@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>番茄时钟</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 顶部信息条 -->
+<header id="topbar">
+  <div class="tb-left">
+    <span id="tbPlan" class="tb-plan">未命名序列</span>
+    <span id="tbStage" class="tb-stage"></span>
+  </div>
+  <div class="tb-right">
+    <button class="ghost" id="btnSchedules">定时</button>
+    <button class="ghost" id="btnPresets">预设</button>
+    <button class="ghost" id="btnSettings">设置</button>
+  </div>
+</header>
+
+<!-- 预设面板 -->
+<div id="presetPanel" class="drop hide">
+  <div class="drop-title">预设序列</div>
+  <div id="presetList"></div>
+  <div class="drop-actions">
+    <button class="ghost sm" id="btnSaveAs">把当前编排存为预设</button>
+  </div>
+</div>
+
+<!-- 设置面板 -->
+<div id="settingsPanel" class="drop hide">
+  <div class="drop-title">设置</div>
+  <label class="opt"><input type="checkbox" id="optAutoWB"> 工作结束自动进入休息</label>
+  <label class="opt"><input type="checkbox" id="optAutoBW"> 休息结束自动开始工作 <span class="dim">（默认手动，防过劳）</span></label>
+  <div class="opt-group">
+    <div class="opt-head">休息策略</div>
+    <label class="opt"><input type="radio" name="restPolicy" value="flexible" id="optFlexible"> 非强制 <span class="dim">（可跳过休息）</span></label>
+    <label class="opt"><input type="radio" name="restPolicy" value="forced" id="optForced"> 强制休息 <span class="dim">（休息期不能跳过/回退）</span></label>
+    <label class="opt sub" id="optUnlockWrap"><input type="checkbox" id="optUnlock"> 允许跳过<b>本次会话最后一段</b>休息（一次性）</label>
+  </div>
+  <div class="opt-group">
+    <div class="opt-head">提示音</div>
+    <label class="opt"><input type="checkbox" id="optSound"> 阶段切换提示音</label>
+    <label class="opt">铃声
+      <select id="optSoundId" class="inline-sel">
+        <option value="chime">清脆双音</option>
+        <option value="bell">风铃三连</option>
+        <option value="wood">木鱼短打</option>
+      </select>
+      <button class="ghost sm" id="optSoundTry">试听</button>
+    </label>
+    <label class="opt">音量 <input type="range" id="optVolume" min="0" max="100" class="inline-range"></label>
+  </div>
+  <div class="opt-group">
+    <div class="opt-head">提醒</div>
+    <label class="opt">久坐提醒：连续工作每 <input type="number" id="optSit" min="0" max="120" class="tiny-num"> 分钟响一声 <span class="dim">（0=关，仅非强制模式）</span></label>
+    <label class="opt"><input type="checkbox" id="optStrong"> 休息结束没响应时反复催</label>
+  </div>
+  <div class="opt-group">
+    <div class="opt-head">开机自启</div>
+    <label class="opt"><input type="checkbox" id="optAuto"> 开机自动启动</label>
+    <label class="opt sub">启动形态
+      <select id="optLaunchMode" class="inline-sel">
+        <option value="silent">静默（只在托盘）</option>
+        <option value="window">显示主窗口</option>
+      </select>
+    </label>
+  </div>
+</div>
+
+<!-- 定时面板 -->
+<div id="schedulePanel" class="drop hide">
+  <div class="drop-title">定时启动</div>
+  <div class="opt-group">
+    <div class="opt-head">稍后开始</div>
+    <div class="qrow"><input type="number" id="scDelayMin" value="30" min="1" max="480" class="tiny"> 分钟后自动开始当前序列
+      <button class="ghost sm" id="scDelayGo">定好</button></div>
+  </div>
+  <div class="opt-group">
+    <div class="opt-head">定点一次</div>
+    <div class="qrow"><input type="datetime-local" id="scOnceAt" class="inline-dt"></div>
+    <div class="qrow"><select id="scOncePlan" class="inline-sel"></select>
+      <button class="ghost sm" id="scOnceGo">定好</button></div>
+  </div>
+  <div class="opt-group">
+    <div class="opt-head">每周重复</div>
+    <div class="qrow"><input type="time" id="scRecTime" value="09:30"> <select id="scRecPlan" class="inline-sel"></select></div>
+    <div class="chips" id="scRecDays"></div>
+    <div class="qrow"><button class="ghost sm" id="scRecGo">加一条</button></div>
+  </div>
+  <div class="opt-group">
+    <div class="opt-head">已有计划</div>
+    <div id="scList"></div>
+  </div>
+</div>
+
+<main id="layout">
+  <!-- 左：可视化 + 大数字 -->
+  <section id="vizPane">
+    <canvas id="viz"></canvas>
+    <div id="clock" class="clock">25:00</div>
+    <div id="clockSub" class="clock-sub"></div>
+    <div id="restMask" class="rest-mask hide">
+      <div class="rest-mask-inner">
+        <div class="rest-icon">☕</div>
+        <div class="rest-word">强制休息中</div>
+        <div class="rest-tip">好好歇一会儿，只有「暂停」可用</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 右：序列卡片列表 -->
+  <section id="listPane">
+    <div id="stageList"></div>
+    <div id="editorBar">
+      <button class="add work" id="btnAddWork">＋ 工作</button>
+      <button class="add rest" id="btnAddBreak">＋ 休息</button>
+      <button class="ghost sm" id="btnQuick">快捷生成</button>
+    </div>
+    <div id="summary" class="summary"></div>
+    <div id="emptyHint" class="empty hide">
+      <p>还没有阶段。<br>点上面「＋ 工作」开始编排，<br>或者直接用一个预设。</p>
+      <button class="ghost sm" id="btnEmptyClassic">用经典番茄</button>
+    </div>
+  </section>
+</main>
+
+<!-- 快捷生成弹层 -->
+<div id="quickModal" class="modal hide">
+  <div class="modal-card">
+    <h3>快捷生成等长序列</h3>
+    <div class="qrow"><span>工作</span><input type="number" id="qWork" value="25" min="1" max="240"><span>分钟</span></div>
+    <div class="qrow"><span>休息</span><input type="number" id="qBreak" value="5" min="1" max="240"><span>分钟</span></div>
+    <div class="qrow"><span>循环</span><input type="number" id="qLoops" value="4" min="1" max="12"><span>轮</span></div>
+    <div class="qrow"><label class="opt"><input type="checkbox" id="qLong"> 每 <input type="number" id="qLongN" value="4" min="2" max="12" class="tiny"> 轮把休息换成长休 <input type="number" id="qLongM" value="15" min="1" max="240" class="tiny"> 分钟</label></div>
+    <div class="modal-actions">
+      <button class="ghost" id="qCancel">取消</button>
+      <button class="primary" id="qGo">生成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 完成态 -->
+<div id="doneView" class="done hide">
+  <div class="done-card">
+    <div class="done-emoji">🍅</div>
+    <h2>这一轮收获满满</h2>
+    <div id="doneSummary" class="done-summary"></div>
+    <div id="doneStages" class="done-stages"></div>
+    <div class="modal-actions">
+      <button class="ghost" id="btnNewSession">新会话</button>
+      <button class="primary" id="btnAgain">再来一轮</button>
+    </div>
+  </div>
+</div>
+
+<!-- 底部控制条 -->
+<footer id="controls">
+  <button class="primary big" id="btnMain">▶ 开始</button>
+  <div class="ctl-side">
+    <button class="ghost" id="btnPrev" title="上一段（←）">⏮ 上一段</button>
+    <button class="ghost" id="btnReset" title="重置当前段（R）">↻ 重置</button>
+    <button class="ghost" id="btnSkip" title="跳过（S / →）">⏭ 跳过</button>
+    <button class="ghost warn" id="btnStop" title="结束会话">■ 结束</button>
+  </div>
+</footer>
+
+<div id="toast" class="toast hide"></div>
+
+<script src="bridge.js"></script>
+<script src="viz.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

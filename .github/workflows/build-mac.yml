@@ -1,0 +1,26 @@
+# Mac 包：universal 双架构（同事的新系统 ARM Mac + 2017 Intel 都能跑）。
+# 手动触发（workflow_dispatch），产物在 Actions 的 Artifacts 里下载 dmg。
+# 未签名：Mac 上首次打开需右键-打开，或终端 xattr -cr /Applications/番茄时钟.app
+name: build-mac
+on:
+  workflow_dispatch:
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install deps
+        run: npm ci
+      - name: Build universal dmg
+        run: npx tauri build --target universal-apple-darwin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tomato-mac-universal
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
