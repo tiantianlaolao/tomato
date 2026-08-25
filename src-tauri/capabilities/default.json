@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主窗口默认能力",
-  "windows": ["main"],
+  "description": "主窗口 + 强制休息遮罩窗默认能力",
+  "windows": ["main", "rest"],
   "permissions": ["core:default"]
 }

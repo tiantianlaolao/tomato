@@ -132,7 +132,7 @@ pub fn project(s: &mut Session, cfg: &Settings, now: u64) {
 
 /// 强制休息护栏：当前是否处于"锁定的休息阶段"。
 /// awaiting 状态不锁 —— 那时休息已经走完，开始下一段工作天经地义。
-fn rest_locked(s: &Session, cfg: &Settings) -> bool {
+pub fn rest_locked(s: &Session, cfg: &Settings) -> bool {
     if cfg.rest_policy != "forced" {
         return false;
     }

@@ -21,6 +21,8 @@ const S = {
   undoStack: [],                     // 编辑操作撤销（快照式）
   deleted: null,                     // 待撤销的删除 {stage, at}
   schedules: [],                     // 定时计划（FE-29~33）
+  listOpen: false,                   // 计时期间右侧序列栏是否展开（默认收起）
+  wasActive: false,                  // 上一帧是否在会话中（检测 idle→active 边沿）
 };
 
 // ———————————————————————— 内核交互 ————————————————————————
@@ -335,6 +337,13 @@ function renderClock() {
 function render() {
   const v = S.view;
   const active = ['running', 'paused', 'awaiting'].includes(v.status);
+  // 开始计时 → 右侧序列栏自动收起（☰ 按钮可随时展开）
+  if (active && !S.wasActive) S.listOpen = false;
+  S.wasActive = active;
+  $('layout').classList.toggle('collapsed', active && !S.listOpen);
+  const tl = $('btnToggleList');
+  tl.classList.toggle('hide', !active);
+  tl.textContent = S.listOpen ? '✕ 收起' : '☰ 序列';
   document.body.className = v.status === 'done' ? 'mode-done'
     : active && v.stages[v.idx] && v.stages[v.idx].kind === 'break' && v.status !== 'awaiting' ? 'mode-rest'
     : '';
@@ -464,7 +473,7 @@ function beep(kind) {
 
 // ———————————————————————— 定时面板（FE-29~33） ————————————————————————
 const WEEK_CN = ['日', '一', '二', '三', '四', '五', '六'];
-const scState = { days: [1, 2, 3, 4, 5] };
+const scState = { mode: 'delay', days: [1, 2, 3, 4, 5] };
 function planOptions(sel) {
   sel.textContent = '';
   S.plans.forEach((p) => {
@@ -477,7 +486,7 @@ function scDesc(sc) {
   const plan = (S.plans.find((p) => p.id === sc.plan_id) || {}).name || '?';
   if (sc.mode === 'recurring') return `每周${sc.weekdays.map((d) => WEEK_CN[d]).join('/')} ${sc.time} · ${plan}`;
   const d = new Date(sc.trigger_at);
-  return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())} · ${plan}`;
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())} · ${plan}`;
 }
 async function pushSchedules() {
   S.schedules = await Bridge.saveSchedules(S.schedules);
@@ -501,6 +510,24 @@ function renderSchedules() {
   });
 }
 function bindSchedules() {
+  // 类型三选一（定时/定点/周重复）：只展开选中的表单
+  const seg = $('scModeSeg');
+  const applyMode = () => {
+    seg.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x.dataset.mode === scState.mode));
+    $('scFormDelay').classList.toggle('hide', scState.mode !== 'delay');
+    $('scFormOnce').classList.toggle('hide', scState.mode !== 'once');
+    $('scFormRec').classList.toggle('hide', scState.mode !== 'recurring');
+  };
+  seg.querySelectorAll('button').forEach((b) => {
+    b.onclick = () => { scState.mode = b.dataset.mode; applyMode(); };
+  });
+  applyMode();
+  // 定点默认值：10 分钟后（秒归零），已填过就不动
+  if (!$('scOnceDate').value) {
+    const d = new Date(Date.now() + 10 * 60000);
+    $('scOnceDate').value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    $('scOnceH').value = d.getHours(); $('scOnceM').value = d.getMinutes(); $('scOnceS').value = 0;
+  }
   planOptions($('scOncePlan')); planOptions($('scRecPlan'));
   const dayBox = $('scRecDays'); dayBox.textContent = '';
   for (let d = 0; d < 7; d++) {
@@ -523,13 +550,16 @@ function bindSchedules() {
     toast(`定好了：${min} 分钟后自动开始`);
   };
   $('scOnceGo').onclick = () => {
-    const at = $('scOnceAt').value;
-    if (!at) { toast('先选个时间'); return; }
-    const ts = new Date(at).getTime();
-    if (ts <= Date.now()) { toast('这个时间已经过了'); return; }
+    const date = $('scOnceDate').value;
+    if (!date) { toast('先选个日期'); return; }
+    const clamp = (id, max) => Math.min(max, Math.max(0, parseInt($(id).value) || 0));
+    const h = clamp('scOnceH', 23), m = clamp('scOnceM', 59), sec = clamp('scOnceS', 59);
+    const [Y, Mo, D] = date.split('-').map(Number);
+    const ts = new Date(Y, Mo - 1, D, h, m, sec).getTime();
+    if (!ts || ts <= Date.now()) { toast('这个时间已经过了'); return; }
     S.schedules.push({ id: newId(), plan_id: $('scOncePlan').value, mode: 'once', trigger_at: ts, time: '', weekdays: [], enabled: true, last_fired: '', pre_alerted: false });
     pushSchedules();
-    toast('定好了');
+    toast(`定好了：${Mo}/${D} ${pad2(h)}:${pad2(m)}:${pad2(sec)}`);
   };
   $('scRecGo').onclick = () => {
     if (!scState.days.length) { toast('选几个星期几'); return; }
@@ -689,6 +719,11 @@ async function boot() {
     } catch (e) { toast(String(e)); }
   };
   $('btnNewSession').onclick = () => cmd('stop');
+  $('btnToggleList').onclick = (e) => {
+    e.stopPropagation(); // 别触发 vizPane 的暂停/继续热区
+    S.listOpen = !S.listOpen;
+    render();
+  };
   // 可视化大热区：点击=暂停/继续（规格 4.1）
   $('vizPane').onclick = () => {
     const v = S.view;

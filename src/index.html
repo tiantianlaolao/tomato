@@ -71,22 +71,27 @@
   </div>
 </div>
 
-<!-- 定时面板 -->
+<!-- 定时面板：先选类型（三选一），只展开选中的那种表单 -->
 <div id="schedulePanel" class="drop hide">
   <div class="drop-title">定时启动</div>
-  <div class="opt-group">
-    <div class="opt-head">稍后开始</div>
+  <div class="seg" id="scModeSeg">
+    <button data-mode="delay" class="on">定时</button>
+    <button data-mode="once">定点</button>
+    <button data-mode="recurring">周重复</button>
+  </div>
+  <div class="opt-group" id="scFormDelay">
     <div class="qrow"><input type="number" id="scDelayMin" value="30" min="1" max="480" class="tiny"> 分钟后自动开始当前序列
       <button class="ghost sm" id="scDelayGo">定好</button></div>
   </div>
-  <div class="opt-group">
-    <div class="opt-head">定点一次</div>
-    <div class="qrow"><input type="datetime-local" id="scOnceAt" class="inline-dt"></div>
+  <div class="opt-group hide" id="scFormOnce">
+    <div class="qrow"><input type="date" id="scOnceDate" class="inline-dt">
+      <span class="hms"><input type="number" id="scOnceH" min="0" max="23" class="tiny-num">
+      <span class="colon">:</span><input type="number" id="scOnceM" min="0" max="59" class="tiny-num">
+      <span class="colon">:</span><input type="number" id="scOnceS" min="0" max="59" value="0" class="tiny-num"></span></div>
     <div class="qrow"><select id="scOncePlan" class="inline-sel"></select>
       <button class="ghost sm" id="scOnceGo">定好</button></div>
   </div>
-  <div class="opt-group">
-    <div class="opt-head">每周重复</div>
+  <div class="opt-group hide" id="scFormRec">
     <div class="qrow"><input type="time" id="scRecTime" value="09:30"> <select id="scRecPlan" class="inline-sel"></select></div>
     <div class="chips" id="scRecDays"></div>
     <div class="qrow"><button class="ghost sm" id="scRecGo">加一条</button></div>
@@ -100,6 +105,7 @@
 <main id="layout">
   <!-- 左：可视化 + 大数字 -->
   <section id="vizPane">
+    <button class="ghost sm list-toggle hide" id="btnToggleList">☰ 序列</button>
     <canvas id="viz"></canvas>
     <div id="clock" class="clock">25:00</div>
     <div id="clockSub" class="clock-sub"></div>

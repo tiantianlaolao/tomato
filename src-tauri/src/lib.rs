@@ -3,6 +3,13 @@
 // M2 的关键升级：后台滴答线程。M1 靠前端轮询推进惰性投影，窗口一藏就没人问时间了；
 // 现在 Rust 侧每秒 tick 一次 —— 窗口关着照样：阶段切换发通知、托盘分钟数在变、
 // 定时计划到点开跑、会话完成写流水。前端只是"恰好也在看"的一个观众。
+//
+// ⚠️ 线程纪律（Mac 卡死事故的教训）：托盘/菜单的 set_* 是「同步派发到主线程并阻塞等
+// 结果」（tauri 的 run_item_main_thread）。滴答线程若持着 App 锁去调它们，而主线程恰好
+// 在一个也要拿 App 锁的同步 command 里 —— 两边互等，整个进程冻死（工作段结束必触发
+// 托盘重画，所以表现为"时间一到就卡死"）。因此：
+//   ① tick 锁内只做计算和落盘，把 UI 动作攒进 UiWork，放锁之后再执行；
+//   ② 所有 #[tauri::command] 一律 async —— 跑在异步线程池上，主线程永远不等 App 锁。
 mod core;
 
 use core::{Plan, Session, Settings};
@@ -28,7 +35,7 @@ pub struct Schedule {
     pub id: String,
     pub plan_id: String,
     pub mode: String,      // "delay" | "once" | "recurring"
-    pub trigger_at: u64,   // delay/once：绝对时刻 ms
+    pub trigger_at: u64,   // delay/once：绝对时刻 ms（once 由前端精确到秒）
     pub time: String,      // recurring："HH:MM"
     pub weekdays: Vec<u8>, // recurring：0=周日 … 6=周六
     pub enabled: bool,
@@ -65,7 +72,9 @@ struct App {
     last_strong_ms: u64,     // 上次强提醒时刻
     continuous_work_ms: u64, // 连续工作累计（久坐提醒 FE-41）
     last_sit_ms: u64,        // 上次久坐提醒时刻
-    last_tray: String,       // 托盘上次画的内容，变了才重画
+    last_tray: String,       // 托盘图标/菜单上次画的内容（分钟级），变了才重画
+    last_tray_sec: String,   // 托盘标题/气泡上次的内容（秒级）
+    rest_shown: bool,        // 强制休息全屏遮罩当前是否亮着
     last_save_ms: u64,
 }
 
@@ -94,7 +103,8 @@ impl App {
             dir, settings, plans, session, schedules,
             prev_status: "idle".into(), prev_idx: 0, prealert_idx: -1,
             last_strong_ms: 0, continuous_work_ms: 0, last_sit_ms: 0,
-            last_tray: String::new(), last_save_ms: 0,
+            last_tray: String::new(), last_tray_sec: String::new(),
+            rest_shown: false, last_save_ms: 0,
         }
     }
     fn save_settings(&self) { if let Ok(s) = serde_json::to_string_pretty(&self.settings) { fs::write(self.dir.join("settings.json"), s).ok(); } }
@@ -126,8 +136,6 @@ impl App {
         self.save_session();
     }
 }
-
-type S<'a> = State<'a, Mutex<App>>;
 
 // ———————————————————————— 托盘图标：把剩余分钟画进 32×32（Windows 托盘没有文字位） ————————————————————————
 // 3×5 点阵数字，放大 3 倍 = 9×15，两位数并排居中。够清楚，也不用拖字体库。
@@ -193,14 +201,46 @@ fn notify(app: &AppHandle, title: &str, body: &str) {
 fn sfx(app: &AppHandle, kind: &str) {
     let _ = app.emit("sfx", kind);
 }
-fn push_state(app: &AppHandle, a: &App) {
-    let _ = app.emit("state", core::view(&a.session, &a.settings, now_ms()));
+
+// ———————————————————————— UI 动作清单：锁内攒、放锁后做 ————————————————————————
+#[derive(Default)]
+struct UiWork {
+    notices: Vec<(String, String)>,   // 系统通知（标题, 正文）
+    sfx: Vec<&'static str>,
+    state_push: Option<core::View>,   // 状态快照推给所有窗口
+    attention: bool,                  // 主窗口闪烁请求
+    tray: Option<TrayDraw>,           // 图标/菜单/进度条（分钟级变化才动）
+    tray_sec: Option<TraySec>,        // 标题(mac)/气泡/状态行（秒级）
+    rest_show: Option<bool>,          // Some(true)=弹强制休息遮罩，Some(false)=收
+    rest_regrab: bool,                // 遮罩活跃期间每秒抢回焦点
+}
+struct TrayDraw {
+    txt: String,
+    rgb: [u8; 3],
+    toggle: String,
+    toggle_en: bool,
+    skip_en: bool,
+    prog_status: u8, // 0=无 1=正常 2=暂停
+    prog: u64,
+}
+struct TraySec {
+    title: Option<String>, // macOS 菜单栏文字（MM:SS 每秒刷新）
+    tip: String,
 }
 
 // ———————————————————————— 每秒滴答：投影推进 / 提醒 / 托盘 / 定时 / 流水 ————————————————————————
 fn tick(app: &AppHandle) {
-    let state: State<Mutex<App>> = app.state();
-    let mut a = state.lock().unwrap();
+    let work = {
+        let state: State<Mutex<App>> = app.state();
+        let mut a = state.lock().unwrap();
+        collect_tick(&mut a)
+    };
+    apply_ui(app, work);
+}
+
+/// 锁内阶段：只做状态推演、落盘和"要做什么 UI 动作"的决策，绝不碰托盘/窗口。
+fn collect_tick(a: &mut App) -> UiWork {
+    let mut w = UiWork::default();
     let now = now_ms();
     let cfg = a.settings.clone();
 
@@ -215,27 +255,27 @@ fn tick(app: &AppHandle) {
                 if let Some(cur) = a.session.stages.get(idx) {
                     let kind = if cur.kind == "work" { "工作" } else { "休息" };
                     if a.prev_status != "idle" && !(a.prev_status == "paused" && a.prev_idx == idx) {
-                        notify(app, &format!("第 {}/{} 段 · {}", idx + 1, total, kind),
-                            &format!("{} {} 分钟，开始。", kind, (cur.secs + 30) / 60));
-                        sfx(app, "switch");
+                        w.notices.push((format!("第 {}/{} 段 · {}", idx + 1, total, kind),
+                            format!("{} {} 分钟，开始。", kind, (cur.secs + 30) / 60)));
+                        w.sfx.push("switch");
                     }
                 }
             }
             "awaiting" => {
-                notify(app, "这一段走完了", "休息结束，准备好了就开始下一段工作。");
-                sfx(app, "switch");
+                w.notices.push(("这一段走完了".into(), "休息结束，准备好了就开始下一段工作。".into()));
+                w.sfx.push("switch");
                 a.last_strong_ms = now;
             }
             "done" => {
-                notify(app, "🍅 这一轮收获满满", "整个序列都跑完了，去看看汇总吧。");
-                sfx(app, "done");
+                w.notices.push(("🍅 这一轮收获满满".into(), "整个序列都跑完了，去看看汇总吧。".into()));
+                w.sfx.push("done");
             }
             _ => {}
         }
         a.prev_status = st.clone();
         a.prev_idx = idx;
         a.prealert_idx = -1;
-        push_state(app, &a);
+        w.state_push = Some(core::view(&a.session, &a.settings, now));
         a.save_session();
     }
 
@@ -244,18 +284,16 @@ fn tick(app: &AppHandle) {
         let remain = a.session.end_ms.saturating_sub(now);
         if remain > 0 && remain <= cfg.pre_alert_sec as u64 * 1000 && a.prealert_idx != idx as i64 {
             a.prealert_idx = idx as i64;
-            sfx(app, "pre");
+            w.sfx.push("pre");
         }
     }
 
     // ③ 强提醒（FE-23）：休息结束停在等待，每 60s 催一次 + 窗口闪烁
     if st == "awaiting" && cfg.strong_remind && now.saturating_sub(a.last_strong_ms) >= 60_000 {
         a.last_strong_ms = now;
-        notify(app, "还等着你呢", "休息早结束了，回来把下一段工作开起来。");
-        sfx(app, "remind");
-        if let Some(w) = app.get_webview_window("main") {
-            let _ = w.request_user_attention(Some(tauri::UserAttentionType::Informational));
-        }
+        w.notices.push(("还等着你呢".into(), "休息早结束了，回来把下一段工作开起来。".into()));
+        w.sfx.push("remind");
+        w.attention = true;
     }
 
     // ④ 久坐提醒（FE-41）：非强制模式下连续工作每 N 分钟响一声
@@ -266,8 +304,8 @@ fn tick(app: &AppHandle) {
                 let gap = cfg.sit_remind_min as u64 * 60_000;
                 if a.continuous_work_ms >= gap && now.saturating_sub(a.last_sit_ms) >= gap {
                     a.last_sit_ms = now;
-                    notify(app, "该歇歇眼睛了", &format!("已经连续专注 {} 分钟，起来活动一下吧。", a.continuous_work_ms / 60_000));
-                    sfx(app, "remind");
+                    w.notices.push(("该歇歇眼睛了".into(), format!("已经连续专注 {} 分钟，起来活动一下吧。", a.continuous_work_ms / 60_000)));
+                    w.sfx.push("remind");
                 }
             } else {
                 a.continuous_work_ms = 0; // 真正休息了才清零
@@ -291,7 +329,7 @@ fn tick(app: &AppHandle) {
                 let until = sc.trigger_at.saturating_sub(now);
                 if until > 0 && until <= 30_000 && !sc.pre_alerted {
                     sc.pre_alerted = true; dirty = true;
-                    notify(app, "⏳ 30 秒后自动开始", "定好的专注马上开始，准备一下。");
+                    w.notices.push(("⏳ 30 秒后自动开始".into(), "定好的专注马上开始，准备一下。".into()));
                 }
                 if now >= sc.trigger_at && now - sc.trigger_at < 90_000 {
                     fire.push((sc.plan_id.clone(), sc.mode.clone()));
@@ -315,71 +353,165 @@ fn tick(app: &AppHandle) {
                     a.session = s;
                     a.prev_status = "running".into(); a.prev_idx = 0;
                     a.save_session();
-                    notify(app, &format!("🍅 已自动开始「{}」", p.name), "到点了，这一轮已经替你开起来了。");
-                    sfx(app, "switch");
-                    push_state(app, &a);
+                    w.notices.push((format!("🍅 已自动开始「{}」", p.name), "到点了，这一轮已经替你开起来了。".into()));
+                    w.sfx.push("switch");
+                    w.state_push = Some(core::view(&a.session, &a.settings, now));
                 }
             }
         } else {
-            notify(app, "定时计划到点了", "但你正在会话中，没有打断你。想切换就去主窗口。");
+            w.notices.push(("定时计划到点了".into(), "但你正在会话中，没有打断你。想切换就去主窗口。".into()));
         }
     }
 
     // ⑥ 会话完成 → 流水入账
     a.maybe_log_done();
 
-    // ⑦ 托盘 + 任务栏进度（内容变了才重画）
-    let (txt, rgb, tip) = match a.session.status.as_str() {
+    // ⑦ 托盘。秒级：菜单栏标题(mac)/气泡/状态行；分钟级：图标/菜单项/进度条
+    let (title, tip, txt, rgb) = match a.session.status.as_str() {
         "running" | "paused" => {
             let cur = &a.session.stages[a.session.idx];
             let remain = if a.session.status == "running" { a.session.end_ms.saturating_sub(now) } else { a.session.remain_ms };
-            let mins = (remain / 60_000).min(99);
             let paused = a.session.status == "paused";
             let rgb = if paused { [128, 128, 128] } else if cur.kind == "work" { [232, 89, 12] } else { [12, 166, 120] };
-            let sym = if cur.kind == "work" { "◉" } else { "◇" };
-            (format!("{mins}"), rgb,
+            let sym = if paused { "‖" } else if cur.kind == "work" { "◉" } else { "◇" };
+            let (mm, ss) = (remain / 60_000, remain % 60_000 / 1000);
+            (Some(format!("{sym} {mm:02}:{ss:02}")),
              format!("{} {} {:02}:{:02}{} · {}", sym, if cur.kind == "work" { "工作" } else { "休息" },
-                remain / 60_000, remain % 60_000 / 1000, if paused { "（已暂停）" } else { "" }, a.session.plan_name))
+                mm, ss, if paused { "（已暂停）" } else { "" }, a.session.plan_name),
+             format!("{}", mm.min(99)), rgb)
         }
-        "awaiting" => ("0".into(), [180, 140, 60], "⏳ 等你开始下一段".to_string()),
-        "done" => (String::new(), [233, 168, 13], "🍅 跑完了，去看汇总".to_string()),
-        _ => (String::new(), [200, 120, 90], "番茄时钟 · 空闲".to_string()),
+        "awaiting" => (Some("⏳".into()), "⏳ 等你开始下一段".to_string(), "0".into(), [180, 140, 60]),
+        "done" => (None, "🍅 跑完了，去看汇总".to_string(), String::new(), [233, 168, 13]),
+        _ => (None, "番茄时钟 · 空闲".to_string(), String::new(), [200, 120, 90]),
     };
-    let key = format!("{txt}|{rgb:?}|{tip}");
-    if key != a.last_tray {
-        a.last_tray = key;
-        if let Some(tray) = app.tray_by_id("tray") {
-            let _ = tray.set_icon(Some(tray_image(&txt, rgb)));
-            let _ = tray.set_tooltip(Some(&tip));
+    let sec_key = format!("{title:?}|{tip}");
+    if sec_key != a.last_tray_sec {
+        a.last_tray_sec = sec_key;
+        w.tray_sec = Some(TraySec { title, tip });
+    }
+    let toggle = if a.session.status == "paused" { "继续" } else if a.session.status == "awaiting" { "开始下一段" } else { "暂停" }.to_string();
+    let toggle_en = a.session.status != "idle" && a.session.status != "done";
+    let skip_en = matches!(a.session.status.as_str(), "running" | "paused" | "awaiting");
+    let (prog_status, prog) = match a.session.status.as_str() {
+        "running" => {
+            let cur = &a.session.stages[a.session.idx];
+            let done = 100u64.saturating_sub(a.session.end_ms.saturating_sub(now) * 100 / (cur.secs * 1000).max(1));
+            (1u8, done.min(100))
         }
-        let ui: State<TrayUi> = app.state();
-        let _ = ui.status.set_text(&tip);
-        let _ = ui.toggle.set_text(if a.session.status == "paused" { "继续" } else if a.session.status == "awaiting" { "开始下一段" } else { "暂停" });
-        let _ = ui.toggle.set_enabled(a.session.status != "idle" && a.session.status != "done");
-        let _ = ui.skip.set_enabled(matches!(a.session.status.as_str(), "running" | "paused" | "awaiting"));
-        // 任务栏/Dock 进度条（FE-27 的跨平台落法）
-        if let Some(w) = app.get_webview_window("main") {
-            use tauri::window::{ProgressBarState, ProgressBarStatus};
-            let pb = match a.session.status.as_str() {
-                "running" => {
-                    let cur = &a.session.stages[a.session.idx];
-                    let done = 100 - (a.session.end_ms.saturating_sub(now) * 100 / (cur.secs * 1000).max(1)) as u64;
-                    ProgressBarState { status: Some(ProgressBarStatus::Normal), progress: Some(done.min(100)) }
-                }
-                "paused" => ProgressBarState { status: Some(ProgressBarStatus::Paused), progress: None },
-                _ => ProgressBarState { status: Some(ProgressBarStatus::None), progress: None },
-            };
-            let _ = w.set_progress_bar(pb);
-        }
+        "paused" => (2u8, 0),
+        _ => (0u8, 0),
+    };
+    let min_key = format!("{txt}|{rgb:?}|{toggle}|{toggle_en}|{skip_en}|{prog_status}|{prog}");
+    if min_key != a.last_tray {
+        a.last_tray = min_key;
+        w.tray = Some(TrayDraw { txt, rgb, toggle, toggle_en, skip_en, prog_status, prog });
     }
 
     // ⑧ 跑动中每 30s 兜底存一次盘
     if a.session.status == "running" && now.saturating_sub(a.last_save_ms) >= 30_000 {
         a.save_session();
     }
+
+    // ⑨ 强制休息全屏遮罩：休息被锁定期间亮着 + 每秒抢回焦点（FE-40 真·强制）
+    let want_rest = core::rest_locked(&a.session, &a.settings);
+    if want_rest != a.rest_shown {
+        a.rest_shown = want_rest;
+        w.rest_show = Some(want_rest);
+    }
+    w.rest_regrab = want_rest;
+
+    w
+}
+
+/// 放锁后阶段：真正执行 UI 动作。此时不持任何锁，阻塞派发到主线程也无妨。
+fn apply_ui(app: &AppHandle, w: UiWork) {
+    for (t, b) in &w.notices { notify(app, t, b); }
+    for k in &w.sfx { sfx(app, k); }
+    if let Some(v) = w.state_push { let _ = app.emit("state", v); }
+    if w.attention {
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.request_user_attention(Some(tauri::UserAttentionType::Informational));
+        }
+    }
+    if let Some(s) = w.tray_sec {
+        if let Some(tray) = app.tray_by_id("tray") {
+            let _ = tray.set_tooltip(Some(&s.tip));
+            #[cfg(target_os = "macos")]
+            let _ = tray.set_title(s.title.as_deref());
+            #[cfg(not(target_os = "macos"))]
+            let _ = s.title; // 其他平台托盘没有文字位，气泡里有到秒的时间
+        }
+        let ui: State<TrayUi> = app.state();
+        let _ = ui.status.set_text(&s.tip);
+    }
+    if let Some(d) = w.tray {
+        if let Some(tray) = app.tray_by_id("tray") {
+            let _ = tray.set_icon(Some(tray_image(&d.txt, d.rgb)));
+        }
+        let ui: State<TrayUi> = app.state();
+        let _ = ui.toggle.set_text(&d.toggle);
+        let _ = ui.toggle.set_enabled(d.toggle_en);
+        let _ = ui.skip.set_enabled(d.skip_en);
+        // 任务栏/Dock 进度条（FE-27 的跨平台落法）
+        if let Some(win) = app.get_webview_window("main") {
+            use tauri::window::{ProgressBarState, ProgressBarStatus};
+            let pb = match d.prog_status {
+                1 => ProgressBarState { status: Some(ProgressBarStatus::Normal), progress: Some(d.prog) },
+                2 => ProgressBarState { status: Some(ProgressBarStatus::Paused), progress: None },
+                _ => ProgressBarState { status: Some(ProgressBarStatus::None), progress: None },
+            };
+            let _ = win.set_progress_bar(pb);
+        }
+    }
+    if let Some(show) = w.rest_show { set_rest_overlay(app, show); }
+    if w.rest_regrab {
+        if let Some(win) = app.get_webview_window("rest") {
+            if !win.is_focused().unwrap_or(true) { let _ = win.set_focus(); }
+        }
+    }
+}
+
+/// 强制休息遮罩窗（FE-40 真·强制）：铺满主窗口所在显示器、置顶、抢焦点。
+/// 不需要系统权限；Cmd+Tab/Alt+Tab 切走会被立刻抢回来，其他窗口实际用不了。
+fn set_rest_overlay(app: &AppHandle, show: bool) {
+    let Some(w) = app.get_webview_window("rest") else { return };
+    if show {
+        let mon = app.get_webview_window("main")
+            .and_then(|m| m.current_monitor().ok().flatten())
+            .or_else(|| w.primary_monitor().ok().flatten());
+        if let Some(mon) = mon {
+            let _ = w.set_position(tauri::Position::Physical(*mon.position()));
+            let _ = w.set_size(tauri::Size::Physical(*mon.size()));
+        }
+        let _ = w.set_visible_on_all_workspaces(true);
+        let _ = w.set_always_on_top(true);
+        let _ = w.show();
+        #[cfg(target_os = "macos")]
+        let _ = w.set_simple_fullscreen(true); // 非原生全屏：不建新 Space、没有切换动画
+        let _ = w.set_focus();
+    } else {
+        #[cfg(target_os = "macos")]
+        let _ = w.set_simple_fullscreen(false);
+        let _ = w.hide();
+        if let Some(m) = app.get_webview_window("main") {
+            if m.is_visible().unwrap_or(false) { let _ = m.set_focus(); }
+        }
+    }
+}
+
+/// 命令路径（跳过/暂停等）也可能进出锁定休息段，跟滴答线程共用同一套开合判断。
+fn sync_rest_overlay(app: &AppHandle) {
+    let change = {
+        let state: State<Mutex<App>> = app.state();
+        let mut a = state.lock().unwrap();
+        let want = core::rest_locked(&a.session, &a.settings);
+        if want == a.rest_shown { None } else { a.rest_shown = want; Some(want) }
+    };
+    if let Some(show) = change { set_rest_overlay(app, show); }
 }
 
 // ———————————————————————— 命令 ————————————————————————
+// 全部 async：跑在异步线程池上，主线程绝不因等 App 锁被卡住（死锁修复的另一半）。
 #[derive(Serialize)]
 struct Boot {
     settings: Settings,
@@ -390,8 +522,9 @@ struct Boot {
 }
 
 #[tauri::command]
-fn boot(app: S) -> Boot {
-    let mut a = app.lock().unwrap();
+async fn boot(app: AppHandle) -> Boot {
+    let state: State<Mutex<App>> = app.state();
+    let mut a = state.lock().unwrap();
     let now = now_ms();
     let cfg = a.settings.clone();
     core::project(&mut a.session, &cfg, now);
@@ -416,8 +549,9 @@ fn boot(app: S) -> Boot {
 }
 
 #[tauri::command]
-fn get_state(app: S) -> core::View {
-    let mut a = app.lock().unwrap();
+async fn get_state(app: AppHandle) -> core::View {
+    let state: State<Mutex<App>> = app.state();
+    let mut a = state.lock().unwrap();
     let now = now_ms();
     let cfg = a.settings.clone();
     core::project(&mut a.session, &cfg, now);
@@ -425,52 +559,79 @@ fn get_state(app: S) -> core::View {
     core::view(&a.session, &a.settings, now)
 }
 
-#[tauri::command]
-fn session_start(app: S, plan: Plan) -> Result<core::View, String> {
-    let mut a = app.lock().unwrap();
-    let now = now_ms();
-    a.session = core::start_session(&plan, now)?;
-    a.prev_status = "running".into();
-    a.prev_idx = 0;
-    a.continuous_work_ms = 0;
-    a.save_session();
-    Ok(core::view(&a.session, &a.settings, now))
+fn do_session_start(app: &AppHandle, plan: &Plan) -> Result<core::View, String> {
+    let view = {
+        let state: State<Mutex<App>> = app.state();
+        let mut a = state.lock().unwrap();
+        let now = now_ms();
+        a.session = core::start_session(plan, now)?;
+        a.prev_status = "running".into();
+        a.prev_idx = 0;
+        a.continuous_work_ms = 0;
+        a.save_session();
+        core::view(&a.session, &a.settings, now)
+    };
+    sync_rest_overlay(app);
+    let _ = app.emit("state", view.clone()); // 广播给所有窗口（主窗口/遮罩窗谁发起的都同步）
+    Ok(view)
 }
 
 #[tauri::command]
-fn session_cmd(app: S, cmd: String) -> Result<core::View, String> {
-    let mut a = app.lock().unwrap();
-    let now = now_ms();
-    let cfg = a.settings.clone();
-    let out = core::apply(&mut a.session, &cfg, &cmd, now)?;
-    if out.unlock_consumed {
-        a.settings.final_break_unlock = false;
+async fn session_start(app: AppHandle, plan: Plan) -> Result<core::View, String> {
+    do_session_start(&app, &plan)
+}
+
+fn do_session_cmd(app: &AppHandle, cmd: &str) -> Result<core::View, String> {
+    let view = {
+        let state: State<Mutex<App>> = app.state();
+        let mut a = state.lock().unwrap();
+        let now = now_ms();
+        let cfg = a.settings.clone();
+        let out = core::apply(&mut a.session, &cfg, cmd, now)?;
+        if out.unlock_consumed {
+            a.settings.final_break_unlock = false;
+            a.save_settings();
+        }
+        a.prev_status = a.session.status.clone();
+        a.prev_idx = a.session.idx;
+        a.maybe_log_done();
+        a.save_session();
+        core::view(&a.session, &a.settings, now)
+    };
+    sync_rest_overlay(app);
+    let _ = app.emit("state", view.clone()); // 广播给所有窗口
+    Ok(view)
+}
+
+#[tauri::command]
+async fn session_cmd(app: AppHandle, cmd: String) -> Result<core::View, String> {
+    do_session_cmd(&app, &cmd)
+}
+
+#[tauri::command]
+async fn save_settings(app: AppHandle, settings: Settings) -> Settings {
+    let saved = {
+        let state: State<Mutex<App>> = app.state();
+        let mut a = state.lock().unwrap();
+        let autostart_changed = a.settings.autostart != settings.autostart;
+        a.settings = settings;
         a.save_settings();
-    }
-    a.prev_status = a.session.status.clone();
-    a.prev_idx = a.session.idx;
-    a.maybe_log_done();
-    a.save_session();
-    Ok(core::view(&a.session, &a.settings, now))
+        if autostart_changed {
+            use tauri_plugin_autostart::ManagerExt;
+            let al = app.autolaunch();
+            if a.settings.autostart { let _ = al.enable(); } else { let _ = al.disable(); }
+        }
+        a.settings.clone()
+    };
+    // 休息策略被改（强制→非强制）时，遮罩要立刻跟着收
+    sync_rest_overlay(&app);
+    saved
 }
 
 #[tauri::command]
-fn save_settings(app: S, handle: AppHandle, settings: Settings) -> Settings {
-    let mut a = app.lock().unwrap();
-    let autostart_changed = a.settings.autostart != settings.autostart;
-    a.settings = settings;
-    a.save_settings();
-    if autostart_changed {
-        use tauri_plugin_autostart::ManagerExt;
-        let al = handle.autolaunch();
-        if a.settings.autostart { let _ = al.enable(); } else { let _ = al.disable(); }
-    }
-    a.settings.clone()
-}
-
-#[tauri::command]
-fn save_plans(app: S, plans: Vec<Plan>) -> Vec<Plan> {
-    let mut a = app.lock().unwrap();
+async fn save_plans(app: AppHandle, plans: Vec<Plan>) -> Vec<Plan> {
+    let state: State<Mutex<App>> = app.state();
+    let mut a = state.lock().unwrap();
     let mut merged = core::builtin_plans();
     merged.extend(plans.into_iter().filter(|p| !p.builtin));
     a.plans = merged;
@@ -479,16 +640,18 @@ fn save_plans(app: S, plans: Vec<Plan>) -> Vec<Plan> {
 }
 
 #[tauri::command]
-fn save_schedules(app: S, schedules: Vec<Schedule>) -> Vec<Schedule> {
-    let mut a = app.lock().unwrap();
+async fn save_schedules(app: AppHandle, schedules: Vec<Schedule>) -> Vec<Schedule> {
+    let state: State<Mutex<App>> = app.state();
+    let mut a = state.lock().unwrap();
     a.schedules = schedules;
     a.save_schedules();
     a.schedules.clone()
 }
 
 #[tauri::command]
-fn get_history(app: S, limit: usize) -> Vec<serde_json::Value> {
-    let a = app.lock().unwrap();
+async fn get_history(app: AppHandle, limit: usize) -> Vec<serde_json::Value> {
+    let state: State<Mutex<App>> = app.state();
+    let a = state.lock().unwrap();
     let txt = fs::read_to_string(a.dir.join("history.jsonl")).unwrap_or_default();
     let mut v: Vec<serde_json::Value> = txt.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
     let n = v.len();
@@ -496,25 +659,34 @@ fn get_history(app: S, limit: usize) -> Vec<serde_json::Value> {
     v
 }
 
+/// 遮罩窗失焦时自己喊一声，Rust 立刻把焦点抢回来（比等下一秒滴答更快）
+#[tauri::command]
+async fn rest_focus(app: AppHandle) -> bool {
+    let want = {
+        let state: State<Mutex<App>> = app.state();
+        let a = state.lock().unwrap();
+        a.rest_shown && core::rest_locked(&a.session, &a.settings)
+    };
+    if want {
+        if let Some(w) = app.get_webview_window("rest") { let _ = w.set_focus(); }
+    }
+    want
+}
+
 // ———————————————————————— 组装 ————————————————————————
 fn toggle_session(app: &AppHandle) {
-    let state: State<Mutex<App>> = app.state();
     let cmd = {
+        let state: State<Mutex<App>> = app.state();
         let a = state.lock().unwrap();
         match a.session.status.as_str() {
             "running" => "pause", "paused" => "resume", "awaiting" => "start_next",
             _ => return,
         }.to_string()
     };
-    let _ = session_cmd(app.state(), cmd);
-    let a = state.lock().unwrap();
-    push_state(app, &a);
+    let _ = do_session_cmd(app, &cmd); // 广播在 do_session_cmd 里统一发
 }
 fn skip_session(app: &AppHandle) {
-    let _ = session_cmd(app.state(), "skip".into());
-    let state: State<Mutex<App>> = app.state();
-    let a = state.lock().unwrap();
-    push_state(app, &a);
+    let _ = do_session_cmd(app, "skip");
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -598,8 +770,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             boot, get_state, session_start, session_cmd,
-            save_settings, save_plans, save_schedules, get_history
+            save_settings, save_plans, save_schedules, get_history, rest_focus
         ])
         .run(tauri::generate_context!())
-        .expect("番茄时钟启动失败");
+        .expect("番茄时钟启动失败")
 }

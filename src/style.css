@@ -73,11 +73,20 @@ button:disabled{opacity:.4; cursor:default}
   background:var(--surface); color:var(--ink); text-align:center; font:inherit; font-size:.85rem}
 .inline-dt{font:inherit; font-size:.85rem; padding:4px 6px; border:1px solid var(--line); border-radius:7px;
   background:var(--surface); color:var(--ink)}
+.drop input[type=time]{font:inherit; font-size:.85rem; width:7.2em; padding:4px 6px; border:1px solid var(--line);
+  border-radius:7px; background:var(--surface); color:var(--ink)}
 .drop .qrow{font-size:.88rem; margin-bottom:8px}
 .drop .chips{margin:4px 0 8px}
 .drop .chip{padding:4px 10px; font-size:.82rem}
 .chip{background:var(--bg); border:1px solid var(--line); color:var(--ink); border-radius:999px; cursor:pointer}
 .chip.on{background:var(--accent); border-color:var(--accent); color:#fff}
+/* 定时面板：类型三选一分段控件 */
+.seg{display:flex; gap:4px; background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:3px; margin-bottom:4px}
+.seg button{flex:1; padding:5px 0; font-size:.85rem; border-radius:8px; background:transparent; color:var(--soft); transition:background .15s, color .15s}
+.seg button.on{background:var(--accent); color:#fff; font-weight:600}
+.hms{display:inline-flex; align-items:center; gap:2px}
+.hms .colon{color:var(--soft)}
+
 .sc-row{display:flex; align-items:center; gap:8px; padding:6px 4px; font-size:.85rem; border-bottom:1px dashed var(--line)}
 .sc-row:last-child{border-bottom:none}
 .sc-desc{flex:1; min-width:0}
@@ -109,6 +118,10 @@ button:disabled{opacity:.4; cursor:default}
 .rest-icon{font-size:1.4rem}
 .rest-word{font-weight:700; color:var(--rest)}
 .rest-tip{font-size:.8rem; color:var(--soft)}
+
+/* 计时期间右栏收起：画面只留可视化 + 大数字（☰ 按钮可展开） */
+#layout.collapsed #listPane{display:none}
+.list-toggle{position:absolute; top:12px; right:12px; z-index:6}
 
 /* —— 右：序列列表 —— */
 #listPane{flex:45; border-left:1px solid var(--line); display:flex; flex-direction:column; min-width:0}

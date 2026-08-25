@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>强制休息</title>
+<style>
+  :root{ --rest:#0CA678; }
+  *{ box-sizing:border-box; -webkit-user-select:none; user-select:none; cursor:default }
+  html,body{ height:100% }
+  body{
+    margin:0; display:flex; align-items:center; justify-content:center;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    background:#0e1512; color:#e8f5ef; overflow:hidden;
+  }
+  .wrap{ text-align:center }
+  .icon{ font-size:3.2rem }
+  .word{ font-size:1.5rem; font-weight:700; color:var(--rest); margin:10px 0 4px }
+  .count{ font-size:clamp(72px,14vw,150px); font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:.02em }
+  .count.dimmed{ opacity:.5; animation:breath 2s ease-in-out infinite }
+  @keyframes breath{ 50%{ opacity:.3 } }
+  .tip{ color:#7fa896; margin-top:6px; font-size:.95rem }
+  button{
+    font:inherit; cursor:pointer; margin-top:26px; padding:11px 34px; font-size:1rem;
+    border:1px solid #2d4a3d; border-radius:12px; background:transparent; color:#a9cbbc;
+  }
+  button:hover{ border-color:var(--rest); color:var(--rest) }
+  @media (prefers-reduced-motion: reduce){ *{ animation:none!important } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="icon">☕</div>
+  <div class="word">强制休息中</div>
+  <div id="count" class="count">--:--</div>
+  <div class="tip">好好歇一会儿，休息结束会自动放行</div>
+  <button id="btnPause">‖ 暂停</button>
+</div>
+<script>
+(function () {
+  const inv = window.__TAURI__ && window.__TAURI__.core ? window.__TAURI__.core.invoke : null;
+  if (!inv) return; // 纯浏览器打开时只展示静态样子
+  let view = { status: 'idle' };
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const el = document.getElementById('count');
+  const btn = document.getElementById('btnPause');
+
+  function paint() {
+    if (view.status === 'running') {
+      const remain = Math.max(0, view.end_ms - Date.now());
+      const s = Math.ceil(remain / 1000);
+      el.textContent = pad2(Math.floor(s / 60)) + ':' + pad2(s % 60);
+      el.classList.remove('dimmed');
+      btn.textContent = '‖ 暂停';
+    } else if (view.status === 'paused') {
+      const s = Math.ceil(view.remain_ms / 1000);
+      el.textContent = pad2(Math.floor(s / 60)) + ':' + pad2(s % 60);
+      el.classList.add('dimmed');
+      btn.textContent = '▶ 继续';
+    }
+  }
+
+  async function refresh() { try { view = await inv('get_state'); paint(); } catch (e) {} }
+  btn.onclick = async () => {
+    try { view = await inv('session_cmd', { cmd: view.status === 'paused' ? 'resume' : 'pause' }); paint(); } catch (e) {}
+  };
+  window.__TAURI__.event.listen('state', (e) => { view = e.payload; paint(); });
+  setInterval(paint, 250);
+  refresh();
+  // 焦点被别的窗口拿走 → 立刻喊 Rust 抢回来（滴答线程还有每秒一次的兜底）
+  window.addEventListener('blur', () => { try { inv('rest_focus'); } catch (e) {} });
+})();
+</script>
+</body>
+</html>
