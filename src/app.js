@@ -23,7 +23,15 @@ const S = {
   schedules: [],                     // 定时计划（FE-29~33）
   listOpen: false,                   // 计时期间右侧序列栏是否展开（默认收起）
   wasActive: false,                  // 上一帧是否在会话中（检测 idle→active 边沿）
+  activity: localStorage.getItem('tm_activity') || 'idle', // 陪伴活动：守烛/键盘/读书/写字
+  donePlayed: false, doneDelay: false, // 完成态先让道别动画演完再弹汇总
 };
+
+// 把最新快照喂给舞台（activity 以前端选择为准）
+function feedCompanion() {
+  S.view.activity = S.activity;
+  Companion.set(S.view);
+}
 
 // ———————————————————————— 内核交互 ————————————————————————
 async function cmd(c) {
@@ -310,25 +318,15 @@ function quickGen() {
 
 // ———————————————————————— 运行视图 ————————————————————————
 function renderClock() {
+  // 大数字钟已隐藏（木牌接管画面读数），这里只维护窗口标题的值
   const v = S.view;
   const cl = $('clock');
   if (v.status === 'running') {
-    const st = v.stages[v.idx];
-    const remain = Math.max(0, v.end_ms - Date.now());
-    cl.textContent = fmt(remain);
-    cl.classList.toggle('alert', remain <= (S.settings.pre_alert_sec || 3) * 1000 && remain > 0);
-    Viz.set({
-      mode: st.kind === 'work' ? 'work' : 'break',
-      progress: 1 - remain / (st.secs * 1000),
-      paused: false,
-      alert: remain <= (S.settings.pre_alert_sec || 3) * 1000,
-    });
+    cl.textContent = fmt(Math.max(0, v.end_ms - Date.now()));
   } else if (v.status === 'paused') {
     cl.textContent = fmt(v.remaining_ms);
-    cl.classList.remove('alert');
-    const st = v.stages[v.idx];
-    Viz.set({ mode: st.kind === 'work' ? 'work' : 'break', progress: 1 - v.remaining_ms / (st.secs * 1000), paused: true, alert: false });
   }
+  feedCompanion();
   document.title = v.status === 'running' || v.status === 'paused'
     ? `${cl.textContent} · ${v.stages[v.idx].kind === 'work' ? '工作' : '休息'} — 番茄时钟`
     : '番茄时钟';
@@ -347,8 +345,17 @@ function render() {
   document.body.className = v.status === 'done' ? 'mode-done'
     : active && v.stages[v.idx] && v.stages[v.idx].kind === 'break' && v.status !== 'awaiting' ? 'mode-rest'
     : '';
-  $('doneView').classList.toggle('hide', v.status !== 'done');
-  $('restMask').classList.toggle('hide', !v.rest_locked);
+  // 完成态：先让舞台演完道别（挥手→吹烛→离场 约3.4s）再弹汇总
+  if (v.status === 'done' && !S.donePlayed) {
+    S.donePlayed = true; S.doneDelay = true;
+    setTimeout(() => { S.doneDelay = false; render(); }, 3400);
+  }
+  if (v.status !== 'done') S.donePlayed = false;
+  $('doneView').classList.toggle('hide', v.status !== 'done' || S.doneDelay);
+  // 活动选择行：空闲或工作段可见（休息/完成时藏起）
+  $('actRow').classList.toggle('hide2',
+    !(v.status === 'idle' || (active && v.stages[v.idx] && v.stages[v.idx].kind === 'work')));
+  feedCompanion();
 
   const main = $('btnMain');
   if (v.status === 'idle') {
@@ -358,7 +365,7 @@ function render() {
     const total = S.edit.stages.reduce((s, x) => s + x.secs, 0);
     $('clock').textContent = fmt((S.edit.stages[0] ? S.edit.stages[0].secs : 25 * 60) * 1000);
     $('clockSub').textContent = total ? '就绪 · 共 ' + fmtLong(total) : '';
-    Viz.set({ mode: 'idle', progress: 0, paused: false, alert: false });
+    Companion.setIdleSecs(S.edit.stages[0] ? S.edit.stages[0].secs : 25 * 60);
     renderEditor();
     document.title = '番茄时钟';
     return;
@@ -386,7 +393,6 @@ function render() {
     $('clock').classList.remove('dimmed', 'alert');
     $('clockSub').textContent = '这一段休息结束了，准备好了就开始';
     $('btnPrev').disabled = false; $('btnReset').disabled = true; $('btnSkip').disabled = false;
-    Viz.set({ mode: 'awaiting', progress: 0, paused: false, alert: false });
   } else if (v.status === 'paused') {
     main.textContent = '▶ 继续';
     $('clock').classList.add('dimmed');
@@ -436,7 +442,12 @@ async function mainAction() {
         stages: S.edit.stages,
         builtin: false,
       });
+      if (Bridge.setActivity) Bridge.setActivity(S.activity); // 会话开场就把活动记进内核
       render();
+      // 变形：开始计时后主窗退场，陪伴交给桌宠小窗（完成时会自动回来展示汇总）
+      if (Bridge.onTauri) {
+        setTimeout(() => { try { window.__TAURI__.window.getCurrentWindow().hide(); } catch (e) {} }, 600);
+      }
     } catch (e) { toast(String(e)); }
   } else if (v.status === 'running') cmd('pause');
   else if (v.status === 'paused') cmd('resume');
@@ -657,7 +668,21 @@ async function boot() {
   S.plans = b.plans;
   S.view = b.view;
   S.schedules = b.schedules || [];
-  Viz.init($('viz'));
+  Companion.init($('viz'));
+  // 活动选择：你在做什么，它就做什么（记住上次；写进内核给流水记账）
+  const syncActBtns = () => document.querySelectorAll('#actRow button')
+    .forEach((x) => x.classList.toggle('on', x.dataset.a === S.activity));
+  document.querySelectorAll('#actRow button').forEach((b2) => {
+    b2.onclick = (e) => {
+      e.stopPropagation(); // 别触发舞台的暂停热区
+      S.activity = b2.dataset.a;
+      localStorage.setItem('tm_activity', S.activity);
+      syncActBtns();
+      if (Bridge.setActivity) Bridge.setActivity(S.activity);
+      feedCompanion();
+    };
+  });
+  syncActBtns();
   bindSettings();
   bindSchedules();
   renderPresets();

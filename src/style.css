@@ -119,9 +119,18 @@ button:disabled{opacity:.4; cursor:default}
 .rest-word{font-weight:700; color:var(--rest)}
 .rest-tip{font-size:.8rem; color:var(--soft)}
 
-/* 计时期间右栏收起：画面只留可视化 + 大数字（☰ 按钮可展开） */
+/* 计时期间右栏收起：画面只留舞台（☰ 按钮可展开） */
 #layout.collapsed #listPane{display:none}
 .list-toggle{position:absolute; top:12px; right:12px; z-index:6}
+
+/* 舞台上的活动选择行（空闲和工作段可见）：你在做什么，它就做什么 */
+.act-row{position:absolute; right:14px; bottom:10px; z-index:5;
+  display:flex; gap:6px; background:rgba(20,16,12,.55); border:1px solid rgba(120,95,65,.35);
+  border-radius:999px; padding:4px 6px; backdrop-filter:blur(2px)}
+.act-row button{padding:4px 12px; font-size:.8rem; border-radius:999px; background:transparent;
+  color:#cbb89a; border:none; white-space:nowrap; transition:background .15s, color .15s}
+.act-row button.on{background:#e8590c; color:#fff}
+.act-row.hide2{display:none}
 
 /* —— 右：序列列表 —— */
 #listPane{flex:45; border-left:1px solid var(--line); display:flex; flex-direction:column; min-width:0}

@@ -88,6 +88,7 @@ pub struct Session {
     pub started_ms: u64,     // 会话开始时刻（完成页汇总用）
     pub awaiting_since: u64, // 进入段间等待的时刻（强提醒 FE-23 的计时起点）
     pub logged: bool,        // 这次会话完成后是否已写进流水（防重复入账）
+    pub activity: String,    // 陪伴活动（守烛idle/typing/reading/writing），流水记账用
 }
 
 impl Session {
@@ -279,6 +280,7 @@ pub fn start_session(plan: &Plan, now: u64) -> Result<Session, String> {
         started_ms: now,
         awaiting_since: 0,
         logged: false,
+        activity: String::new(),
     })
 }
 

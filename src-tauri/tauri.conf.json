@@ -28,6 +28,21 @@
         "skipTaskbar": true,
         "resizable": false,
         "closable": false
+      },
+      {
+        "title": "番茄水豚",
+        "label": "pet",
+        "url": "pet.html",
+        "width": 260,
+        "height": 250,
+        "visible": true,
+        "transparent": true,
+        "decorations": false,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "closable": false
       }
     ],
     "security": {

@@ -1,7 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主窗口 + 强制休息遮罩窗默认能力",
-  "windows": ["main", "rest"],
-  "permissions": ["core:default"]
+  "description": "主窗口 + 强制休息遮罩窗 + 桌宠窗默认能力",
+  "windows": ["main", "rest", "pet"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-position",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
+  ]
 }

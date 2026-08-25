@@ -16,6 +16,7 @@
       savePlans: (plans) => inv('save_plans', { plans }),
       saveSchedules: (schedules) => inv('save_schedules', { schedules }),
       getHistory: (limit) => inv('get_history', { limit }),
+      setActivity: (activity) => inv('set_activity', { activity }),
     };
     return;
   }
@@ -46,7 +47,7 @@
   }
   let settings = Object.assign({}, DEFAULT_SETTINGS, LS.get('tm_settings', {}));
   let plans = builtinPlans().concat((LS.get('tm_plans', [])).filter((p) => !p.builtin));
-  let session = LS.get('tm_session', null) || { status: 'idle', stages: [], idx: 0, end_ms: 0, remain_ms: 0, plan_id: '', plan_name: '', started_ms: 0 };
+  let session = LS.get('tm_session', null) || { status: 'idle', stages: [], idx: 0, end_ms: 0, remain_ms: 0, plan_id: '', plan_name: '', started_ms: 0, activity: '' };
 
   function project(s, cfg, now) {
     while (s.status === 'running' && now >= s.end_ms) {
@@ -94,7 +95,7 @@
       if (!plan.stages.length) throw '序列是空的，先加一段';
       for (const st of plan.stages) if (st.secs < 5 || st.secs > 4 * 3600) throw '阶段时长要在 5 秒到 4 小时之间';
       const now = Date.now();
-      session = { status: 'running', plan_id: plan.id, plan_name: plan.name, stages: plan.stages.map((s) => ({ ...s })), idx: 0, end_ms: now + plan.stages[0].secs * 1000, remain_ms: 0, started_ms: now };
+      session = { status: 'running', plan_id: plan.id, plan_name: plan.name, stages: plan.stages.map((s) => ({ ...s })), idx: 0, end_ms: now + plan.stages[0].secs * 1000, remain_ms: 0, started_ms: now, activity: '' };
       persist();
       return view(session, settings, now);
     },
@@ -131,12 +132,13 @@
         if (s.status !== 'awaiting') throw '现在不在段间等待';
         s.idx += 1; s.end_ms = now + s.stages[s.idx].secs * 1000; s.status = 'running';
       } else if (cmd === 'stop') {
-        session = { status: 'idle', stages: [], idx: 0, end_ms: 0, remain_ms: 0, plan_id: '', plan_name: '', started_ms: 0 };
+        session = { status: 'idle', stages: [], idx: 0, end_ms: 0, remain_ms: 0, plan_id: '', plan_name: '', started_ms: 0, activity: '' };
       } else throw '未知指令 ' + cmd;
       persist();
       return view(session, settings, now);
     },
     saveSettings: async (st) => { settings = st; persist(); return settings; },
     savePlans: async (ps) => { plans = builtinPlans().concat(ps.filter((p) => !p.builtin)); persist(); return plans; },
+    setActivity: async (activity) => { session.activity = activity; persist(); },
   };
 })();

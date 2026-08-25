@@ -56,6 +56,7 @@ struct HistoryRecord<'a> {
     ended_ms: u64,
     work_secs: u64,
     rest_secs: u64,
+    activity: &'a str, // 陪伴活动（将来"陪你读了X小时书"的统计地基）
     stages: &'a [core::Stage],
 }
 
@@ -125,6 +126,7 @@ impl App {
             started_ms: self.session.started_ms,
             ended_ms: now_ms(),
             work_secs: work, rest_secs: rest,
+            activity: &self.session.activity,
             stages: &self.session.stages,
         };
         if let Ok(line) = serde_json::to_string(&rec) {
@@ -213,6 +215,7 @@ struct UiWork {
     tray_sec: Option<TraySec>,        // 标题(mac)/气泡/状态行（秒级）
     rest_show: Option<bool>,          // Some(true)=弹强制休息遮罩，Some(false)=收
     rest_regrab: bool,                // 遮罩活跃期间每秒抢回焦点
+    show_main: bool,                  // 会话完成 → 主窗口回来展示汇总
 }
 struct TrayDraw {
     txt: String,
@@ -269,6 +272,7 @@ fn collect_tick(a: &mut App) -> UiWork {
             "done" => {
                 w.notices.push(("🍅 这一轮收获满满".into(), "整个序列都跑完了，去看看汇总吧。".into()));
                 w.sfx.push("done");
+                w.show_main = true; // 跑完把主窗口叫回来看汇总（桌宠期间主窗是藏着的）
             }
             _ => {}
         }
@@ -462,6 +466,9 @@ fn apply_ui(app: &AppHandle, w: UiWork) {
             };
             let _ = win.set_progress_bar(pb);
         }
+    }
+    if w.show_main {
+        if let Some(win) = app.get_webview_window("main") { let _ = win.show(); let _ = win.set_focus(); }
     }
     if let Some(show) = w.rest_show { set_rest_overlay(app, show); }
     if w.rest_regrab {
@@ -659,6 +666,26 @@ async fn get_history(app: AppHandle, limit: usize) -> Vec<serde_json::Value> {
     v
 }
 
+/// 桌宠窗上点「⤢」回主窗口（编排/跳过/结束都在那边）
+#[tauri::command]
+async fn open_main(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
+/// 陪伴活动（守烛/键盘/读书/写字）：随时可换，落进会话并入流水
+#[tauri::command]
+async fn set_activity(app: AppHandle, activity: String) {
+    let state: State<Mutex<App>> = app.state();
+    let mut a = state.lock().unwrap();
+    if a.session.activity != activity {
+        a.session.activity = activity;
+        if a.session.status != "idle" { a.save_session(); }
+    }
+}
+
 /// 遮罩窗失焦时自己喊一声，Rust 立刻把焦点抢回来（比等下一秒滴答更快）
 #[tauri::command]
 async fn rest_focus(app: AppHandle) -> bool {
@@ -701,9 +728,22 @@ pub fn run() {
             let silent = std::env::args().any(|x| x == "--hidden") && loaded.settings.launch_mode == "silent";
             app.manage(Mutex::new(loaded));
 
-            // 自启且静默：只留托盘，不亮主窗口（FE-25 启动形态）
+            // 自启且静默：只留托盘，不亮主窗口（FE-25 启动形态）；桌宠窗任何形态都常驻
             if silent {
                 if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
+            }
+
+            // 桌宠窗默认落在主屏右下角（拖动后位置由前端 localStorage 记忆并恢复）
+            if let Some(pet) = app.get_webview_window("pet") {
+                if let Ok(Some(mon)) = pet.primary_monitor() {
+                    let sf = mon.scale_factor();
+                    let (mw, mh) = (mon.size().width as f64, mon.size().height as f64);
+                    let (pw, ph) = (260.0 * sf, 250.0 * sf);
+                    let _ = pet.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+                        (mw - pw - 24.0 * sf) as i32,
+                        (mh - ph - 90.0 * sf) as i32,
+                    )));
+                }
             }
 
             // 托盘 + 迷你菜单（FE-24）
@@ -770,7 +810,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             boot, get_state, session_start, session_cmd,
-            save_settings, save_plans, save_schedules, get_history, rest_focus
+            save_settings, save_plans, save_schedules, get_history, rest_focus, set_activity, open_main
         ])
         .run(tauri::generate_context!())
         .expect("番茄时钟启动失败")

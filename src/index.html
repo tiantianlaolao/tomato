@@ -103,13 +103,19 @@
 </div>
 
 <main id="layout">
-  <!-- 左：可视化 + 大数字 -->
+  <!-- 左：水豚陪伴舞台（烛钟+木牌=倒计时；旧大数字钟隐藏，标题/托盘仍用它的值） -->
   <section id="vizPane">
     <button class="ghost sm list-toggle hide" id="btnToggleList">☰ 序列</button>
     <canvas id="viz"></canvas>
-    <div id="clock" class="clock">25:00</div>
-    <div id="clockSub" class="clock-sub"></div>
-    <div id="restMask" class="rest-mask hide">
+    <div id="clock" class="clock" style="display:none">25:00</div>
+    <div id="clockSub" class="clock-sub" style="display:none"></div>
+    <div id="actRow" class="act-row">
+      <button data-a="idle" class="on" title="守烛">🕯️ 守烛</button>
+      <button data-a="typing" title="敲键盘">⌨️ 键盘</button>
+      <button data-a="reading" title="读书">📖 读书</button>
+      <button data-a="writing" title="写字">✏️ 写字</button>
+    </div>
+    <div id="restMask" class="rest-mask hide" style="display:none">
       <div class="rest-mask-inner">
         <div class="rest-icon">☕</div>
         <div class="rest-word">强制休息中</div>
@@ -177,7 +183,7 @@
 <div id="toast" class="toast hide"></div>
 
 <script src="bridge.js"></script>
-<script src="viz.js"></script>
+<script src="companion.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
