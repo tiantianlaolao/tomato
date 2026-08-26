@@ -41,10 +41,12 @@ pub struct Schedule {
     pub enabled: bool,
     pub last_fired: String, // recurring：上次触发的 YYYY-MM-DD，防同日重复
     pub pre_alerted: bool,  // 触发前 30s 预告只发一次
+    pub name: String,           // 序列快照名（delay 存的是"当时编辑器里那个序列"）
+    pub stages: Vec<core::Stage>, // 序列快照；非空时不查 plan_id，直接跑它 —— 没存成预设的临时编排也能如约开跑
 }
 impl Default for Schedule {
     fn default() -> Self {
-        Schedule { id: String::new(), plan_id: String::new(), mode: "once".into(), trigger_at: 0, time: String::new(), weekdays: vec![], enabled: true, last_fired: String::new(), pre_alerted: false }
+        Schedule { id: String::new(), plan_id: String::new(), mode: "once".into(), trigger_at: 0, time: String::new(), weekdays: vec![], enabled: true, last_fired: String::new(), pre_alerted: false, name: String::new(), stages: vec![] }
     }
 }
 
@@ -52,6 +54,7 @@ impl Default for Schedule {
 #[derive(Serialize)]
 struct HistoryRecord<'a> {
     plan_name: &'a str,
+    completed: bool, // false=中途放弃（部分时长也如实入账）
     started_ms: u64,
     ended_ms: u64,
     work_secs: u64,
@@ -77,6 +80,7 @@ struct App {
     last_tray_sec: String,   // 托盘标题/气泡上次的内容（秒级）
     rest_shown: bool,        // 强制休息全屏遮罩当前是否亮着
     last_save_ms: u64,
+    remind_armed: bool,      // 强提醒只对"本次运行期间进入等待"的会话催；隔夜恢复的旧会话不该开机就被唠叨
 }
 
 #[derive(Serialize, Deserialize)]
@@ -100,12 +104,15 @@ impl App {
             .map(|w| core::restore(w.session, &settings, w.saved_at))
             .unwrap_or_else(Session::idle);
         let schedules: Vec<Schedule> = read("schedules.json").and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        // prev_* 直接对齐恢复出来的会话：否则滴答线程会把"恢复"误判成"刚发生的切换"，
+        // 启动即重发完成/等待通知，restored done 还会在静默自启时强行弹主窗（曾依赖前端 boot 在 1s 内抢先对齐，竞态）
+        let (prev_status, prev_idx) = (session.status.clone(), session.idx);
         App {
             dir, settings, plans, session, schedules,
-            prev_status: "idle".into(), prev_idx: 0, prealert_idx: -1,
+            prev_status, prev_idx, prealert_idx: -1,
             last_strong_ms: 0, continuous_work_ms: 0, last_sit_ms: 0,
             last_tray: String::new(), last_tray_sec: String::new(),
-            rest_shown: false, last_save_ms: 0,
+            rest_shown: false, last_save_ms: 0, remind_armed: false,
         }
     }
     fn save_settings(&self) { if let Ok(s) = serde_json::to_string_pretty(&self.settings) { fs::write(self.dir.join("settings.json"), s).ok(); } }
@@ -116,16 +123,16 @@ impl App {
         let w = SavedSession { saved_at: self.last_save_ms, session: self.session.clone() };
         if let Ok(s) = serde_json::to_string(&w) { fs::write(self.dir.join("session.json"), s).ok(); }
     }
-    /// 会话完成 → 追加一行 JSONL 流水（history.jsonl）。将来的番茄园/统计都从这里长
-    fn maybe_log_done(&mut self) {
-        if self.session.status != "done" || self.session.logged { return; }
-        let work: u64 = self.session.stages.iter().filter(|s| s.kind == "work").map(|s| s.secs).sum();
-        let rest: u64 = self.session.stages.iter().filter(|s| s.kind == "break").map(|s| s.secs).sum();
+    /// 追加一行 JSONL 流水（history.jsonl）。将来的番茄园/统计都从这里长。
+    /// 时长按 acc_* 实际经过时间入账（跳过不虚记、暂停不算、放弃记部分）。
+    fn write_history(&mut self, completed: bool) {
         let rec = HistoryRecord {
             plan_name: &self.session.plan_name,
+            completed,
             started_ms: self.session.started_ms,
             ended_ms: now_ms(),
-            work_secs: work, rest_secs: rest,
+            work_secs: self.session.acc_work_ms / 1000,
+            rest_secs: self.session.acc_rest_ms / 1000,
             activity: &self.session.activity,
             stages: &self.session.stages,
         };
@@ -136,6 +143,17 @@ impl App {
         }
         self.session.logged = true;
         self.save_session();
+    }
+    /// 会话完成 → 入账（防重复）
+    fn maybe_log_done(&mut self) {
+        if self.session.status != "done" || self.session.logged { return; }
+        self.write_history(true);
+    }
+    /// 中途结束 → 部分入账（不足 1 分钟的就不记了，免得误触也留痕）
+    fn log_abandoned(&mut self) {
+        if !matches!(self.session.status.as_str(), "running" | "paused" | "awaiting") || self.session.logged { return; }
+        if self.session.acc_work_ms + self.session.acc_rest_ms < 60_000 { return; }
+        self.write_history(false);
     }
 }
 
@@ -194,6 +212,7 @@ struct TrayUi {
     status: MenuItem<tauri::Wry>,
     toggle: MenuItem<tauri::Wry>,
     skip: MenuItem<tauri::Wry>,
+    pet: MenuItem<tauri::Wry>,
 }
 
 // ———————————————————————— 通知 + 音效（音效发给前端 WebAudio 播） ————————————————————————
@@ -265,9 +284,13 @@ fn collect_tick(a: &mut App) -> UiWork {
                 }
             }
             "awaiting" => {
-                w.notices.push(("这一段走完了".into(), "休息结束，准备好了就开始下一段工作。".into()));
+                // 段间等待有两种方向：休息完等开工（默认），或关了"自动进休息"后工作完等休息 —— 文案要分开
+                let next_is_work = a.session.stages.get(idx + 1).map(|s| s.kind == "work").unwrap_or(true);
+                let body = if next_is_work { "休息结束，准备好了就开始下一段工作。" } else { "这段工作完成了，歇一会儿再继续。" };
+                w.notices.push(("这一段走完了".into(), body.into()));
                 w.sfx.push("switch");
                 a.last_strong_ms = now;
+                a.remind_armed = true;
             }
             "done" => {
                 w.notices.push(("🍅 这一轮收获满满".into(), "整个序列都跑完了，去看看汇总吧。".into()));
@@ -292,10 +315,13 @@ fn collect_tick(a: &mut App) -> UiWork {
         }
     }
 
-    // ③ 强提醒（FE-23）：休息结束停在等待，每 60s 催一次 + 窗口闪烁
-    if st == "awaiting" && cfg.strong_remind && now.saturating_sub(a.last_strong_ms) >= 60_000 {
+    // ③ 强提醒（FE-23）：段间等待每 60s 催一次 + 窗口闪烁。
+    // remind_armed：只催"本次运行期间"进入等待的会话 —— 隔夜恢复的旧会话开机就唠叨太烦，交给"还没跑完"的 toast。
+    if st == "awaiting" && cfg.strong_remind && a.remind_armed && now.saturating_sub(a.last_strong_ms) >= 60_000 {
         a.last_strong_ms = now;
-        w.notices.push(("还等着你呢".into(), "休息早结束了，回来把下一段工作开起来。".into()));
+        let next_is_work = a.session.stages.get(idx + 1).map(|s| s.kind == "work").unwrap_or(true);
+        let body = if next_is_work { "休息早结束了，回来把下一段工作开起来。" } else { "工作早就结束了，去歇一会儿吧。" };
+        w.notices.push(("还等着你呢".into(), body.into()));
         w.sfx.push("remind");
         w.attention = true;
     }
@@ -320,11 +346,16 @@ fn collect_tick(a: &mut App) -> UiWork {
     }
 
     // ⑤ 定时计划（FE-29~33）
-    let mut fire: Vec<(String, String)> = vec![]; // (plan_id, 描述)
+    let mut fire: Vec<Schedule> = vec![];
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let hhmm = chrono::Local::now().format("%H:%M").to_string();
     let weekday = chrono::Datelike::weekday(&chrono::Local::now()).num_days_from_sunday() as u8;
     let mut dirty = false;
+    let plan_names: Vec<(String, String)> = a.plans.iter().map(|p| (p.id.clone(), p.name.clone())).collect();
+    let sched_name = |sc: &Schedule| -> String {
+        if !sc.name.is_empty() { return sc.name.clone(); }
+        plan_names.iter().find(|(id, _)| *id == sc.plan_id).map(|(_, n)| n.clone()).unwrap_or_else(|| "定时计划".into())
+    };
     for sc in a.schedules.iter_mut() {
         if !sc.enabled { continue; }
         match sc.mode.as_str() {
@@ -336,26 +367,50 @@ fn collect_tick(a: &mut App) -> UiWork {
                     w.notices.push(("⏳ 30 秒后自动开始".into(), "定好的专注马上开始，准备一下。".into()));
                 }
                 if now >= sc.trigger_at && now - sc.trigger_at < 90_000 {
-                    fire.push((sc.plan_id.clone(), sc.mode.clone()));
+                    fire.push(sc.clone());
                     sc.enabled = false; dirty = true;
+                } else if now >= sc.trigger_at {
+                    // 触发点被睡过去了（app 在跑但机器挂起超过 90s）：别留僵尸，明说错过了
+                    let name = sched_name(sc);
+                    sc.enabled = false; dirty = true;
+                    w.notices.push(("错过了定时计划".into(), format!("「{name}」到点时机器不在线，这次没有自动开始。")));
                 }
             }
             "recurring" => {
-                if sc.weekdays.contains(&weekday) && sc.time == hhmm && sc.last_fired != today {
-                    sc.last_fired = today.clone(); dirty = true;
-                    fire.push((sc.plan_id.clone(), "recurring".into()));
+                if sc.weekdays.contains(&weekday) && sc.last_fired != today {
+                    if sc.time == hhmm {
+                        sc.last_fired = today.clone(); dirty = true;
+                        fire.push(sc.clone());
+                    } else if sc.time.as_str() < hhmm.as_str() {
+                        // 今天的触发分钟已经过去（睡眠/当时没开机）：记为已处理并提示，别整天沉默
+                        sc.last_fired = today.clone(); dirty = true;
+                        w.notices.push(("错过了今天的计划".into(),
+                            format!("{} 的定时专注这次没赶上，想跑的话去主窗口手动开。", sc.time)));
+                    }
                 }
             }
             _ => {}
         }
     }
+    // 名字要在可变借用结束后取
+    let fire: Vec<(Option<Plan>, String)> = fire.into_iter().map(|sc| {
+        let name = sched_name(&sc);
+        let plan = if !sc.stages.is_empty() {
+            Some(Plan { id: if sc.plan_id.is_empty() { "adhoc".into() } else { sc.plan_id.clone() }, name: name.clone(), stages: sc.stages.clone(), builtin: false })
+        } else {
+            a.plans.iter().find(|p| p.id == sc.plan_id).cloned()
+        };
+        (plan, name)
+    }).collect();
     if dirty { a.save_schedules(); }
-    for (plan_id, _) in fire {
+    for (plan, _name) in fire {
         if a.session.status == "idle" || a.session.status == "done" {
-            if let Some(p) = a.plans.iter().find(|p| p.id == plan_id).cloned() {
+            if let Some(p) = plan {
                 if let Ok(s) = core::start_session(&p, now) {
                     a.session = s;
                     a.prev_status = "running".into(); a.prev_idx = 0;
+                    a.continuous_work_ms = 0;
+                    a.remind_armed = false;
                     a.save_session();
                     w.notices.push((format!("🍅 已自动开始「{}」", p.name), "到点了，这一轮已经替你开起来了。".into()));
                     w.sfx.push("switch");
@@ -384,7 +439,7 @@ fn collect_tick(a: &mut App) -> UiWork {
                 mm, ss, if paused { "（已暂停）" } else { "" }, a.session.plan_name),
              format!("{}", mm.min(99)), rgb)
         }
-        "awaiting" => (Some("⏳".into()), "⏳ 等你开始下一段".to_string(), "0".into(), [180, 140, 60]),
+        "awaiting" => (Some("⏳".into()), "⏳ 等你开始下一段".to_string(), String::new(), [180, 140, 60]),
         "done" => (None, "🍅 跑完了，去看汇总".to_string(), String::new(), [233, 168, 13]),
         _ => (None, "番茄时钟 · 空闲".to_string(), String::new(), [200, 120, 90]),
     };
@@ -483,12 +538,33 @@ fn apply_ui(app: &AppHandle, w: UiWork) {
 fn set_rest_overlay(app: &AppHandle, show: bool) {
     let Some(w) = app.get_webview_window("rest") else { return };
     if show {
-        let mon = app.get_webview_window("main")
-            .and_then(|m| m.current_monitor().ok().flatten())
-            .or_else(|| w.primary_monitor().ok().flatten());
-        if let Some(mon) = mon {
-            let _ = w.set_position(tauri::Position::Physical(*mon.position()));
-            let _ = w.set_size(tauri::Size::Physical(*mon.size()));
+        // 非 mac：铺满所有显示器的包围盒 —— 只盖一块屏的话，双屏用户在另一块上照常干活，"强制"就不成立了
+        #[cfg(not(target_os = "macos"))]
+        {
+            let mons = w.available_monitors().unwrap_or_default();
+            if mons.len() > 1 {
+                let (mut x0, mut y0, mut x1, mut y1) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+                for m in &mons {
+                    let (p, s) = (m.position(), m.size());
+                    x0 = x0.min(p.x); y0 = y0.min(p.y);
+                    x1 = x1.max(p.x + s.width as i32); y1 = y1.max(p.y + s.height as i32);
+                }
+                let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x0, y0)));
+                let _ = w.set_size(tauri::Size::Physical(tauri::PhysicalSize::new((x1 - x0) as u32, (y1 - y0) as u32)));
+            } else if let Some(mon) = mons.into_iter().next() {
+                let _ = w.set_position(tauri::Position::Physical(*mon.position()));
+                let _ = w.set_size(tauri::Size::Physical(*mon.size()));
+            }
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let mon = app.get_webview_window("main")
+                .and_then(|m| m.current_monitor().ok().flatten())
+                .or_else(|| w.primary_monitor().ok().flatten());
+            if let Some(mon) = mon {
+                let _ = w.set_position(tauri::Position::Physical(*mon.position()));
+                let _ = w.set_size(tauri::Size::Physical(*mon.size()));
+            }
         }
         let _ = w.set_visible_on_all_workspaces(true);
         let _ = w.set_always_on_top(true);
@@ -520,12 +596,19 @@ fn sync_rest_overlay(app: &AppHandle) {
 // ———————————————————————— 命令 ————————————————————————
 // 全部 async：跑在异步线程池上，主线程绝不因等 App 锁被卡住（死锁修复的另一半）。
 #[derive(Serialize)]
+struct MissedPlan {
+    name: String,
+    plan_id: String,
+    stages: Vec<core::Stage>, // 解析好的真实序列 —— 补跑要跑"错过的那个"，不是编辑器里正好装着的
+}
+
+#[derive(Serialize)]
 struct Boot {
     settings: Settings,
     plans: Vec<Plan>,
     view: core::View,
     schedules: Vec<Schedule>,
-    missed: Vec<String>, // 错过的计划描述（FE-33：启动时询问补跑）
+    missed: Vec<MissedPlan>, // 错过的计划（FE-33：启动时询问补跑）
 }
 
 #[tauri::command]
@@ -537,14 +620,18 @@ async fn boot(app: AppHandle) -> Boot {
     core::project(&mut a.session, &cfg, now);
     a.prev_status = a.session.status.clone();
     a.prev_idx = a.session.idx;
-    // 错过的一次性计划：到点了但当时没开机
-    let plan_names: Vec<(String, String)> = a.plans.iter().map(|p| (p.id.clone(), p.name.clone())).collect();
+    // 错过的一次性计划：到点了但当时没开机。带上解析好的序列，前端"补跑"直接照着开
+    let plan_lookup: Vec<Plan> = a.plans.clone();
     let mut missed = vec![];
     for sc in a.schedules.iter_mut() {
         if sc.enabled && matches!(sc.mode.as_str(), "once" | "delay") && sc.trigger_at > 0 && now > sc.trigger_at + 90_000 {
             sc.enabled = false;
-            let name = plan_names.iter().find(|(id, _)| *id == sc.plan_id).map(|(_, n)| n.clone()).unwrap_or_default();
-            missed.push(name);
+            let found = plan_lookup.iter().find(|p| p.id == sc.plan_id);
+            let name = if !sc.name.is_empty() { sc.name.clone() } else { found.map(|p| p.name.clone()).unwrap_or_default() };
+            let stages = if !sc.stages.is_empty() { sc.stages.clone() } else { found.map(|p| p.stages.clone()).unwrap_or_default() };
+            if !stages.is_empty() {
+                missed.push(MissedPlan { name, plan_id: sc.plan_id.clone(), stages });
+            }
         }
     }
     if !missed.is_empty() { a.save_schedules(); }
@@ -575,6 +662,7 @@ fn do_session_start(app: &AppHandle, plan: &Plan) -> Result<core::View, String> 
         a.prev_status = "running".into();
         a.prev_idx = 0;
         a.continuous_work_ms = 0;
+        a.remind_armed = false;
         a.save_session();
         core::view(&a.session, &a.settings, now)
     };
@@ -589,23 +677,36 @@ async fn session_start(app: AppHandle, plan: Plan) -> Result<core::View, String>
 }
 
 fn do_session_cmd(app: &AppHandle, cmd: &str) -> Result<core::View, String> {
-    let view = {
+    let (view, settings_push) = {
         let state: State<Mutex<App>> = app.state();
         let mut a = state.lock().unwrap();
         let now = now_ms();
         let cfg = a.settings.clone();
+        if cmd == "stop" {
+            // 结束前把账推到 now 并入流水（放弃也如实记部分时长）
+            core::project(&mut a.session, &cfg, now);
+            a.log_abandoned();
+        }
         let out = core::apply(&mut a.session, &cfg, cmd, now)?;
+        let mut settings_push = None;
         if out.unlock_consumed {
             a.settings.final_break_unlock = false;
             a.save_settings();
+            settings_push = Some(a.settings.clone()); // 推给前端，别让设置面板里的开关继续亮着骗人
+        }
+        if a.session.status == "awaiting" && a.prev_status != "awaiting" {
+            // 命令路径也可能落进段间等待（内核投影发生在 apply 里）：强提醒计时从现在起算
+            a.last_strong_ms = now;
+            a.remind_armed = true;
         }
         a.prev_status = a.session.status.clone();
         a.prev_idx = a.session.idx;
         a.maybe_log_done();
         a.save_session();
-        core::view(&a.session, &a.settings, now)
+        (core::view(&a.session, &a.settings, now), settings_push)
     };
     sync_rest_overlay(app);
+    if let Some(s) = settings_push { let _ = app.emit("settings", s); }
     let _ = app.emit("state", view.clone()); // 广播给所有窗口
     Ok(view)
 }
@@ -617,10 +718,11 @@ async fn session_cmd(app: AppHandle, cmd: String) -> Result<core::View, String> 
 
 #[tauri::command]
 async fn save_settings(app: AppHandle, settings: Settings) -> Settings {
-    let saved = {
+    let (saved, pet_changed) = {
         let state: State<Mutex<App>> = app.state();
         let mut a = state.lock().unwrap();
         let autostart_changed = a.settings.autostart != settings.autostart;
+        let pet_changed = a.settings.pet_hidden != settings.pet_hidden;
         a.settings = settings;
         a.save_settings();
         if autostart_changed {
@@ -628,11 +730,22 @@ async fn save_settings(app: AppHandle, settings: Settings) -> Settings {
             let al = app.autolaunch();
             if a.settings.autostart { let _ = al.enable(); } else { let _ = al.disable(); }
         }
-        a.settings.clone()
+        (a.settings.clone(), pet_changed)
     };
+    // 锁已放，才能安全碰窗口/菜单（线程纪律）
+    if pet_changed { apply_pet_visibility(&app, saved.pet_hidden); }
     // 休息策略被改（强制→非强制）时，遮罩要立刻跟着收
     sync_rest_overlay(&app);
     saved
+}
+
+/// 桌宠窗显隐 + 托盘菜单文字同步（调用方保证不持 App 锁）
+fn apply_pet_visibility(app: &AppHandle, hidden: bool) {
+    if let Some(w) = app.get_webview_window("pet") {
+        if hidden { let _ = w.hide(); } else { let _ = w.show(); }
+    }
+    let ui: State<TrayUi> = app.state();
+    let _ = ui.pet.set_text(if hidden { "显示桌宠" } else { "隐藏桌宠" });
 }
 
 #[tauri::command]
@@ -675,15 +788,20 @@ async fn open_main(app: AppHandle) {
     }
 }
 
-/// 陪伴活动（守烛/键盘/读书/写字）：随时可换，落进会话并入流水
+/// 陪伴活动（守烛/键盘/读书/写字）：随时可换，落进会话并入流水。
+/// 改完必须广播 state —— 计时中主窗是藏着的，用户看的是桌宠窗，它只认 state 推送
+/// （不广播的话要等下一次状态跳变才刷新，表现为"切了活动没反应，暂停再开始才变"）。
 #[tauri::command]
 async fn set_activity(app: AppHandle, activity: String) {
-    let state: State<Mutex<App>> = app.state();
-    let mut a = state.lock().unwrap();
-    if a.session.activity != activity {
+    let view = {
+        let state: State<Mutex<App>> = app.state();
+        let mut a = state.lock().unwrap();
+        if a.session.activity == activity { return; }
         a.session.activity = activity;
         if a.session.status != "idle" { a.save_session(); }
-    }
+        core::view(&a.session, &a.settings, now_ms())
+    };
+    let _ = app.emit("state", view);
 }
 
 /// 遮罩窗失焦时自己喊一声，Rust 立刻把焦点抢回来（比等下一秒滴答更快）
@@ -726,11 +844,16 @@ pub fn run() {
             let dir = app.path().app_data_dir().expect("拿不到应用数据目录");
             let loaded = App::load(dir);
             let silent = std::env::args().any(|x| x == "--hidden") && loaded.settings.launch_mode == "silent";
+            let pet_hidden0 = loaded.settings.pet_hidden;
             app.manage(Mutex::new(loaded));
 
-            // 自启且静默：只留托盘，不亮主窗口（FE-25 启动形态）；桌宠窗任何形态都常驻
+            // 自启且静默：只留托盘，不亮主窗口（FE-25 启动形态）
             if silent {
                 if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
+            }
+            // 桌宠窗常驻，但用户收起过就保持收起（托盘/设置里可再叫出来）
+            if pet_hidden0 {
+                if let Some(w) = app.get_webview_window("pet") { let _ = w.hide(); }
             }
 
             // 桌宠窗默认落在主屏右下角（拖动后位置由前端 localStorage 记忆并恢复）
@@ -751,13 +874,14 @@ pub fn run() {
             let toggle = MenuItem::with_id(app, "toggle", "暂停", false, None::<&str>)?;
             let skip = MenuItem::with_id(app, "skip", "跳过这一段", false, None::<&str>)?;
             let show = MenuItem::with_id(app, "show", "打开主窗口", true, None::<&str>)?;
+            let pet_item = MenuItem::with_id(app, "pet", if pet_hidden0 { "显示桌宠" } else { "隐藏桌宠" }, true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[
                 &status, &PredefinedMenuItem::separator(app)?,
                 &toggle, &skip, &PredefinedMenuItem::separator(app)?,
-                &show, &quit,
+                &show, &pet_item, &quit,
             ])?;
-            app.manage(TrayUi { status: status.clone(), toggle: toggle.clone(), skip: skip.clone() });
+            app.manage(TrayUi { status: status.clone(), toggle: toggle.clone(), skip: skip.clone(), pet: pet_item.clone() });
             TrayIconBuilder::with_id("tray")
                 .icon(tray_image("", [200, 120, 90]))
                 .tooltip("番茄时钟")
@@ -768,6 +892,17 @@ pub fn run() {
                     "skip" => skip_session(app),
                     "show" => {
                         if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); }
+                    }
+                    "pet" => {
+                        // 先在锁内翻状态落盘，放锁后才碰窗口/菜单（线程纪律）
+                        let hidden = {
+                            let state: State<Mutex<App>> = app.state();
+                            let mut a = state.lock().unwrap();
+                            a.settings.pet_hidden = !a.settings.pet_hidden;
+                            a.save_settings();
+                            a.settings.pet_hidden
+                        };
+                        apply_pet_visibility(app, hidden);
                     }
                     "quit" => {
                         let state: State<Mutex<App>> = app.state();
@@ -806,6 +941,18 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                // 桌宠被 Alt+F4 收起：记进设置并同步托盘菜单文字，托盘里随时能再叫出来
+                if window.label() == "pet" {
+                    let app = window.app_handle();
+                    {
+                        let state: State<Mutex<App>> = app.state();
+                        let mut a = state.lock().unwrap();
+                        a.settings.pet_hidden = true;
+                        a.save_settings();
+                    }
+                    let ui: State<TrayUi> = app.state();
+                    let _ = ui.pet.set_text("显示桌宠");
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

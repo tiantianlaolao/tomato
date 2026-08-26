@@ -15,11 +15,18 @@
     <span id="tbStage" class="tb-stage"></span>
   </div>
   <div class="tb-right">
+    <button class="ghost" id="btnHistory">记录</button>
     <button class="ghost" id="btnSchedules">定时</button>
     <button class="ghost" id="btnPresets">预设</button>
     <button class="ghost" id="btnSettings">设置</button>
   </div>
 </header>
+
+<!-- 记录面板：history.jsonl 的可视化（实际时长，中途结束也记） -->
+<div id="historyPanel" class="drop hide">
+  <div class="drop-title">最近的专注</div>
+  <div id="histList"></div>
+</div>
 
 <!-- 预设面板 -->
 <div id="presetPanel" class="drop hide">
@@ -56,8 +63,13 @@
   </div>
   <div class="opt-group">
     <div class="opt-head">提醒</div>
-    <label class="opt">久坐提醒：连续工作每 <input type="number" id="optSit" min="0" max="120" class="tiny-num"> 分钟响一声 <span class="dim">（0=关，仅非强制模式）</span></label>
-    <label class="opt"><input type="checkbox" id="optStrong"> 休息结束没响应时反复催</label>
+    <label class="opt">久坐提醒：连续工作每 <input type="number" id="optSit" min="0" max="240" class="tiny-num"> 分钟响一声 <span class="dim">（0=关，仅非强制模式；建议大于单段工作时长）</span></label>
+    <label class="opt"><input type="checkbox" id="optStrong"> 段间等着没响应时反复催</label>
+    <label class="opt">阶段结束前 <input type="number" id="optPre" min="0" max="60" class="tiny-num"> 秒来一声预备音 <span class="dim">（0=关）</span></label>
+  </div>
+  <div class="opt-group">
+    <div class="opt-head">桌宠</div>
+    <label class="opt"><input type="checkbox" id="optPet"> 显示桌面水豚 <span class="dim">（托盘菜单里也能切）</span></label>
   </div>
   <div class="opt-group">
     <div class="opt-head">开机自启</div>
@@ -151,6 +163,18 @@
     <div class="modal-actions">
       <button class="ghost" id="qCancel">取消</button>
       <button class="primary" id="qGo">生成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 预设取名弹层（不能用 window.prompt：macOS WKWebView 下是 no-op） -->
+<div id="nameModal" class="modal hide">
+  <div class="modal-card">
+    <h3>把当前编排存为预设</h3>
+    <div class="qrow"><input type="text" id="nameInput" maxlength="20" placeholder="给它起个名字" class="name-input"></div>
+    <div class="modal-actions">
+      <button class="ghost" id="nameCancel">取消</button>
+      <button class="primary" id="nameOk">保存</button>
     </div>
   </div>
 </div>

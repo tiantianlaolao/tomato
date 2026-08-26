@@ -36,6 +36,7 @@
         "width": 260,
         "height": 250,
         "visible": true,
+        "focus": false,
         "transparent": true,
         "decorations": false,
         "shadow": false,

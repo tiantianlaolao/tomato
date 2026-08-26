@@ -276,18 +276,44 @@ function renderPresets() {
       };
       row.appendChild(del);
     }
-    row.onclick = () => {
+    row.onclick = async () => {
       S.edit = { name: p.name, planId: p.id, stages: p.stages.map((s) => ({ ...s })) };
       S.undoStack = [];
       hidePanels();
       renderEditor();
+      // 记住这次选的预设：下次启动编辑器直接装回它（以前永远装回经典番茄）
+      if (S.settings.selected_plan_id !== p.id) {
+        S.settings.selected_plan_id = p.id;
+        S.settings = await Bridge.saveSettings(S.settings);
+      }
     };
     box.appendChild(row);
   });
 }
+// 自绘取名弹层：window.prompt 在 macOS 的 WKWebView 里是 no-op（Tauri 已知限制），不能用
+function askName(defVal) {
+  return new Promise((resolve) => {
+    const modal = $('nameModal'), inp = $('nameInput');
+    inp.value = defVal || '';
+    modal.classList.remove('hide');
+    inp.focus(); inp.select();
+    const done = (val) => {
+      modal.classList.add('hide');
+      inp.onkeydown = $('nameOk').onclick = $('nameCancel').onclick = null;
+      resolve(val);
+    };
+    $('nameOk').onclick = () => done(inp.value.trim() || null);
+    $('nameCancel').onclick = () => done(null);
+    inp.onkeydown = (e) => {
+      if (e.key === 'Enter') done(inp.value.trim() || null);
+      else if (e.key === 'Escape') done(null);
+      e.stopPropagation();
+    };
+  });
+}
 async function saveAsPreset() {
   if (!S.edit.stages.length) { toast('序列是空的'); return; }
-  const name = prompt('给这个预设起个名字：', S.edit.name === '未命名序列' ? '' : S.edit.name);
+  const name = await askName(S.edit.name === '未命名序列' ? '' : S.edit.name);
   if (!name) return;
   const p = { id: 'c' + Date.now().toString(36), name: name.slice(0, 20), stages: S.edit.stages.map((s) => ({ ...s })), builtin: false };
   S.plans.push(p);
@@ -391,7 +417,7 @@ function render() {
     main.textContent = '▶ 开始' + (next.kind === 'work' ? '工作' : '休息');
     $('clock').textContent = fmt(next.secs * 1000);
     $('clock').classList.remove('dimmed', 'alert');
-    $('clockSub').textContent = '这一段休息结束了，准备好了就开始';
+    $('clockSub').textContent = next.kind === 'work' ? '这一段休息结束了，准备好了就开始' : '这一段工作结束了，歇一会儿吧';
     $('btnPrev').disabled = false; $('btnReset').disabled = true; $('btnSkip').disabled = false;
   } else if (v.status === 'paused') {
     main.textContent = '▶ 继续';
@@ -431,24 +457,30 @@ function renderDone() {
 }
 
 // ———————————————————————— 控制 ————————————————————————
+// 统一的会话启动：开始/再来一轮/补跑都走这里 —— 开跑后主窗退场，陪伴交给桌宠小窗（完成时自动回来展示汇总）
+async function startPlan(plan) {
+  try {
+    S.view = await Bridge.sessionStart(plan);
+    if (Bridge.setActivity) Bridge.setActivity(S.activity); // 会话开场就把活动记进内核
+    render();
+    if (Bridge.onTauri) {
+      setTimeout(() => { try { window.__TAURI__.window.getCurrentWindow().hide(); } catch (e) {} }, 600);
+    }
+  } catch (e) { toast(String(e)); }
+}
+function editorPlan() {
+  return {
+    id: S.edit.planId || 'adhoc',
+    name: S.edit.planId ? ((S.plans.find((p) => p.id === S.edit.planId) || {}).name || S.edit.name) : S.edit.name,
+    stages: S.edit.stages,
+    builtin: false,
+  };
+}
 async function mainAction() {
   const v = S.view;
   if (v.status === 'idle') {
     if (!S.edit.stages.length) { toast('先加一段，或选个预设'); return; }
-    try {
-      S.view = await Bridge.sessionStart({
-        id: S.edit.planId || 'adhoc',
-        name: S.edit.planId ? ((S.plans.find((p) => p.id === S.edit.planId) || {}).name || S.edit.name) : S.edit.name,
-        stages: S.edit.stages,
-        builtin: false,
-      });
-      if (Bridge.setActivity) Bridge.setActivity(S.activity); // 会话开场就把活动记进内核
-      render();
-      // 变形：开始计时后主窗退场，陪伴交给桌宠小窗（完成时会自动回来展示汇总）
-      if (Bridge.onTauri) {
-        setTimeout(() => { try { window.__TAURI__.window.getCurrentWindow().hide(); } catch (e) {} }, 600);
-      }
-    } catch (e) { toast(String(e)); }
+    await startPlan(editorPlan());
   } else if (v.status === 'running') cmd('pause');
   else if (v.status === 'paused') cmd('resume');
   else if (v.status === 'awaiting') cmd('start_next');
@@ -469,6 +501,8 @@ function beep(kind) {
   if (!S.settings || !S.settings.sound_on) return;
   try {
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    // 无用户手势创建的 AudioContext 可能是 suspended（自启静默+定时开跑的路径上没人点过窗口）：先唤醒再排音
+    if (actx.state === 'suspended') actx.resume();
     const v = (S.settings.volume || 0.7) * 0.3;
     const t0 = actx.currentTime;
     const id = S.settings.sound_id || 'chime';
@@ -494,7 +528,7 @@ function planOptions(sel) {
   });
 }
 function scDesc(sc) {
-  const plan = (S.plans.find((p) => p.id === sc.plan_id) || {}).name || '?';
+  const plan = sc.name || (S.plans.find((p) => p.id === sc.plan_id) || {}).name || '?';
   if (sc.mode === 'recurring') return `每周${sc.weekdays.map((d) => WEEK_CN[d]).join('/')} ${sc.time} · ${plan}`;
   const d = new Date(sc.trigger_at);
   return `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())} · ${plan}`;
@@ -556,9 +590,11 @@ function bindSchedules() {
   $('scDelayGo').onclick = () => {
     const min = parseInt($('scDelayMin').value) || 30;
     if (!S.edit.stages.length) { toast('当前序列是空的'); return; }
-    S.schedules.push({ id: newId(), plan_id: S.edit.planId || S.settings.selected_plan_id, mode: 'delay', trigger_at: Date.now() + min * 60000, time: '', weekdays: [], enabled: true, last_fired: '', pre_alerted: false });
+    // 把"当前序列"整个快照进计划：没存成预设的临时编排也能如约开跑（以前会悄悄回落到别的预设）
+    const p = editorPlan();
+    S.schedules.push({ id: newId(), plan_id: S.edit.planId || '', name: p.name, stages: p.stages.map((s) => ({ ...s })), mode: 'delay', trigger_at: Date.now() + min * 60000, time: '', weekdays: [], enabled: true, last_fired: '', pre_alerted: false });
     pushSchedules();
-    toast(`定好了：${min} 分钟后自动开始`);
+    toast(`定好了：${min} 分钟后自动开始「${p.name}」`);
   };
   $('scOnceGo').onclick = () => {
     const date = $('scOnceDate').value;
@@ -568,13 +604,13 @@ function bindSchedules() {
     const [Y, Mo, D] = date.split('-').map(Number);
     const ts = new Date(Y, Mo - 1, D, h, m, sec).getTime();
     if (!ts || ts <= Date.now()) { toast('这个时间已经过了'); return; }
-    S.schedules.push({ id: newId(), plan_id: $('scOncePlan').value, mode: 'once', trigger_at: ts, time: '', weekdays: [], enabled: true, last_fired: '', pre_alerted: false });
+    S.schedules.push({ id: newId(), plan_id: $('scOncePlan').value, name: '', stages: [], mode: 'once', trigger_at: ts, time: '', weekdays: [], enabled: true, last_fired: '', pre_alerted: false });
     pushSchedules();
     toast(`定好了：${Mo}/${D} ${pad2(h)}:${pad2(m)}:${pad2(sec)}`);
   };
   $('scRecGo').onclick = () => {
     if (!scState.days.length) { toast('选几个星期几'); return; }
-    S.schedules.push({ id: newId(), plan_id: $('scRecPlan').value, mode: 'recurring', trigger_at: 0, time: $('scRecTime').value || '09:30', weekdays: scState.days.slice().sort(), enabled: true, last_fired: '', pre_alerted: false });
+    S.schedules.push({ id: newId(), plan_id: $('scRecPlan').value, name: '', stages: [], mode: 'recurring', trigger_at: 0, time: $('scRecTime').value || '09:30', weekdays: scState.days.slice().sort(), enabled: true, last_fired: '', pre_alerted: false });
     pushSchedules();
     toast('每周计划已加上');
   };
@@ -600,6 +636,30 @@ function hidePanels() {
   $('presetPanel').classList.add('hide');
   $('settingsPanel').classList.add('hide');
   $('schedulePanel').classList.add('hide');
+  $('historyPanel').classList.add('hide');
+}
+
+// ———————————————————————— 记录（history.jsonl 的可视化，实际时长口径） ————————————————————————
+async function renderHistory() {
+  const box = $('histList');
+  box.textContent = '';
+  let rows = [];
+  try { rows = await Bridge.getHistory(30); } catch (e) {}
+  if (!rows.length) {
+    const p = document.createElement('div'); p.className = 'dim'; p.textContent = '还没有记录，跑完一轮就有了';
+    box.appendChild(p); return;
+  }
+  rows.slice().reverse().forEach((r) => {
+    const d = new Date(r.ended_ms || 0);
+    const row = document.createElement('div'); row.className = 'hist-row';
+    const when = document.createElement('span'); when.className = 'hist-when';
+    when.textContent = `${d.getMonth() + 1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    const name = document.createElement('span'); name.className = 'hist-name'; name.textContent = r.plan_name || '会话';
+    const len = document.createElement('span'); len.className = 'hist-len';
+    len.textContent = '专注 ' + fmtLong(r.work_secs || 0) + (r.completed === false ? ' · 中途结束' : '');
+    row.append(when, name, len);
+    box.appendChild(row);
+  });
 }
 function togglePanel(id) {
   const was = $(id).classList.contains('hide');
@@ -617,8 +677,10 @@ function bindSettings() {
   $('optSound').checked = s.sound_on;
   $('optSoundId').value = s.sound_id || 'chime';
   $('optVolume').value = Math.round((s.volume || 0.7) * 100);
-  $('optSit').value = s.sit_remind_min != null ? s.sit_remind_min : 10;
+  $('optSit').value = s.sit_remind_min != null ? s.sit_remind_min : 60;
   $('optStrong').checked = s.strong_remind !== false;
+  $('optPre').value = s.pre_alert_sec != null ? s.pre_alert_sec : 3;
+  $('optPet').checked = !s.pet_hidden;
   $('optAuto').checked = !!s.autostart;
   $('optLaunchMode').value = s.launch_mode || 'silent';
   const save = async () => {
@@ -631,6 +693,8 @@ function bindSettings() {
     s.volume = (parseInt($('optVolume').value) || 70) / 100;
     s.sit_remind_min = Math.max(0, parseInt($('optSit').value) || 0);
     s.strong_remind = $('optStrong').checked;
+    s.pre_alert_sec = Math.min(60, Math.max(0, parseInt($('optPre').value) || 0));
+    s.pet_hidden = !$('optPet').checked;
     s.autostart = $('optAuto').checked;
     s.launch_mode = $('optLaunchMode').value;
     $('optUnlockWrap').classList.toggle('hide', s.rest_policy !== 'forced');
@@ -638,7 +702,7 @@ function bindSettings() {
     render();
   };
   ['optAutoWB', 'optAutoBW', 'optFlexible', 'optForced', 'optUnlock', 'optSound',
-   'optSoundId', 'optVolume', 'optSit', 'optStrong', 'optAuto', 'optLaunchMode']
+   'optSoundId', 'optVolume', 'optSit', 'optStrong', 'optPre', 'optPet', 'optAuto', 'optLaunchMode']
     .forEach((id) => { $(id).onchange = save; });
   $('optSoundTry').onclick = () => { S.settings.sound_id = $('optSoundId').value; beep('switch'); };
 }
@@ -687,9 +751,13 @@ async function boot() {
   bindSchedules();
   renderPresets();
 
-  // 错过的定时计划（FE-33：关机时到点了没跑）
+  // 错过的定时计划（FE-33：关机时到点了没跑）——补跑要跑"错过的那一个"，不是编辑器里正好装着的
   if (b.missed && b.missed.length) {
-    toast(`错过了定时计划：${b.missed.join('、')}`, '现在补跑', () => mainAction());
+    const m = b.missed[0];
+    toast(`错过了定时计划：${b.missed.map((x) => x.name).join('、')}`, '现在补跑', () => {
+      if (S.view.status !== 'idle') { toast('正在会话中，先结束再补跑'); return; }
+      startPlan({ id: m.plan_id || 'missed', name: m.name || '补跑', stages: m.stages, builtin: false });
+    });
   }
 
   // Rust 侧滴答线程的推送：阶段切换/托盘操作/全局快捷键改了状态，界面立刻跟上
@@ -697,15 +765,20 @@ async function boot() {
     const { listen } = window.__TAURI__.event;
     listen('state', (e) => { S.view = e.payload; render(); });
     listen('sfx', (e) => beep(e.payload));
+    // 内核侧改了设置（比如"最后一段休息解锁"被用掉复位）→ 面板别继续显示旧状态骗人
+    listen('settings', (e) => { S.settings = e.payload; bindSettings(); });
   }
 
   // 默认把选中预设装进编辑器
   const sel = S.plans.find((p) => p.id === S.settings.selected_plan_id) || S.plans[0];
   if (sel) S.edit = { name: sel.name, planId: sel.id, stages: sel.stages.map((s) => ({ ...s })) };
 
-  // 上次没跑完的会话：问一声（FE-39）
+  // 上次没跑完的会话：问一声（FE-39）——「继续」要真的把计时开回来
   if (['paused', 'awaiting'].includes(S.view.status)) {
-    toast('上次的会话还没跑完', '继续', () => { render(); });
+    toast('上次的会话还没跑完', '继续', () => {
+      if (S.view.status === 'paused') cmd('resume');
+      else if (S.view.status === 'awaiting') cmd('start_next');
+    });
   } else if (S.view.status === 'idle') {
     S.view = { status: 'idle' };
   }
@@ -730,18 +803,16 @@ async function boot() {
     renderEditor();
   };
   $('btnPresets').onclick = (e) => { e.stopPropagation(); togglePanel('presetPanel'); renderPresets(); };
+  $('btnHistory').onclick = (e) => { e.stopPropagation(); togglePanel('historyPanel'); renderHistory(); };
   $('btnSettings').onclick = (e) => { e.stopPropagation(); togglePanel('settingsPanel'); };
   $('btnSchedules').onclick = (e) => { e.stopPropagation(); togglePanel('schedulePanel'); bindSchedules(); };
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.drop') && !e.target.closest('.tb-right')) hidePanels();
   });
   $('btnSaveAs').onclick = saveAsPreset;
-  $('btnAgain').onclick = async () => {
+  $('btnAgain').onclick = () => {
     const v = S.view;
-    try {
-      S.view = await Bridge.sessionStart({ id: v.plan_id, name: v.plan_name, stages: v.stages, builtin: false });
-      render();
-    } catch (e) { toast(String(e)); }
+    startPlan({ id: v.plan_id, name: v.plan_name, stages: v.stages, builtin: false });
   };
   $('btnNewSession').onclick = () => cmd('stop');
   $('btnToggleList').onclick = (e) => {

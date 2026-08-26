@@ -45,6 +45,7 @@ pub struct Settings {
     pub launch_mode: String,       // 自启形态："silent" | "window"
     pub sit_remind_min: u32,       // 久坐提醒间隔分钟，0=关（FE-41，仅非强制模式）
     pub strong_remind: bool,       // 休息结束未响应的强提醒（FE-23）
+    pub pet_hidden: bool,          // 桌宠小窗是否收起（托盘/设置可切）
 }
 
 impl Default for Settings {
@@ -63,8 +64,10 @@ impl Default for Settings {
             sound_id: "chime".into(),
             autostart: false,
             launch_mode: "silent".into(),
-            sit_remind_min: 10,
+            // 默认 60：必须大于常见工作段长（25/52 分钟），否则会在正常番茄中途催人起身
+            sit_remind_min: 60,
             strong_remind: true,
+            pet_hidden: false,
         }
     }
 }
@@ -89,6 +92,26 @@ pub struct Session {
     pub awaiting_since: u64, // 进入段间等待的时刻（强提醒 FE-23 的计时起点）
     pub logged: bool,        // 这次会话完成后是否已写进流水（防重复入账）
     pub activity: String,    // 陪伴活动（守烛idle/typing/reading/writing），流水记账用
+    pub acc_work_ms: u64,    // 实际专注毫秒（跳过/暂停/放弃都按真实经过时间算，流水入账用）
+    pub acc_rest_ms: u64,    // 实际休息毫秒
+    pub mark_ms: u64,        // 上次记账时刻；所有推进时间的路径都要过 credit()
+}
+
+/// 实际时长记账：把 [mark_ms, upto) 计入当前段的种类。
+/// 幂等（同一 now 重复调加零）；暂停/等待期间不会被调到，所以那些时间不入账。
+fn credit(s: &mut Session, upto: u64) {
+    if upto <= s.mark_ms {
+        return;
+    }
+    let add = upto - s.mark_ms;
+    if let Some(st) = s.stages.get(s.idx) {
+        if st.kind == "work" {
+            s.acc_work_ms += add;
+        } else {
+            s.acc_rest_ms += add;
+        }
+    }
+    s.mark_ms = upto;
 }
 
 impl Session {
@@ -106,6 +129,8 @@ impl Session {
 /// 惰性投影：把会话推演到 now 时刻。可能连续吃掉多个自动衔接的阶段。
 pub fn project(s: &mut Session, cfg: &Settings, now: u64) {
     while s.status == "running" && now >= s.end_ms {
+        let end = s.end_ms;
+        credit(s, end);
         if s.idx + 1 >= s.stages.len() {
             s.status = "done".into();
             return;
@@ -128,6 +153,9 @@ pub fn project(s: &mut Session, cfg: &Settings, now: u64) {
             s.awaiting_since = s.end_ms; // 等待从"那一段真正结束的时刻"算起（惰性投影也准确）
             return;
         }
+    }
+    if s.status == "running" {
+        credit(s, now);
     }
 }
 
@@ -191,6 +219,7 @@ pub fn apply(
             }
             s.end_ms = now + s.remain_ms;
             s.status = "running".into();
+            s.mark_ms = now; // 暂停期间不入账
         }
         "skip" | "prev" | "reset_stage" => {
             if !s.is_active() {
@@ -205,13 +234,10 @@ pub fn apply(
             match cmd {
                 "skip" => {
                     if s.status == "awaiting" || s.idx + 1 < s.stages.len() {
-                        if s.status != "awaiting" {
-                            s.idx += 1;
-                        } else {
-                            s.idx += 1;
-                        }
+                        s.idx += 1;
                         s.end_ms = now + s.stages[s.idx].secs * 1000;
                         s.status = "running".into();
+                        s.mark_ms = now;
                     } else {
                         s.status = "done".into();
                     }
@@ -220,15 +246,14 @@ pub fn apply(
                     if s.status == "awaiting" {
                         // 停在段间：回到刚走完那一段的开头
                         s.end_ms = now + s.stages[s.idx].secs * 1000;
-                        s.status = "running".into();
                     } else if s.idx > 0 {
                         s.idx -= 1;
                         s.end_ms = now + s.stages[s.idx].secs * 1000;
-                        s.status = "running".into();
                     } else {
                         s.end_ms = now + s.stages[0].secs * 1000;
-                        s.status = "running".into();
                     }
+                    s.status = "running".into();
+                    s.mark_ms = now;
                 }
                 "reset_stage" => {
                     let dur = s.stages[s.idx].secs * 1000;
@@ -238,6 +263,7 @@ pub fn apply(
                         _ => {
                             s.end_ms = now + dur;
                             s.status = "running".into();
+                            s.mark_ms = now;
                         }
                     }
                 }
@@ -251,6 +277,7 @@ pub fn apply(
             s.idx += 1;
             s.end_ms = now + s.stages[s.idx].secs * 1000;
             s.status = "running".into();
+            s.mark_ms = now;
         }
         "stop" => {
             *s = Session::idle();
@@ -281,6 +308,9 @@ pub fn start_session(plan: &Plan, now: u64) -> Result<Session, String> {
         awaiting_since: 0,
         logged: false,
         activity: String::new(),
+        acc_work_ms: 0,
+        acc_rest_ms: 0,
+        mark_ms: now,
     })
 }
 
@@ -309,12 +339,16 @@ pub fn builtin_plans() -> Vec<Plan> {
         }
         v
     };
-    vec![
+    #[allow(unused_mut)]
+    let mut v = vec![
         Plan { id: "classic".into(), name: "经典番茄".into(), stages: classic, builtin: true },
         Plan { id: "p5217".into(), name: "52 / 17".into(), stages: seq(&[("work", 52 * 60), ("break", 17 * 60)]), builtin: true },
         Plan { id: "p9020".into(), name: "90 / 20 深工作".into(), stages: seq(&[("work", 90 * 60), ("break", 20 * 60)]), builtin: true },
-        Plan { id: "sprint5".into(), name: "5 秒冲刺（测试）".into(), stages: seq(&[("work", 5), ("break", 5), ("work", 5)]), builtin: true },
-    ]
+    ];
+    // 冲刺预设只进 debug 构建：正式包用户不该看到测试用序列
+    #[cfg(debug_assertions)]
+    v.push(Plan { id: "sprint5".into(), name: "5 秒冲刺（测试）".into(), stages: seq(&[("work", 5), ("break", 5), ("work", 5)]), builtin: true });
+    v
 }
 
 /// 给前端的快照：附上派生量，前端不用自己算
@@ -439,6 +473,35 @@ mod tests {
         let s2 = start_session(&p3, 0).unwrap();
         let r2 = restore(s2, &cfg, 95_000);
         assert_eq!(r2.status, "awaiting");
+    }
+
+    #[test]
+    fn actual_time_accounting() {
+        // 实际时长记账：暂停不算、跳过只算真跑过的、放弃前的部分也在账上
+        let cfg = Settings::default();
+        let p = plan(&[("work", 60), ("break", 30), ("work", 60)]);
+        let mut s = start_session(&p, 0).unwrap();
+        apply(&mut s, &cfg, "pause", 20_000).unwrap(); // 工作 20s
+        assert_eq!(s.acc_work_ms, 20_000);
+        apply(&mut s, &cfg, "resume", 100_000).unwrap(); // 暂停 80s 不入账
+        project(&mut s, &cfg, 110_000); // 再工作 10s
+        assert_eq!(s.acc_work_ms, 30_000);
+        apply(&mut s, &cfg, "skip", 110_000).unwrap(); // 工作还剩 30s 直接跳进休息
+        assert_eq!(s.acc_work_ms, 30_000);
+        project(&mut s, &cfg, 125_000); // 休息 15s
+        assert_eq!(s.acc_rest_ms, 15_000);
+        apply(&mut s, &cfg, "skip", 125_000).unwrap(); // 跳进最后一段工作
+        project(&mut s, &cfg, 130_000); // 工作 5s 后放弃
+        assert_eq!(s.acc_work_ms, 35_000);
+        assert_eq!(s.acc_rest_ms, 15_000);
+        // 整段自然跑完的账也对：睡一觉回来一口气投影
+        let mut s2 = start_session(&plan(&[("work", 60), ("break", 30)]), 0).unwrap();
+        let mut cfg2 = Settings::default();
+        cfg2.auto_break_to_work = true;
+        project(&mut s2, &cfg2, 999_000);
+        assert_eq!(s2.status, "done");
+        assert_eq!(s2.acc_work_ms, 60_000);
+        assert_eq!(s2.acc_rest_ms, 30_000);
     }
 
     #[test]

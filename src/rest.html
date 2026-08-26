@@ -24,6 +24,12 @@
     border:1px solid #3d4a3d; border-radius:12px; background:transparent; color:#a9cbbc;
   }
   button:hover{ border-color:#0CA678; color:#0CA678 }
+  #urgent{
+    margin-top:28px; font-size:.8rem; color:#4d4336; cursor:pointer; user-select:none;
+    padding:6px 14px; border:1px dashed #3a3229; border-radius:8px; display:inline-block;
+  }
+  #urgent:hover{ color:#7a6b55; border-color:#5a4d3c }
+  #urgent.holding{ color:#c98a4a; border-color:#c98a4a }
   @media (prefers-reduced-motion: reduce){ *{ animation:none!important } }
 </style>
 </head>
@@ -34,6 +40,7 @@
   <div id="count" class="count">--:--</div>
   <div class="tip">强制休息中，休息结束会自动放行</div>
   <button id="btnPause">‖ 暂停</button>
+  <div id="urgent" title="真有急事再用：会结束整个会话">有急事？按住 5 秒结束本次会话</div>
 </div>
 <script>
 (function () {
@@ -102,6 +109,29 @@
   setInterval(paint, 250);
   refresh();
   window.addEventListener('blur', () => { try { inv('rest_focus'); } catch (e) {} });
+
+  // 紧急出口：按住 5 秒结束整个会话（走内核本就未锁的 stop 通道；长按门槛保证不是手滑）。
+  // 没有这个的话，遮罩期间主窗够不到、托盘被盖住，真有急事只能杀进程。
+  const urgent = document.getElementById('urgent');
+  const URGENT_TXT = urgent.textContent;
+  let holdTimer = 0, holdLeft = 0;
+  const holdStop = () => {
+    clearInterval(holdTimer); holdTimer = 0;
+    urgent.classList.remove('holding');
+    urgent.textContent = URGENT_TXT;
+  };
+  urgent.addEventListener('mousedown', () => {
+    holdLeft = 5;
+    urgent.classList.add('holding');
+    urgent.textContent = '继续按住 ' + holdLeft + ' 秒…';
+    holdTimer = setInterval(async () => {
+      holdLeft -= 1;
+      if (holdLeft > 0) { urgent.textContent = '继续按住 ' + holdLeft + ' 秒…'; return; }
+      holdStop();
+      try { await inv('session_cmd', { cmd: 'stop' }); } catch (e) {}
+    }, 1000);
+  });
+  ['mouseup', 'mouseleave'].forEach((ev) => urgent.addEventListener(ev, holdStop));
 })();
 </script>
 </body>

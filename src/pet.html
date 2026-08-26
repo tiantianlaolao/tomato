@@ -82,8 +82,10 @@
       else if (st === 'done' && ['work','restS','restL','pause','awaiting','summon'].includes(phase)) enter('wave');
       else if (st === 'idle' && ['work','restS','restL','pause','awaiting'].includes(phase)) enter('blow');
       else if (st === 'running' && !['summon','wave','blow','leave'].includes(phase)) {
+        // 与 companion.js 同写法：phase !== want。之前只比"是不是工作"，
+        // 从暂停恢复到休息段时两边都不是 work → 永远卡在 pause 相，看起来像没恢复
         const want = stageKind(v) === 'break' ? restPhaseFor(v) : 'work';
-        if ((want === 'work') !== (phase === 'work')) enter(want);
+        if (phase !== want) enter(want);
       }
       else if (st === 'paused' && phase !== 'pause' && !['wave','blow','leave'].includes(phase)) enter('pause');
       else if (st === 'awaiting' && phase !== 'awaiting' && !['wave','blow','leave'].includes(phase)) enter('awaiting');
@@ -116,10 +118,23 @@
   }
   function spawn(p) { if (parts.length < 60) parts.push(p); }
 
+  // 空闲/结束时整窗点击穿透：不然一块 260×250 的透明矩形永远悬在桌面右下角吞点击、
+  // mousedown 还会把窗口拖走 —— 用户以为在点底下的东西。会话期间恢复可交互（拖动/暂停/回主窗）。
+  let ctLast = null;
+  function syncClickThrough() {
+    if (!T) return;
+    const ghost = (phase === 'idle' || phase === 'done');
+    if (ghost === ctLast) return;
+    ctLast = ghost;
+    try { T.window.getCurrentWindow().setIgnoreCursorEvents(ghost); } catch (e) {}
+  }
+
   function frame(ts) {
     requestAnimationFrame(frame);
     const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts;
     t += dt; phaseT += dt; clipT += dt;
+    syncClickThrough();
+    syncOps();
     if (fadeT < 1) fadeT = Math.min(1, fadeT + dt / 0.3);
 
     if (phase === 'summon' && phaseT > 2.3) enter(stageKind(view) === 'break' ? restPhaseFor(view) : 'work');
@@ -289,12 +304,24 @@
   requestAnimationFrame(frame);
 
   // —— 交互 ——
+  const bPause = document.getElementById('bPause');
+  // ‖/▶ 按钮跟着状态走（每帧同步，有变化才写 DOM）
+  let opsLast = '';
+  function syncOps() {
+    const paused = view.status === 'paused', waiting = view.status === 'awaiting';
+    const txt = paused || waiting ? '▶' : '‖';
+    if (txt !== opsLast) {
+      opsLast = txt;
+      bPause.textContent = txt;
+      bPause.title = paused ? '继续' : (waiting ? '开始下一段' : '暂停');
+    }
+  }
   document.getElementById('bMain').onclick = () => { if (inv) inv('open_main'); };
-  document.getElementById('bPause').onclick = async () => {
+  bPause.onclick = async () => {
     if (!inv) return;
     try {
       const cmd = view.status === 'paused' ? 'resume' : (view.status === 'awaiting' ? 'start_next' : 'pause');
-      view = await inv('session_cmd', { cmd });
+      onView(await inv('session_cmd', { cmd })); // 过 onView：演出状态机立即跟上，不等广播
     } catch (e) {}
   };
   // 拖动：按住画布拖走（记住位置）
@@ -305,10 +332,19 @@
   if (T) {
     const win = T.window.getCurrentWindow();
     win.onMoved((p) => { try { localStorage.setItem('tm_pet_pos', JSON.stringify(p.payload)); } catch (e) {} });
-    try {
-      const saved = JSON.parse(localStorage.getItem('tm_pet_pos') || 'null');
-      if (saved) win.setPosition(new T.window.PhysicalPosition(saved.x, saved.y));
-    } catch (e) {}
+    (async () => {
+      try {
+        const saved = JSON.parse(localStorage.getItem('tm_pet_pos') || 'null');
+        if (!saved) return;
+        // 换显示器/改分辨率后旧坐标可能在屏幕外 —— 落不进任何一块屏就别恢复，用 Rust 给的默认右下角
+        const mons = await T.window.availableMonitors();
+        const ok = mons.some((m) =>
+          saved.x > m.position.x - 200 && saved.x < m.position.x + m.size.width - 60 &&
+          saved.y > m.position.y - 40 && saved.y < m.position.y + m.size.height - 60);
+        if (ok) win.setPosition(new T.window.PhysicalPosition(saved.x, saved.y));
+        else localStorage.removeItem('tm_pet_pos');
+      } catch (e) {}
+    })();
   }
 
   // —— 数据 ——

@@ -58,6 +58,13 @@ button:disabled{opacity:.4; cursor:default}
 .opt-group{border-top:1px solid var(--line); margin-top:8px; padding-top:8px}
 .opt-head{font-size:.8rem; color:var(--soft); margin-bottom:2px}
 .drop-actions{border-top:1px solid var(--line); margin-top:8px; padding-top:10px}
+.hist-row{display:flex; align-items:baseline; gap:8px; padding:6px 6px; border-radius:8px; font-size:.88rem}
+.hist-row:hover{background:var(--bg)}
+.hist-when{color:var(--soft); font-variant-numeric:tabular-nums; flex:none}
+.hist-name{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.hist-len{color:var(--soft); flex:none}
+.qrow input.name-input{font:inherit; width:100%; flex:1; padding:8px 10px; border:1px solid var(--line); border-radius:8px;
+  background:var(--bg); color:inherit}
 .preset-row{display:flex; align-items:center; gap:8px; padding:7px 6px; border-radius:8px; cursor:pointer}
 .preset-row:hover{background:var(--bg)}
 .preset-row.on{outline:2px solid var(--accent)}
