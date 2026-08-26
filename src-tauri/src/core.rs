@@ -17,6 +17,11 @@ pub const MAX_STAGE_SEC: u64 = 4 * 3600;
 pub struct Stage {
     pub kind: String, // "work" | "break"
     pub secs: u64,
+    /// 这一段约定要干的事（守烛idle/typing/reading/writing），换段时水豚照做。
+    /// 只对 work 段有意义；休息段演什么由陪伴层自己挑。
+    /// 空 = 老序列没标过，沿用当前活动 —— 字段级 default 保证老 plans.json 照常读得进来。
+    #[serde(default)]
+    pub activity: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -114,6 +119,18 @@ fn credit(s: &mut Session, upto: u64) {
     s.mark_ms = upto;
 }
 
+/// 换段时把这一段约定的活动接过来。
+/// ⚠️ 只在 idx 真的动了之后调 —— 要是每次投影都调，用户在舞台上临时换的活动
+/// 下一秒就被改回去，表现成"活动按钮点了没反应"。
+/// 段上没标（空）就保持当前活动不变：老序列、以及"这一段我懒得标"都走这条。
+fn adopt_activity(s: &mut Session) {
+    if let Some(st) = s.stages.get(s.idx) {
+        if st.kind == "work" && !st.activity.is_empty() {
+            s.activity = st.activity.clone();
+        }
+    }
+}
+
 impl Session {
     pub fn idle() -> Self {
         Session { status: "idle".into(), ..Default::default() }
@@ -148,6 +165,7 @@ pub fn project(s: &mut Session, cfg: &Settings, now: u64) {
         if auto {
             s.idx += 1;
             s.end_ms += s.stages[s.idx].secs * 1000;
+            adopt_activity(s);
         } else {
             s.status = "awaiting".into();
             s.awaiting_since = s.end_ms; // 等待从"那一段真正结束的时刻"算起（惰性投影也准确）
@@ -238,6 +256,7 @@ pub fn apply(
                         s.end_ms = now + s.stages[s.idx].secs * 1000;
                         s.status = "running".into();
                         s.mark_ms = now;
+                        adopt_activity(s);
                     } else {
                         s.status = "done".into();
                     }
@@ -254,6 +273,7 @@ pub fn apply(
                     }
                     s.status = "running".into();
                     s.mark_ms = now;
+                    adopt_activity(s);
                 }
                 "reset_stage" => {
                     let dur = s.stages[s.idx].secs * 1000;
@@ -278,6 +298,7 @@ pub fn apply(
             s.end_ms = now + s.stages[s.idx].secs * 1000;
             s.status = "running".into();
             s.mark_ms = now;
+            adopt_activity(s);
         }
         "stop" => {
             *s = Session::idle();
@@ -296,7 +317,7 @@ pub fn start_session(plan: &Plan, now: u64) -> Result<Session, String> {
             return Err("阶段时长要在 5 秒到 4 小时之间".into());
         }
     }
-    Ok(Session {
+    let mut s = Session {
         status: "running".into(),
         plan_id: plan.id.clone(),
         plan_name: plan.name.clone(),
@@ -311,7 +332,9 @@ pub fn start_session(plan: &Plan, now: u64) -> Result<Session, String> {
         acc_work_ms: 0,
         acc_rest_ms: 0,
         mark_ms: now,
-    })
+    };
+    adopt_activity(&mut s); // 第一段标了活动就直接采用；没标留空，由前端把"上次用的那个"推进来
+    Ok(s)
 }
 
 /// 重启恢复（FE-39）：上次退出时若在跑，按"退出即暂停"折算 —— 退出后流逝的时间不算专注。
@@ -329,13 +352,14 @@ pub fn restore(mut s: Session, cfg: &Settings, saved_at: u64) -> Session {
 /// 内置预设（FE-17）。plans.json 里没有时补种；builtin 只读由前端约束。
 pub fn builtin_plans() -> Vec<Plan> {
     fn seq(pairs: &[(&str, u64)]) -> Vec<Stage> {
-        pairs.iter().map(|(k, s)| Stage { kind: (*k).into(), secs: *s }).collect()
+        pairs.iter().map(|(k, s)| Stage { kind: (*k).into(), secs: *s, activity: String::new() }).collect()
     }
     let classic = {
         let mut v = Vec::new();
         for i in 0..4 {
-            v.push(Stage { kind: "work".into(), secs: 25 * 60 });
-            v.push(Stage { kind: "break".into(), secs: if i == 3 { 15 * 60 } else { 5 * 60 } });
+            // 内置预设不预设活动（留空=沿用用户上次选的），别替用户做决定
+            v.push(Stage { kind: "work".into(), secs: 25 * 60, activity: String::new() });
+            v.push(Stage { kind: "break".into(), secs: if i == 3 { 15 * 60 } else { 5 * 60 }, activity: String::new() });
         }
         v
     };
@@ -379,9 +403,50 @@ mod tests {
         Plan {
             id: "t".into(),
             name: "测试".into(),
-            stages: pairs.iter().map(|(k, s)| Stage { kind: (*k).into(), secs: *s }).collect(),
+            stages: pairs.iter().map(|(k, s)| Stage { kind: (*k).into(), secs: *s, activity: String::new() }).collect(),
             builtin: false,
         }
+    }
+
+    /// 活动跟着序列走：换段接过那一段约定的；没标的段不动；
+    /// 而且投影本身不能把用户临时改的活动改回去（这条是这套机制最容易写错的地方）。
+    #[test]
+    fn activity_follows_stage() {
+        let mut cfg = Settings::default();
+        cfg.auto_break_to_work = true;
+        let mut p = plan(&[("work", 60), ("break", 30), ("work", 60), ("work", 60)]);
+        p.stages[0].activity = "reading".into();
+        p.stages[2].activity = "typing".into();
+        // 第 4 段故意不标 → 保持上一段的活动
+
+        let mut s = start_session(&p, 0).unwrap();
+        assert_eq!(s.activity, "reading"); // 开场就接过第一段
+
+        // 用户在舞台上临时改成写字：随后的投影（没换段）不许把它改回 reading
+        s.activity = "writing".into();
+        project(&mut s, &cfg, 30_000);
+        assert_eq!(s.idx, 0);
+        assert_eq!(s.activity, "writing");
+
+        project(&mut s, &cfg, 95_000); // 吃掉休息段，进到第 3 段
+        assert_eq!(s.idx, 2);
+        assert_eq!(s.activity, "typing");
+
+        apply(&mut s, &cfg, "skip", 95_000).unwrap(); // 第 4 段没标 → 沿用
+        assert_eq!(s.idx, 3);
+        assert_eq!(s.activity, "typing");
+
+        apply(&mut s, &cfg, "prev", 95_000).unwrap(); // 回第 3 段，重新接过
+        assert_eq!(s.idx, 2);
+        assert_eq!(s.activity, "typing");
+    }
+
+    /// 老 plans.json 没有 activity 字段，必须照常读得进来（字段级 serde default）
+    #[test]
+    fn old_stage_json_without_activity_still_loads() {
+        let st: Stage = serde_json::from_str(r#"{"kind":"work","secs":1500}"#).unwrap();
+        assert_eq!(st.secs, 1500);
+        assert_eq!(st.activity, "");
     }
 
     #[test]

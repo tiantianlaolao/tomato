@@ -121,12 +121,8 @@
     <canvas id="viz"></canvas>
     <div id="clock" class="clock" style="display:none">25:00</div>
     <div id="clockSub" class="clock-sub" style="display:none"></div>
-    <div id="actRow" class="act-row">
-      <button data-a="idle" class="on" title="守烛">🕯️ 守烛</button>
-      <button data-a="typing" title="敲键盘">⌨️ 键盘</button>
-      <button data-a="reading" title="读书">📖 读书</button>
-      <button data-a="writing" title="写字">✏️ 写字</button>
-    </div>
+    <!-- 活动条由 app.js 的 ACTS 渲染（唯一来源，将来加付费活动只动那一处） -->
+    <div id="actRow" class="act-row"></div>
     <div id="restMask" class="rest-mask hide" style="display:none">
       <div class="rest-mask-inner">
         <div class="rest-icon">☕</div>

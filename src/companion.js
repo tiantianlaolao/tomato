@@ -313,7 +313,11 @@ window.Companion = (function () {
     init(canvas) {
       cv = canvas; ctx = cv.getContext('2d');
       resize();
-      window.addEventListener('resize', resize);
+      // ⚠️ 只听 window.resize 不够：收起/展开右侧「序列」栏（#layout.collapsed）改的是
+      // #vizPane 的宽，窗口没变，resize 事件不发 —— 画布的 CSS 尺寸跟着变了、位图尺寸还是旧的，
+      // 浏览器就把旧位图硬拉进新盒子，水豚被横向拉伸。ResizeObserver 盯的是元素自己的盒子。
+      if (window.ResizeObserver) new ResizeObserver(resize).observe(cv);
+      window.addEventListener('resize', resize);  // 拖到另一块屏 dpr 变了、盒子没变，这条才管用
       requestAnimationFrame(frame);
     },
     set(view) { onView(view); },

@@ -779,13 +779,48 @@ async fn get_history(app: AppHandle, limit: usize) -> Vec<serde_json::Value> {
     v
 }
 
-/// 桌宠窗上点「⤢」回主窗口（编排/跳过/结束都在那边）
+/// 回主窗口（编排/跳过/结束都在那边）。桌宠右键菜单的「打开主窗口」走这条。
 #[tauri::command]
 async fn open_main(app: AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.set_focus();
     }
+}
+
+/// 桌宠右键菜单（系统原生弹出菜单）。
+/// 为什么不是 HTML 菜单：桌宠窗只有 260×250，HTML 画的菜单会被窗口边界裁掉，
+/// 而系统菜单不受窗口尺寸限制，Mac 上观感也是对的。
+/// 菜单项 id 与托盘菜单同名 —— muda 的菜单事件是全局广播（tray 的 on_menu_event
+/// 挂在 global_event_listeners 上），托盘那份处理器会照单收下，这里不用再挂一份。
+/// 每次右键现搭一份：标签/可用性按当下状态算，永远不会显示成过期的「暂停」。
+#[tauri::command]
+async fn pet_menu(app: AppHandle) {
+    // 锁内只取快照。建菜单的 MenuItem::with_id 是「同步派发到主线程并阻塞等结果」，
+    // 持着 App 锁去等主线程 = 文件头那条死锁纪律，必须放锁之后再建。
+    let (toggle_txt, toggle_en, skip_en) = {
+        let state: State<Mutex<App>> = app.state();
+        let a = state.lock().unwrap();
+        let txt = match a.session.status.as_str() {
+            "paused" => "继续", "awaiting" => "开始下一段", _ => "暂停",
+        };
+        (txt.to_string(),
+         a.session.status != "idle" && a.session.status != "done",
+         matches!(a.session.status.as_str(), "running" | "paused" | "awaiting"))
+    };
+    let Some(pet) = app.get_webview_window("pet") else { return };
+    let build = || -> tauri::Result<Menu<tauri::Wry>> {
+        let toggle = MenuItem::with_id(&app, "toggle", &toggle_txt, toggle_en, None::<&str>)?;
+        let skip = MenuItem::with_id(&app, "skip", "跳过这一段", skip_en, None::<&str>)?;
+        let show = MenuItem::with_id(&app, "show", "打开主窗口", true, None::<&str>)?;
+        let settings = MenuItem::with_id(&app, "settings", "设置…", true, None::<&str>)?;
+        let hide = MenuItem::with_id(&app, "pet", "隐藏桌宠", true, None::<&str>)?;
+        Menu::with_items(&app, &[
+            &toggle, &skip, &PredefinedMenuItem::separator(&app)?,
+            &show, &settings, &hide,
+        ])
+    };
+    if let Ok(menu) = build() { let _ = pet.popup_menu(&menu); }
 }
 
 /// 陪伴活动（守烛/键盘/读书/写字）：随时可换，落进会话并入流水。
@@ -893,6 +928,13 @@ pub fn run() {
                     "show" => {
                         if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); }
                     }
+                    // 桌宠右键菜单里的「设置…」：主窗弹出来还不够，得直接把设置面板展开
+                    "settings" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show(); let _ = w.set_focus();
+                            let _ = w.emit("open_settings", ());
+                        }
+                    }
                     "pet" => {
                         // 先在锁内翻状态落盘，放锁后才碰窗口/菜单（线程纪律）
                         let hidden = {
@@ -957,7 +999,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             boot, get_state, session_start, session_cmd,
-            save_settings, save_plans, save_schedules, get_history, rest_focus, set_activity, open_main
+            save_settings, save_plans, save_schedules, get_history, rest_focus, set_activity,
+            open_main, pet_menu
         ])
         .run(tauri::generate_context!())
         .expect("番茄时钟启动失败")

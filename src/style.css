@@ -139,6 +139,19 @@ button:disabled{opacity:.4; cursor:default}
 .act-row button.on{background:#e8590c; color:#fff}
 .act-row.hide2{display:none}
 
+/* 序列卡片上的活动标：这一段约定要干什么。点开是个共用的小浮层 */
+.act-chip{width:26px; height:26px; flex:none; padding:0; line-height:1; font-size:.95rem;
+  border:1px solid var(--line); border-radius:8px; background:transparent; cursor:pointer;
+  transition:border-color .15s, background .15s}
+.act-chip:hover:not(:disabled){border-color:var(--work); background:color-mix(in srgb, var(--work) 12%, transparent)}
+.act-chip:disabled{cursor:default; opacity:.75}
+.act-pick{position:fixed; z-index:40; display:flex; flex-direction:column; gap:2px; padding:5px;
+  background:var(--surface); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow)}
+.act-pick button{text-align:left; white-space:nowrap; padding:5px 12px; font-size:.82rem;
+  border:none; border-radius:7px; background:transparent; color:inherit; cursor:pointer}
+.act-pick button:hover{background:color-mix(in srgb, var(--work) 14%, transparent)}
+.act-pick button.on{background:var(--work); color:#fff}
+
 /* —— 右：序列列表 —— */
 #listPane{flex:45; border-left:1px solid var(--line); display:flex; flex-direction:column; min-width:0}
 #stageList{flex:1; overflow-y:auto; padding:14px 14px 4px}

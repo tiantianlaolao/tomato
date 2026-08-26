@@ -27,9 +27,49 @@ const S = {
   donePlayed: false, doneDelay: false, // 完成态先让道别动画演完再弹汇总
 };
 
-// 把最新快照喂给舞台（activity 以前端选择为准）
+// 陪伴活动清单 —— 唯一来源。舞台上的活动条、序列卡片上的活动标都从这里渲染，
+// 以后要卖活动（新姿势/新场景）：这里加一条 + 补 assets/capy/v_<id>.webp，
+// 加个 paid:true 由这一处统一判许可。别再把清单散回 HTML 里去。
+const ACTS = [
+  { id: 'idle',    icon: '🕯️', label: '守烛' },
+  { id: 'typing',  icon: '⌨️', label: '键盘' },
+  { id: 'reading', icon: '📖', label: '读书' },
+  { id: 'writing', icon: '✏️', label: '写字' },
+];
+const actOf = (id) => ACTS.find((a) => a.id === id) || ACTS[0];
+
+function syncActBtns() {
+  document.querySelectorAll('#actRow button')
+    .forEach((x) => x.classList.toggle('on', x.dataset.a === S.activity));
+}
+// 舞台上的活动条：临时改「当前这一段」演什么，不动序列里的约定 ——
+// 下一段开始时又按那一段卡片上标的来。
+function renderActRow() {
+  const row = $('actRow');
+  row.textContent = '';
+  ACTS.forEach((a) => {
+    const b = document.createElement('button');
+    b.dataset.a = a.id; b.title = a.label; b.textContent = `${a.icon} ${a.label}`;
+    b.onclick = (e) => {
+      e.stopPropagation();            // 别触发舞台的暂停热区
+      S.activity = a.id;
+      localStorage.setItem('tm_activity', S.activity);
+      S.view.activity = S.activity;   // 本地先生效：不这么写会被 feedCompanion 用内核里的旧值盖回去
+      if (Bridge.setActivity) Bridge.setActivity(S.activity);
+      feedCompanion();
+    };
+    row.appendChild(b);
+  });
+  syncActBtns();
+}
+
+// 把最新快照喂给舞台。
+// 活动的真相源是内核 —— 换段时它会接过那一段约定的活动（core.rs 的 adopt_activity），
+// 所以这里是"内核 → S.activity"，不是反过来；只有空闲态内核没有值才用本地上次的兜底。
 function feedCompanion() {
-  S.view.activity = S.activity;
+  if (S.view.activity) S.activity = S.view.activity;
+  else S.view.activity = S.activity;
+  syncActBtns();
   Companion.set(S.view);
 }
 
@@ -78,7 +118,8 @@ function undo() {
 }
 function addStage(kind) {
   pushUndo();
-  S.edit.stages.push({ kind, secs: kind === 'work' ? 25 * 60 : 5 * 60 });
+  S.edit.stages.push({ kind, secs: kind === 'work' ? 25 * 60 : 5 * 60,
+    activity: kind === 'work' ? S.activity : '' });
   S.edit.planId = '';
   renderEditor(S.edit.stages.length - 1);
 }
@@ -123,6 +164,36 @@ function setSecs(i, secs, inputEl) {
   renderEditor();
 }
 
+// 卡片上的活动选择：一个共用的小浮层，贴着被点的那个标弹出来
+// （卡片行本身很挤，塞不下四个按钮；下拉框在这套外观里也太生硬）
+let actPickEl = null;
+function closeActPicker() { if (actPickEl) { actPickEl.remove(); actPickEl = null; } }
+function openActPicker(anchor, i) {
+  closeActPicker();
+  const box = document.createElement('div');
+  box.className = 'act-pick';
+  ACTS.forEach((a) => {
+    const b = document.createElement('button');
+    b.textContent = `${a.icon} ${a.label}`;
+    if (a.id === S.edit.stages[i].activity) b.className = 'on';
+    b.onclick = (e) => {
+      e.stopPropagation();
+      pushUndo();
+      S.edit.stages[i].activity = a.id;
+      S.edit.planId = ''; // 改过就不再是那个预设了（和改时长一个待遇）
+      closeActPicker();
+      renderEditor();
+    };
+    box.appendChild(b);
+  });
+  document.body.appendChild(box);
+  const r = anchor.getBoundingClientRect();  // 顶到窗口右/下边就往回收
+  box.style.left = Math.max(8, Math.min(r.left, innerWidth - box.offsetWidth - 8)) + 'px';
+  box.style.top = (r.bottom + 6 + box.offsetHeight > innerHeight
+    ? r.top - box.offsetHeight - 6 : r.bottom + 6) + 'px';
+  actPickEl = box;
+}
+
 function stageCard(st, i, running) {
   const card = document.createElement('div');
   card.className = 'scard' + (st.kind === 'break' ? ' break' : '');
@@ -131,6 +202,21 @@ function stageCard(st, i, running) {
   const ico = document.createElement('span'); ico.className = 'ico'; ico.textContent = st.kind === 'work' ? '⏱' : '☕';
   const name = document.createElement('span'); name.className = 'sname'; name.textContent = st.kind === 'work' ? '工作' : '休息';
   card.append(bar, num, ico, name);
+
+  // 活动标：这一段约定要干什么。工作段才有（休息段演什么由陪伴层自己挑）
+  if (st.kind === 'work') {
+    const chip = document.createElement('button');
+    chip.className = 'act-chip';
+    const paint = () => {
+      const a = actOf(st.activity);
+      chip.textContent = a.icon;
+      chip.title = running ? `这一段：${a.label}` : `这一段做什么：${a.label}（点一下换）`;
+    };
+    paint();
+    if (running) chip.disabled = true;
+    else chip.onclick = (e) => { e.stopPropagation(); openActPicker(chip, i); };
+    card.appendChild(chip);
+  }
 
   if (running) {
     const v = S.view;
@@ -218,6 +304,9 @@ function stageCard(st, i, running) {
 
 function renderEditor(focusIdx) {
   const list = $('stageList');
+  // 老序列（和内置预设）没有 activity 字段：补成"上次用的那个"，
+  // 卡片上永远显示一个具体的活动，不给用户留一个"空着是什么意思"的坑
+  S.edit.stages.forEach((st) => { if (st.kind === 'work' && !st.activity) st.activity = S.activity; });
   list.textContent = '';
   S.edit.stages.forEach((st, i) => list.appendChild(stageCard(st, i, false)));
   $('emptyHint').classList.toggle('hide', S.edit.stages.length > 0);
@@ -334,8 +423,8 @@ function quickGen() {
   pushUndo();
   const stages = [];
   for (let i = 1; i <= loops; i++) {
-    stages.push({ kind: 'work', secs: w });
-    stages.push({ kind: 'break', secs: useLong && i % longN === 0 ? longM : b });
+    stages.push({ kind: 'work', secs: w, activity: S.activity });
+    stages.push({ kind: 'break', secs: useLong && i % longN === 0 ? longM : b, activity: '' });
   }
   S.edit = { name: `${w / 60}/${b / 60} × ${loops}`, planId: '', stages };
   $('quickModal').classList.add('hide');
@@ -461,7 +550,10 @@ function renderDone() {
 async function startPlan(plan) {
   try {
     S.view = await Bridge.sessionStart(plan);
-    if (Bridge.setActivity) Bridge.setActivity(S.activity); // 会话开场就把活动记进内核
+    // 活动的真相在内核：第一段标了什么它已经接过去了（core.rs 的 adopt_activity）。
+    // 只有序列没标（老预设）才轮到前端把"上次用的那个"推进去 —— 反过来无条件推
+    // 会把用户在卡片上标的那个当场盖掉。
+    if (!S.view.activity && Bridge.setActivity) Bridge.setActivity(S.activity);
     render();
     if (Bridge.onTauri) {
       setTimeout(() => { try { window.__TAURI__.window.getCurrentWindow().hide(); } catch (e) {} }, 600);
@@ -733,20 +825,7 @@ async function boot() {
   S.view = b.view;
   S.schedules = b.schedules || [];
   Companion.init($('viz'));
-  // 活动选择：你在做什么，它就做什么（记住上次；写进内核给流水记账）
-  const syncActBtns = () => document.querySelectorAll('#actRow button')
-    .forEach((x) => x.classList.toggle('on', x.dataset.a === S.activity));
-  document.querySelectorAll('#actRow button').forEach((b2) => {
-    b2.onclick = (e) => {
-      e.stopPropagation(); // 别触发舞台的暂停热区
-      S.activity = b2.dataset.a;
-      localStorage.setItem('tm_activity', S.activity);
-      syncActBtns();
-      if (Bridge.setActivity) Bridge.setActivity(S.activity);
-      feedCompanion();
-    };
-  });
-  syncActBtns();
+  renderActRow();
   bindSettings();
   bindSchedules();
   renderPresets();
@@ -767,6 +846,8 @@ async function boot() {
     listen('sfx', (e) => beep(e.payload));
     // 内核侧改了设置（比如"最后一段休息解锁"被用掉复位）→ 面板别继续显示旧状态骗人
     listen('settings', (e) => { S.settings = e.payload; bindSettings(); });
+    // 桌宠右键菜单里选了「设置…」：主窗已经被 Rust 侧叫出来了，这边把面板展开
+    listen('open_settings', () => { hidePanels(); $('settingsPanel').classList.remove('hide'); });
   }
 
   // 默认把选中预设装进编辑器
@@ -808,6 +889,7 @@ async function boot() {
   $('btnSchedules').onclick = (e) => { e.stopPropagation(); togglePanel('schedulePanel'); bindSchedules(); };
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.drop') && !e.target.closest('.tb-right')) hidePanels();
+    if (!e.target.closest('.act-pick') && !e.target.closest('.act-chip')) closeActPicker();
   });
   $('btnSaveAs').onclick = saveAsPreset;
   $('btnAgain').onclick = () => {

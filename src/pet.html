@@ -9,19 +9,10 @@
     font-family:"PingFang SC","Microsoft YaHei",sans-serif }
   body.preview{ background:linear-gradient(140deg,#3b6ea5,#7fa8c9) }  /* 浏览器预览时模拟桌面 */
   #pet{ display:block; cursor:grab }
-  #ops{ position:fixed; top:4px; right:6px; display:flex; gap:4px; opacity:0; transition:opacity .18s }
-  body:hover #ops{ opacity:1 }
-  #ops button{ font:inherit; font-size:12px; padding:3px 9px; border-radius:8px; cursor:pointer;
-    border:1px solid rgba(120,95,65,.5); background:rgba(24,19,15,.78); color:#cbb89a }
-  #ops button:hover{ color:#ffb35c; border-color:#ffb35c }
 </style>
 </head>
 <body>
 <canvas id="pet" width="260" height="250"></canvas>
-<div id="ops">
-  <button id="bPause" title="暂停/继续">‖</button>
-  <button id="bMain" title="打开主窗口">⤢</button>
-</div>
 <script>
 (function () {
   const T = window.__TAURI__;
@@ -134,7 +125,6 @@
     const dt = Math.min(0.05, (ts - last) / 1000 || 0.016); last = ts;
     t += dt; phaseT += dt; clipT += dt;
     syncClickThrough();
-    syncOps();
     if (fadeT < 1) fadeT = Math.min(1, fadeT + dt / 0.3);
 
     if (phase === 'summon' && phaseT > 2.3) enter(stageKind(view) === 'break' ? restPhaseFor(view) : 'work');
@@ -304,26 +294,13 @@
   requestAnimationFrame(frame);
 
   // —— 交互 ——
-  const bPause = document.getElementById('bPause');
-  // ‖/▶ 按钮跟着状态走（每帧同步，有变化才写 DOM）
-  let opsLast = '';
-  function syncOps() {
-    const paused = view.status === 'paused', waiting = view.status === 'awaiting';
-    const txt = paused || waiting ? '▶' : '‖';
-    if (txt !== opsLast) {
-      opsLast = txt;
-      bPause.textContent = txt;
-      bPause.title = paused ? '继续' : (waiting ? '开始下一段' : '暂停');
-    }
-  }
-  document.getElementById('bMain').onclick = () => { if (inv) inv('open_main'); };
-  bPause.onclick = async () => {
-    if (!inv) return;
-    try {
-      const cmd = view.status === 'paused' ? 'resume' : (view.status === 'awaiting' ? 'start_next' : 'pause');
-      onView(await inv('session_cmd', { cmd })); // 过 onView：演出状态机立即跟上，不等广播
-    } catch (e) {}
-  };
+  // 右键 = 系统原生菜单（暂停/跳过/主窗口/设置/隐藏），由 Rust 侧的 pet_menu 现搭现弹。
+  // 之前那两个悬停才浮出来的小方按钮已撤：桌宠上挂 UI 方块本身就不像桌宠，
+  // 而且 macOS 下非活跃窗口的第一次左键会被系统吃掉去激活窗口，按钮常要点两下。
+  window.addEventListener('contextmenu', (e) => {
+    e.preventDefault();   // 顺带盖掉 webview 自带的那个默认菜单
+    if (inv) inv('pet_menu');
+  });
   // 拖动：按住画布拖走（记住位置）
   cv.addEventListener('mousedown', async (e) => {
     if (e.button !== 0 || !T) return;

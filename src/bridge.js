@@ -59,6 +59,12 @@
     if (st) { if (st.kind === 'work') s.acc_work_ms = (s.acc_work_ms || 0) + add; else s.acc_rest_ms = (s.acc_rest_ms || 0) + add; }
     s.mark_ms = upto;
   }
+  // 换段接过这一段约定的活动（语义同 core.rs 的 adopt_activity：只在 idx 动了之后调，
+  // 段上没标就保持不变 —— 每次投影都调的话，舞台上临时换的活动会被立刻改回去）
+  function adoptActivity(s) {
+    const st = s.stages[s.idx];
+    if (st && st.kind === 'work' && st.activity) s.activity = st.activity;
+  }
   function project(s, cfg, now) {
     while (s.status === 'running' && now >= s.end_ms) {
       credit(s, s.end_ms);
@@ -66,7 +72,7 @@
       const cur = s.stages[s.idx].kind, next = s.stages[s.idx + 1].kind;
       const auto = cur === 'work' && next === 'break' ? (cfg.auto_work_to_break || cfg.rest_policy === 'forced')
         : cur === 'break' && next === 'work' ? cfg.auto_break_to_work : true;
-      if (auto) { s.idx += 1; s.end_ms += s.stages[s.idx].secs * 1000; }
+      if (auto) { s.idx += 1; s.end_ms += s.stages[s.idx].secs * 1000; adoptActivity(s); }
       else { s.status = 'awaiting'; return; }
     }
     if (s.status === 'running') credit(s, now);
@@ -108,6 +114,7 @@
       for (const st of plan.stages) if (st.secs < 5 || st.secs > 4 * 3600) throw '阶段时长要在 5 秒到 4 小时之间';
       const now = Date.now();
       session = { status: 'running', plan_id: plan.id, plan_name: plan.name, stages: plan.stages.map((s) => ({ ...s })), idx: 0, end_ms: now + plan.stages[0].secs * 1000, remain_ms: 0, started_ms: now, activity: '', acc_work_ms: 0, acc_rest_ms: 0, mark_ms: now };
+      adoptActivity(session);
       persist();
       return view(session, settings, now);
     },
@@ -129,11 +136,11 @@
         if (lockedZone) { settings.final_break_unlock = false; } // 一次性解锁用掉即复位
         if (cmd === 'skip') {
           if (s.status === 'awaiting' || s.idx + 1 < s.stages.length) {
-            s.idx += 1; s.end_ms = now + s.stages[s.idx].secs * 1000; s.status = 'running'; s.mark_ms = now;
+            s.idx += 1; s.end_ms = now + s.stages[s.idx].secs * 1000; s.status = 'running'; s.mark_ms = now; adoptActivity(s);
           } else s.status = 'done';
         } else if (cmd === 'prev') {
           if (s.status !== 'awaiting' && s.idx > 0) s.idx -= 1;
-          s.end_ms = now + s.stages[s.idx].secs * 1000; s.status = 'running'; s.mark_ms = now;
+          s.end_ms = now + s.stages[s.idx].secs * 1000; s.status = 'running'; s.mark_ms = now; adoptActivity(s);
         } else {
           const dur = s.stages[s.idx].secs * 1000;
           if (s.status === 'running') s.end_ms = now + dur;
@@ -142,7 +149,7 @@
         }
       } else if (cmd === 'start_next') {
         if (s.status !== 'awaiting') throw '现在不在段间等待';
-        s.idx += 1; s.end_ms = now + s.stages[s.idx].secs * 1000; s.status = 'running'; s.mark_ms = now;
+        s.idx += 1; s.end_ms = now + s.stages[s.idx].secs * 1000; s.status = 'running'; s.mark_ms = now; adoptActivity(s);
       } else if (cmd === 'stop') {
         session = { status: 'idle', stages: [], idx: 0, end_ms: 0, remain_ms: 0, plan_id: '', plan_name: '', started_ms: 0, activity: '', acc_work_ms: 0, acc_rest_ms: 0, mark_ms: 0 };
       } else throw '未知指令 ' + cmd;
