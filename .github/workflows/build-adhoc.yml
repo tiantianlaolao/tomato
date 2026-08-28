@@ -65,11 +65,21 @@ jobs:
         continue-on-error: true
         run: |
           APP=$(find src-tauri/gen/apple/build -maxdepth 5 -name "*.app" -type d | head -1)
+          BIN="$APP/$(basename "$APP" .app)"
           echo "app bundle = $APP"
-          echo "----- 移动端标记（应该命中）-----"
-          grep -rl "桥冒烟" "$APP" || echo "❌ 没找到移动端页面"
-          echo "----- 桌面端标记（应该找不到）-----"
-          grep -rl "rest-mask-inner" "$APP" && echo "❌ 桌面前端被打进来了" || echo "✅ 桌面前端没进来"
+          echo "binary     = $BIN  ($(wc -c < "$BIN") 字节)"
+          # 🔴 判据用**文件名**不用页面内容：Tauri 的 generate_context! 会把
+          #    frontendDist 整个嵌进 Rust 二进制并压缩，所以在 .app 里 grep
+          #    页面文字必然一无所获（上一跑两个标记都没命中就是这个原因）。
+          #    而资源的路径键是明文存的，所以拿独有的文件名当判据才成立。
+          echo "----- 移动端独有文件（应该命中）-----"
+          strings "$BIN" | grep -c "_mobile_marker_capyroom" || echo "0"
+          echo "----- 桌面端独有文件（应该都是 0）-----"
+          for f in pet.html companion.js rest.html viz.js; do
+            echo "  $f : $(strings "$BIN" | grep -c "$f")"
+          done
+          echo "----- 兜底诊断：二进制里的 .html/.js 资源键长什么样 -----"
+          strings "$BIN" | grep -oE "/?[A-Za-z0-9_.-]+\.(html|js|css)" | sort -u | head -20
 
       - name: '产物清单'
         if: ${{ !inputs.sign }}
