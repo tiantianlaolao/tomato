@@ -14,13 +14,24 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # macos-private-api：桌宠窗的 transparent:true 在 macOS 上必须靠它才生效，
 # 否则 WKWebView 回落成不透明白底 —— 桌面上就是一块白方块（Windows 不需要这个开关）。
-tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
+# 🔴 这一条必须留在通用 dependencies 里，不能挪进下面的 target 块：
+#    tauri.conf.json 的 app.macOSPrivateApi 会被 tauri-build 校验，而 build script 是按
+#    host 编译的、读不到 target-specific 的 feature —— 挪下去就报
+#    "features on the Cargo.toml file does not match the allowlist"。
+#    它在 iOS/Windows 上本身是空转（tauri 内部 cfg(target_os="macos") 保护），留着无害。
+tauri = { version = "2", features = ["image-png", "macos-private-api"] }
 tauri-plugin-notification = "2"
-tauri-plugin-autostart = "2"
-tauri-plugin-global-shortcut = "2"
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# 桌面独有的三样：托盘、开机自启、全局快捷键 —— iOS/Android 上根本不存在这些概念。
+# 放进 target 块，移动端构建连这几个 crate 都不会去拉（它们内部依赖 win32/AppKit/X11，
+# 留在通用 dependencies 里的话，iOS 会挂在依赖树上，跟我们自己的代码没关系）。
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
 
 [profile.release]
 strip = true

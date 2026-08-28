@@ -10,6 +10,22 @@
 // 托盘重画，所以表现为"时间一到就卡死"）。因此：
 //   ① tick 锁内只做计算和落盘，把 UI 动作攒进 UiWork，放锁之后再执行；
 //   ② 所有 #[tauri::command] 一律 async —— 跑在异步线程池上，主线程永远不等 App 锁。
+//
+// ⚠️ 平台切分（cfg(desktop) / cfg(mobile)）：
+//   desktop = Windows + macOS + Linux；mobile = iOS + Android。注意 macOS 属于 desktop 这一边，
+//   跟 iOS 分在两处 —— 别把 cfg(desktop) 看成"只有 Windows"。
+//   凡是桌面独有的能力（托盘、全局快捷键、开机自启、任务栏进度条、pet/rest 两个附属窗口）
+//   一律用 #[cfg(desktop)] 圈起来；移动端只留内核 + 命令 + 通知 + 一个主 webview。
+//   给移动端补空实现的函数（sync_rest_overlay / apply_pet_visibility）是有意为之：
+//   调用点因此不用加 cfg，桌面端的调用路径一个字都没动。
+//
+// ⚠️ 配置也分了两份：iOS 走 tauri.ios.conf.json 覆盖（Tauri 会合并到主 conf 之上，
+//   对象递归合并、数组整体替换），桌面端读到的仍是原来那份 tauri.conf.json。
+//   🔴 千万别图省事直接改主 conf 的 identifier —— app_data_dir() 是按 identifier 算的，
+//   一改桌面端的数据目录就换了地方，用户现有的 settings/plans/session/history 全部读不到。
+//   移动端 identifier = com.tybbtech.capyroom（与桌面端是两个独立产品，App Store 条目也是独立的）；
+//   productName 在 iOS 侧特意用 ASCII：tauri ios init 拿它生成 Xcode 工程名和 scheme，中文是已知的雷。
+//   iOS 那份只留 main 一个窗口 —— rest 遮罩窗和 pet 桌宠窗在移动端不存在。
 mod core;
 
 use core::{Plan, Session, Settings};
@@ -19,7 +35,9 @@ use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(desktop)]
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+#[cfg(desktop)]
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_notification::NotificationExt;
@@ -63,6 +81,9 @@ struct HistoryRecord<'a> {
     stages: &'a [core::Stage],
 }
 
+// 移动端不画托盘、没有遮罩窗 → last_tray / last_tray_sec / rest_shown 三个字段没人读，
+// 但保留它们能让 App 的构造和存取路径两边完全一致（少一个平台分叉就少一处走形）。
+#[cfg_attr(mobile, allow(dead_code))]
 struct App {
     dir: PathBuf,
     settings: Settings,
@@ -159,6 +180,7 @@ impl App {
 
 // ———————————————————————— 托盘图标：把剩余分钟画进 32×32（Windows 托盘没有文字位） ————————————————————————
 // 3×5 点阵数字，放大 3 倍 = 9×15，两位数并排居中。够清楚，也不用拖字体库。
+#[cfg(desktop)]
 const FONT: [[u8; 5]; 10] = [
     [0b111, 0b101, 0b101, 0b101, 0b111], [0b010, 0b110, 0b010, 0b010, 0b111],
     [0b111, 0b001, 0b111, 0b100, 0b111], [0b111, 0b001, 0b111, 0b001, 0b111],
@@ -167,6 +189,7 @@ const FONT: [[u8; 5]; 10] = [
     [0b111, 0b101, 0b111, 0b101, 0b111], [0b111, 0b101, 0b111, 0b001, 0b111],
 ];
 
+#[cfg(desktop)]
 fn tray_image(text: &str, rgb: [u8; 3]) -> tauri::image::Image<'static> {
     const W: usize = 32;
     let mut px = vec![0u8; W * W * 4];
@@ -208,6 +231,7 @@ fn tray_image(text: &str, rgb: [u8; 3]) -> tauri::image::Image<'static> {
     tauri::image::Image::new_owned(px, W as u32, W as u32)
 }
 
+#[cfg(desktop)]
 struct TrayUi {
     status: MenuItem<tauri::Wry>,
     toggle: MenuItem<tauri::Wry>,
@@ -224,18 +248,20 @@ fn sfx(app: &AppHandle, kind: &str) {
 }
 
 // ———————————————————————— UI 动作清单：锁内攒、放锁后做 ————————————————————————
+// 前三项两个平台都有（通知/音效/状态推送）；其余全是桌面窗口与托盘的活儿。
 #[derive(Default)]
 struct UiWork {
     notices: Vec<(String, String)>,   // 系统通知（标题, 正文）
     sfx: Vec<&'static str>,
     state_push: Option<core::View>,   // 状态快照推给所有窗口
-    attention: bool,                  // 主窗口闪烁请求
-    tray: Option<TrayDraw>,           // 图标/菜单/进度条（分钟级变化才动）
-    tray_sec: Option<TraySec>,        // 标题(mac)/气泡/状态行（秒级）
-    rest_show: Option<bool>,          // Some(true)=弹强制休息遮罩，Some(false)=收
-    rest_regrab: bool,                // 遮罩活跃期间每秒抢回焦点
-    show_main: bool,                  // 会话完成 → 主窗口回来展示汇总
+    #[cfg(desktop)] attention: bool,              // 主窗口闪烁请求
+    #[cfg(desktop)] tray: Option<TrayDraw>,       // 图标/菜单/进度条（分钟级变化才动）
+    #[cfg(desktop)] tray_sec: Option<TraySec>,    // 标题(mac)/气泡/状态行（秒级）
+    #[cfg(desktop)] rest_show: Option<bool>,      // Some(true)=弹强制休息遮罩，Some(false)=收
+    #[cfg(desktop)] rest_regrab: bool,            // 遮罩活跃期间每秒抢回焦点
+    #[cfg(desktop)] show_main: bool,              // 会话完成 → 主窗口回来展示汇总
 }
+#[cfg(desktop)]
 struct TrayDraw {
     txt: String,
     rgb: [u8; 3],
@@ -245,6 +271,7 @@ struct TrayDraw {
     prog_status: u8, // 0=无 1=正常 2=暂停
     prog: u64,
 }
+#[cfg(desktop)]
 struct TraySec {
     title: Option<String>, // macOS 菜单栏文字（MM:SS 每秒刷新）
     tip: String,
@@ -295,7 +322,8 @@ fn collect_tick(a: &mut App) -> UiWork {
             "done" => {
                 w.notices.push(("🍅 这一轮收获满满".into(), "整个序列都跑完了，去看看汇总吧。".into()));
                 w.sfx.push("done");
-                w.show_main = true; // 跑完把主窗口叫回来看汇总（桌宠期间主窗是藏着的）
+                #[cfg(desktop)]
+                { w.show_main = true; } // 跑完把主窗口叫回来看汇总（桌宠期间主窗是藏着的）
             }
             _ => {}
         }
@@ -323,7 +351,8 @@ fn collect_tick(a: &mut App) -> UiWork {
         let body = if next_is_work { "休息早结束了，回来把下一段工作开起来。" } else { "工作早就结束了，去歇一会儿吧。" };
         w.notices.push(("还等着你呢".into(), body.into()));
         w.sfx.push("remind");
-        w.attention = true;
+        #[cfg(desktop)]
+        { w.attention = true; }
     }
 
     // ④ 久坐提醒（FE-41）：非强制模式下连续工作每 N 分钟响一声
@@ -426,44 +455,48 @@ fn collect_tick(a: &mut App) -> UiWork {
     a.maybe_log_done();
 
     // ⑦ 托盘。秒级：菜单栏标题(mac)/气泡/状态行；分钟级：图标/菜单项/进度条
-    let (title, tip, txt, rgb) = match a.session.status.as_str() {
-        "running" | "paused" => {
-            let cur = &a.session.stages[a.session.idx];
-            let remain = if a.session.status == "running" { a.session.end_ms.saturating_sub(now) } else { a.session.remain_ms };
-            let paused = a.session.status == "paused";
-            let rgb = if paused { [128, 128, 128] } else if cur.kind == "work" { [232, 89, 12] } else { [12, 166, 120] };
-            let sym = if paused { "‖" } else if cur.kind == "work" { "◉" } else { "◇" };
-            let (mm, ss) = (remain / 60_000, remain % 60_000 / 1000);
-            (Some(format!("{sym} {mm:02}:{ss:02}")),
-             format!("{} {} {:02}:{:02}{} · {}", sym, if cur.kind == "work" { "工作" } else { "休息" },
-                mm, ss, if paused { "（已暂停）" } else { "" }, a.session.plan_name),
-             format!("{}", mm.min(99)), rgb)
+    // 移动端没有托盘也没有任务栏 —— 整段不参与编译（手机上的"还剩多久"归通知和界面自己管）
+    #[cfg(desktop)]
+    {
+        let (title, tip, txt, rgb) = match a.session.status.as_str() {
+            "running" | "paused" => {
+                let cur = &a.session.stages[a.session.idx];
+                let remain = if a.session.status == "running" { a.session.end_ms.saturating_sub(now) } else { a.session.remain_ms };
+                let paused = a.session.status == "paused";
+                let rgb = if paused { [128, 128, 128] } else if cur.kind == "work" { [232, 89, 12] } else { [12, 166, 120] };
+                let sym = if paused { "‖" } else if cur.kind == "work" { "◉" } else { "◇" };
+                let (mm, ss) = (remain / 60_000, remain % 60_000 / 1000);
+                (Some(format!("{sym} {mm:02}:{ss:02}")),
+                 format!("{} {} {:02}:{:02}{} · {}", sym, if cur.kind == "work" { "工作" } else { "休息" },
+                    mm, ss, if paused { "（已暂停）" } else { "" }, a.session.plan_name),
+                 format!("{}", mm.min(99)), rgb)
+            }
+            "awaiting" => (Some("⏳".into()), "⏳ 等你开始下一段".to_string(), String::new(), [180, 140, 60]),
+            "done" => (None, "🍅 跑完了，去看汇总".to_string(), String::new(), [233, 168, 13]),
+            _ => (None, "番茄时钟 · 空闲".to_string(), String::new(), [200, 120, 90]),
+        };
+        let sec_key = format!("{title:?}|{tip}");
+        if sec_key != a.last_tray_sec {
+            a.last_tray_sec = sec_key;
+            w.tray_sec = Some(TraySec { title, tip });
         }
-        "awaiting" => (Some("⏳".into()), "⏳ 等你开始下一段".to_string(), String::new(), [180, 140, 60]),
-        "done" => (None, "🍅 跑完了，去看汇总".to_string(), String::new(), [233, 168, 13]),
-        _ => (None, "番茄时钟 · 空闲".to_string(), String::new(), [200, 120, 90]),
-    };
-    let sec_key = format!("{title:?}|{tip}");
-    if sec_key != a.last_tray_sec {
-        a.last_tray_sec = sec_key;
-        w.tray_sec = Some(TraySec { title, tip });
-    }
-    let toggle = if a.session.status == "paused" { "继续" } else if a.session.status == "awaiting" { "开始下一段" } else { "暂停" }.to_string();
-    let toggle_en = a.session.status != "idle" && a.session.status != "done";
-    let skip_en = matches!(a.session.status.as_str(), "running" | "paused" | "awaiting");
-    let (prog_status, prog) = match a.session.status.as_str() {
-        "running" => {
-            let cur = &a.session.stages[a.session.idx];
-            let done = 100u64.saturating_sub(a.session.end_ms.saturating_sub(now) * 100 / (cur.secs * 1000).max(1));
-            (1u8, done.min(100))
+        let toggle = if a.session.status == "paused" { "继续" } else if a.session.status == "awaiting" { "开始下一段" } else { "暂停" }.to_string();
+        let toggle_en = a.session.status != "idle" && a.session.status != "done";
+        let skip_en = matches!(a.session.status.as_str(), "running" | "paused" | "awaiting");
+        let (prog_status, prog) = match a.session.status.as_str() {
+            "running" => {
+                let cur = &a.session.stages[a.session.idx];
+                let done = 100u64.saturating_sub(a.session.end_ms.saturating_sub(now) * 100 / (cur.secs * 1000).max(1));
+                (1u8, done.min(100))
+            }
+            "paused" => (2u8, 0),
+            _ => (0u8, 0),
+        };
+        let min_key = format!("{txt}|{rgb:?}|{toggle}|{toggle_en}|{skip_en}|{prog_status}|{prog}");
+        if min_key != a.last_tray {
+            a.last_tray = min_key;
+            w.tray = Some(TrayDraw { txt, rgb, toggle, toggle_en, skip_en, prog_status, prog });
         }
-        "paused" => (2u8, 0),
-        _ => (0u8, 0),
-    };
-    let min_key = format!("{txt}|{rgb:?}|{toggle}|{toggle_en}|{skip_en}|{prog_status}|{prog}");
-    if min_key != a.last_tray {
-        a.last_tray = min_key;
-        w.tray = Some(TrayDraw { txt, rgb, toggle, toggle_en, skip_en, prog_status, prog });
     }
 
     // ⑧ 跑动中每 30s 兜底存一次盘
@@ -472,12 +505,17 @@ fn collect_tick(a: &mut App) -> UiWork {
     }
 
     // ⑨ 强制休息全屏遮罩：休息被锁定期间亮着 + 每秒抢回焦点（FE-40 真·强制）
-    let want_rest = core::rest_locked(&a.session, &a.settings);
-    if want_rest != a.rest_shown {
-        a.rest_shown = want_rest;
-        w.rest_show = Some(want_rest);
+    // 移动端没有"另开一个窗口盖住屏幕"这回事（也不需要 —— 手机上人本来就没在看屏幕），
+    // 强制休息在移动端要怎么表达是产品设计问题，不在这一层解决。
+    #[cfg(desktop)]
+    {
+        let want_rest = core::rest_locked(&a.session, &a.settings);
+        if want_rest != a.rest_shown {
+            a.rest_shown = want_rest;
+            w.rest_show = Some(want_rest);
+        }
+        w.rest_regrab = want_rest;
     }
-    w.rest_regrab = want_rest;
 
     w
 }
@@ -487,54 +525,60 @@ fn apply_ui(app: &AppHandle, w: UiWork) {
     for (t, b) in &w.notices { notify(app, t, b); }
     for k in &w.sfx { sfx(app, k); }
     if let Some(v) = w.state_push { let _ = app.emit("state", v); }
-    if w.attention {
-        if let Some(win) = app.get_webview_window("main") {
-            let _ = win.request_user_attention(Some(tauri::UserAttentionType::Informational));
+    // 以下全是桌面窗口与托盘的活儿：闪窗、托盘图标/菜单栏/气泡、任务栏进度条、
+    // 主窗召回、强制休息遮罩。移动端一样都没有 —— 整块不参与编译。
+    #[cfg(desktop)]
+    {
+        if w.attention {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.request_user_attention(Some(tauri::UserAttentionType::Informational));
+            }
         }
-    }
-    if let Some(s) = w.tray_sec {
-        if let Some(tray) = app.tray_by_id("tray") {
-            let _ = tray.set_tooltip(Some(&s.tip));
-            #[cfg(target_os = "macos")]
-            let _ = tray.set_title(s.title.as_deref());
-            #[cfg(not(target_os = "macos"))]
-            let _ = s.title; // 其他平台托盘没有文字位，气泡里有到秒的时间
+        if let Some(s) = w.tray_sec {
+            if let Some(tray) = app.tray_by_id("tray") {
+                let _ = tray.set_tooltip(Some(&s.tip));
+                #[cfg(target_os = "macos")]
+                let _ = tray.set_title(s.title.as_deref());
+                #[cfg(not(target_os = "macos"))]
+                let _ = s.title; // 其他平台托盘没有文字位，气泡里有到秒的时间
+            }
+            let ui: State<TrayUi> = app.state();
+            let _ = ui.status.set_text(&s.tip);
         }
-        let ui: State<TrayUi> = app.state();
-        let _ = ui.status.set_text(&s.tip);
-    }
-    if let Some(d) = w.tray {
-        if let Some(tray) = app.tray_by_id("tray") {
-            let _ = tray.set_icon(Some(tray_image(&d.txt, d.rgb)));
+        if let Some(d) = w.tray {
+            if let Some(tray) = app.tray_by_id("tray") {
+                let _ = tray.set_icon(Some(tray_image(&d.txt, d.rgb)));
+            }
+            let ui: State<TrayUi> = app.state();
+            let _ = ui.toggle.set_text(&d.toggle);
+            let _ = ui.toggle.set_enabled(d.toggle_en);
+            let _ = ui.skip.set_enabled(d.skip_en);
+            // 任务栏/Dock 进度条（FE-27 的跨平台落法）
+            if let Some(win) = app.get_webview_window("main") {
+                use tauri::window::{ProgressBarState, ProgressBarStatus};
+                let pb = match d.prog_status {
+                    1 => ProgressBarState { status: Some(ProgressBarStatus::Normal), progress: Some(d.prog) },
+                    2 => ProgressBarState { status: Some(ProgressBarStatus::Paused), progress: None },
+                    _ => ProgressBarState { status: Some(ProgressBarStatus::None), progress: None },
+                };
+                let _ = win.set_progress_bar(pb);
+            }
         }
-        let ui: State<TrayUi> = app.state();
-        let _ = ui.toggle.set_text(&d.toggle);
-        let _ = ui.toggle.set_enabled(d.toggle_en);
-        let _ = ui.skip.set_enabled(d.skip_en);
-        // 任务栏/Dock 进度条（FE-27 的跨平台落法）
-        if let Some(win) = app.get_webview_window("main") {
-            use tauri::window::{ProgressBarState, ProgressBarStatus};
-            let pb = match d.prog_status {
-                1 => ProgressBarState { status: Some(ProgressBarStatus::Normal), progress: Some(d.prog) },
-                2 => ProgressBarState { status: Some(ProgressBarStatus::Paused), progress: None },
-                _ => ProgressBarState { status: Some(ProgressBarStatus::None), progress: None },
-            };
-            let _ = win.set_progress_bar(pb);
+        if w.show_main {
+            if let Some(win) = app.get_webview_window("main") { let _ = win.show(); let _ = win.set_focus(); }
         }
-    }
-    if w.show_main {
-        if let Some(win) = app.get_webview_window("main") { let _ = win.show(); let _ = win.set_focus(); }
-    }
-    if let Some(show) = w.rest_show { set_rest_overlay(app, show); }
-    if w.rest_regrab {
-        if let Some(win) = app.get_webview_window("rest") {
-            if !win.is_focused().unwrap_or(true) { let _ = win.set_focus(); }
+        if let Some(show) = w.rest_show { set_rest_overlay(app, show); }
+        if w.rest_regrab {
+            if let Some(win) = app.get_webview_window("rest") {
+                if !win.is_focused().unwrap_or(true) { let _ = win.set_focus(); }
+            }
         }
     }
 }
 
 /// 强制休息遮罩窗（FE-40 真·强制）：铺满主窗口所在显示器、置顶、抢焦点。
 /// 不需要系统权限；Cmd+Tab/Alt+Tab 切走会被立刻抢回来，其他窗口实际用不了。
+#[cfg(desktop)]
 fn set_rest_overlay(app: &AppHandle, show: bool) {
     let Some(w) = app.get_webview_window("rest") else { return };
     if show {
@@ -582,7 +626,13 @@ fn set_rest_overlay(app: &AppHandle, show: bool) {
     }
 }
 
+/// 移动端没有遮罩窗，给个空实现 —— 这样 do_session_start / do_session_cmd / save_settings
+/// 三处调用点保持原样，桌面端的路径一个字都没动。
+#[cfg(mobile)]
+fn sync_rest_overlay(_app: &AppHandle) {}
+
 /// 命令路径（跳过/暂停等）也可能进出锁定休息段，跟滴答线程共用同一套开合判断。
+#[cfg(desktop)]
 fn sync_rest_overlay(app: &AppHandle) {
     let change = {
         let state: State<Mutex<App>> = app.state();
@@ -725,11 +775,15 @@ async fn save_settings(app: AppHandle, settings: Settings) -> Settings {
         let pet_changed = a.settings.pet_hidden != settings.pet_hidden;
         a.settings = settings;
         a.save_settings();
+        // 开机自启是桌面概念（移动端由系统统一管，App 无权自启）
+        #[cfg(desktop)]
         if autostart_changed {
             use tauri_plugin_autostart::ManagerExt;
             let al = app.autolaunch();
             if a.settings.autostart { let _ = al.enable(); } else { let _ = al.disable(); }
         }
+        #[cfg(mobile)]
+        let _ = autostart_changed;
         (a.settings.clone(), pet_changed)
     };
     // 锁已放，才能安全碰窗口/菜单（线程纪律）
@@ -739,7 +793,12 @@ async fn save_settings(app: AppHandle, settings: Settings) -> Settings {
     saved
 }
 
+/// 移动端没有桌宠窗（整块屏幕就是舞台），同样给空实现保住调用点
+#[cfg(mobile)]
+fn apply_pet_visibility(_app: &AppHandle, _hidden: bool) {}
+
 /// 桌宠窗显隐 + 托盘菜单文字同步（调用方保证不持 App 锁）
+#[cfg(desktop)]
 fn apply_pet_visibility(app: &AppHandle, hidden: bool) {
     if let Some(w) = app.get_webview_window("pet") {
         if hidden { let _ = w.hide(); } else { let _ = w.show(); }
@@ -782,10 +841,13 @@ async fn get_history(app: AppHandle, limit: usize) -> Vec<serde_json::Value> {
 /// 回主窗口（编排/跳过/结束都在那边）。桌宠右键菜单的「打开主窗口」走这条。
 #[tauri::command]
 async fn open_main(app: AppHandle) {
+    #[cfg(desktop)]
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.set_focus();
     }
+    #[cfg(mobile)]
+    let _ = app; // 移动端只有一个 webview，"回主窗口"无意义
 }
 
 /// 桌宠右键菜单（系统原生弹出菜单）。
@@ -794,6 +856,11 @@ async fn open_main(app: AppHandle) {
 /// 菜单项 id 与托盘菜单同名 —— muda 的菜单事件是全局广播（tray 的 on_menu_event
 /// 挂在 global_event_listeners 上），托盘那份处理器会照单收下，这里不用再挂一份。
 /// 每次右键现搭一份：标签/可用性按当下状态算，永远不会显示成过期的「暂停」。
+#[cfg(mobile)]
+#[tauri::command]
+async fn pet_menu(_app: AppHandle) {}
+
+#[cfg(desktop)]
 #[tauri::command]
 async fn pet_menu(app: AppHandle) {
     // 锁内只取快照。建菜单的 MenuItem::with_id 是「同步派发到主线程并阻塞等结果」，
@@ -839,7 +906,12 @@ async fn set_activity(app: AppHandle, activity: String) {
     let _ = app.emit("state", view);
 }
 
+#[cfg(mobile)]
+#[tauri::command]
+async fn rest_focus(_app: AppHandle) -> bool { false }
+
 /// 遮罩窗失焦时自己喊一声，Rust 立刻把焦点抢回来（比等下一秒滴答更快）
+#[cfg(desktop)]
 #[tauri::command]
 async fn rest_focus(app: AppHandle) -> bool {
     let want = {
@@ -854,6 +926,8 @@ async fn rest_focus(app: AppHandle) -> bool {
 }
 
 // ———————————————————————— 组装 ————————————————————————
+// 这两个只有托盘菜单和全局快捷键会调 —— 都是桌面独有的入口
+#[cfg(desktop)]
 fn toggle_session(app: &AppHandle) {
     let cmd = {
         let state: State<Mutex<App>> = app.state();
@@ -865,109 +939,123 @@ fn toggle_session(app: &AppHandle) {
     };
     let _ = do_session_cmd(app, &cmd); // 广播在 do_session_cmd 里统一发
 }
+#[cfg(desktop)]
 fn skip_session(app: &AppHandle) {
     let _ = do_session_cmd(app, "skip");
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_notification::init())
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init());
+
+    // 开机自启 + 全局快捷键：桌面独有的两个插件（移动端连这两个 crate 都不会拉，见 Cargo.toml）
+    #[cfg(desktop)]
+    let builder = builder
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+
+    let builder = builder
         .setup(|app| {
             let dir = app.path().app_data_dir().expect("拿不到应用数据目录");
             let loaded = App::load(dir);
+            #[cfg(desktop)]
             let silent = std::env::args().any(|x| x == "--hidden") && loaded.settings.launch_mode == "silent";
+            #[cfg(desktop)]
             let pet_hidden0 = loaded.settings.pet_hidden;
             app.manage(Mutex::new(loaded));
 
-            // 自启且静默：只留托盘，不亮主窗口（FE-25 启动形态）
-            if silent {
-                if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
-            }
-            // 桌宠窗常驻，但用户收起过就保持收起（托盘/设置里可再叫出来）
-            if pet_hidden0 {
-                if let Some(w) = app.get_webview_window("pet") { let _ = w.hide(); }
-            }
-
-            // 桌宠窗默认落在主屏右下角（拖动后位置由前端 localStorage 记忆并恢复）
-            if let Some(pet) = app.get_webview_window("pet") {
-                if let Ok(Some(mon)) = pet.primary_monitor() {
-                    let sf = mon.scale_factor();
-                    let (mw, mh) = (mon.size().width as f64, mon.size().height as f64);
-                    let (pw, ph) = (260.0 * sf, 250.0 * sf);
-                    let _ = pet.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
-                        (mw - pw - 24.0 * sf) as i32,
-                        (mh - ph - 90.0 * sf) as i32,
-                    )));
-                }
-            }
-
-            // 托盘 + 迷你菜单（FE-24）
-            let status = MenuItem::with_id(app, "status", "番茄时钟 · 空闲", false, None::<&str>)?;
-            let toggle = MenuItem::with_id(app, "toggle", "暂停", false, None::<&str>)?;
-            let skip = MenuItem::with_id(app, "skip", "跳过这一段", false, None::<&str>)?;
-            let show = MenuItem::with_id(app, "show", "打开主窗口", true, None::<&str>)?;
-            let pet_item = MenuItem::with_id(app, "pet", if pet_hidden0 { "显示桌宠" } else { "隐藏桌宠" }, true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[
-                &status, &PredefinedMenuItem::separator(app)?,
-                &toggle, &skip, &PredefinedMenuItem::separator(app)?,
-                &show, &pet_item, &quit,
-            ])?;
-            app.manage(TrayUi { status: status.clone(), toggle: toggle.clone(), skip: skip.clone(), pet: pet_item.clone() });
-            TrayIconBuilder::with_id("tray")
-                .icon(tray_image("", [200, 120, 90]))
-                .tooltip("番茄时钟")
-                .menu(&menu)
-                .show_menu_on_left_click(true)
-                .on_menu_event(|app, ev| match ev.id().as_ref() {
-                    "toggle" => toggle_session(app),
-                    "skip" => skip_session(app),
-                    "show" => {
-                        if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); }
-                    }
-                    // 桌宠右键菜单里的「设置…」：主窗弹出来还不够，得直接把设置面板展开
-                    "settings" => {
-                        if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show(); let _ = w.set_focus();
-                            let _ = w.emit("open_settings", ());
-                        }
-                    }
-                    "pet" => {
-                        // 先在锁内翻状态落盘，放锁后才碰窗口/菜单（线程纪律）
-                        let hidden = {
-                            let state: State<Mutex<App>> = app.state();
-                            let mut a = state.lock().unwrap();
-                            a.settings.pet_hidden = !a.settings.pet_hidden;
-                            a.save_settings();
-                            a.settings.pet_hidden
-                        };
-                        apply_pet_visibility(app, hidden);
-                    }
-                    "quit" => {
-                        let state: State<Mutex<App>> = app.state();
-                        state.lock().unwrap().save_session();
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .build(app)?;
-
-            // 全局快捷键（FE-28）：暂停/继续 + 跳过
+            // 以下整块是桌面形态的装配：静默自启、桌宠窗、托盘菜单、全局快捷键。
+            // 移动端一样都没有 —— 它只有一个铺满屏幕的 webview。
+            #[cfg(desktop)]
             {
-                use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-                #[cfg(target_os = "macos")]
-                let (k_toggle, k_skip) = ("Alt+Cmd+P", "Alt+Cmd+S");
-                #[cfg(not(target_os = "macos"))]
-                let (k_toggle, k_skip) = ("Ctrl+Alt+P", "Ctrl+Alt+S");
-                let _ = app.global_shortcut().on_shortcut(k_toggle, |app, _sc, ev| {
-                    if ev.state() == ShortcutState::Pressed { toggle_session(app); }
-                });
-                let _ = app.global_shortcut().on_shortcut(k_skip, |app, _sc, ev| {
-                    if ev.state() == ShortcutState::Pressed { skip_session(app); }
-                });
+                // 自启且静默：只留托盘，不亮主窗口（FE-25 启动形态）
+                if silent {
+                    if let Some(w) = app.get_webview_window("main") { let _ = w.hide(); }
+                }
+                // 桌宠窗常驻，但用户收起过就保持收起（托盘/设置里可再叫出来）
+                if pet_hidden0 {
+                    if let Some(w) = app.get_webview_window("pet") { let _ = w.hide(); }
+                }
+
+                // 桌宠窗默认落在主屏右下角（拖动后位置由前端 localStorage 记忆并恢复）
+                if let Some(pet) = app.get_webview_window("pet") {
+                    if let Ok(Some(mon)) = pet.primary_monitor() {
+                        let sf = mon.scale_factor();
+                        let (mw, mh) = (mon.size().width as f64, mon.size().height as f64);
+                        let (pw, ph) = (260.0 * sf, 250.0 * sf);
+                        let _ = pet.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(
+                            (mw - pw - 24.0 * sf) as i32,
+                            (mh - ph - 90.0 * sf) as i32,
+                        )));
+                    }
+                }
+
+                // 托盘 + 迷你菜单（FE-24）
+                let status = MenuItem::with_id(app, "status", "番茄时钟 · 空闲", false, None::<&str>)?;
+                let toggle = MenuItem::with_id(app, "toggle", "暂停", false, None::<&str>)?;
+                let skip = MenuItem::with_id(app, "skip", "跳过这一段", false, None::<&str>)?;
+                let show = MenuItem::with_id(app, "show", "打开主窗口", true, None::<&str>)?;
+                let pet_item = MenuItem::with_id(app, "pet", if pet_hidden0 { "显示桌宠" } else { "隐藏桌宠" }, true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[
+                    &status, &PredefinedMenuItem::separator(app)?,
+                    &toggle, &skip, &PredefinedMenuItem::separator(app)?,
+                    &show, &pet_item, &quit,
+                ])?;
+                app.manage(TrayUi { status: status.clone(), toggle: toggle.clone(), skip: skip.clone(), pet: pet_item.clone() });
+                TrayIconBuilder::with_id("tray")
+                    .icon(tray_image("", [200, 120, 90]))
+                    .tooltip("番茄时钟")
+                    .menu(&menu)
+                    .show_menu_on_left_click(true)
+                    .on_menu_event(|app, ev| match ev.id().as_ref() {
+                        "toggle" => toggle_session(app),
+                        "skip" => skip_session(app),
+                        "show" => {
+                            if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.set_focus(); }
+                        }
+                        // 桌宠右键菜单里的「设置…」：主窗弹出来还不够，得直接把设置面板展开
+                        "settings" => {
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show(); let _ = w.set_focus();
+                                let _ = w.emit("open_settings", ());
+                            }
+                        }
+                        "pet" => {
+                            // 先在锁内翻状态落盘，放锁后才碰窗口/菜单（线程纪律）
+                            let hidden = {
+                                let state: State<Mutex<App>> = app.state();
+                                let mut a = state.lock().unwrap();
+                                a.settings.pet_hidden = !a.settings.pet_hidden;
+                                a.save_settings();
+                                a.settings.pet_hidden
+                            };
+                            apply_pet_visibility(app, hidden);
+                        }
+                        "quit" => {
+                            let state: State<Mutex<App>> = app.state();
+                            state.lock().unwrap().save_session();
+                            app.exit(0);
+                        }
+                        _ => {}
+                    })
+                    .build(app)?;
+
+                // 全局快捷键（FE-28）：暂停/继续 + 跳过
+                {
+                    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+                    #[cfg(target_os = "macos")]
+                    let (k_toggle, k_skip) = ("Alt+Cmd+P", "Alt+Cmd+S");
+                    #[cfg(not(target_os = "macos"))]
+                    let (k_toggle, k_skip) = ("Ctrl+Alt+P", "Ctrl+Alt+S");
+                    let _ = app.global_shortcut().on_shortcut(k_toggle, |app, _sc, ev| {
+                        if ev.state() == ShortcutState::Pressed { toggle_session(app); }
+                    });
+                    let _ = app.global_shortcut().on_shortcut(k_skip, |app, _sc, ev| {
+                        if ev.state() == ShortcutState::Pressed { skip_session(app); }
+                    });
+                }
             }
 
             // 滴答线程：窗口在不在都每秒推一次
@@ -977,26 +1065,31 @@ pub fn run() {
                 tick(&handle);
             });
             Ok(())
-        })
-        // 关窗只隐藏，计时不断（FE-26）；真正退出走托盘菜单
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
-                // 桌宠被 Alt+F4 收起：记进设置并同步托盘菜单文字，托盘里随时能再叫出来
-                if window.label() == "pet" {
-                    let app = window.app_handle();
-                    {
-                        let state: State<Mutex<App>> = app.state();
-                        let mut a = state.lock().unwrap();
-                        a.settings.pet_hidden = true;
-                        a.save_settings();
-                    }
-                    let ui: State<TrayUi> = app.state();
-                    let _ = ui.pet.set_text("显示桌宠");
+        });
+
+    // 关窗只隐藏，计时不断（FE-26）；真正退出走托盘菜单。
+    // 移动端没有"关窗口"这回事（生命周期归系统管），整个处理器不挂。
+    #[cfg(desktop)]
+    let builder = builder.on_window_event(|window, event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = window.hide();
+            // 桌宠被 Alt+F4 收起：记进设置并同步托盘菜单文字，托盘里随时能再叫出来
+            if window.label() == "pet" {
+                let app = window.app_handle();
+                {
+                    let state: State<Mutex<App>> = app.state();
+                    let mut a = state.lock().unwrap();
+                    a.settings.pet_hidden = true;
+                    a.save_settings();
                 }
+                let ui: State<TrayUi> = app.state();
+                let _ = ui.pet.set_text("显示桌宠");
             }
-        })
+        }
+    });
+
+    builder
         .invoke_handler(tauri::generate_handler![
             boot, get_state, session_start, session_cmd,
             save_settings, save_plans, save_schedules, get_history, rest_focus, set_activity,
