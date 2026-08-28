@@ -4,11 +4,13 @@
 #   sign=false：--no-sign --archive-only，只验能不能编出 .app（已验证通过）
 #   sign=true ：签名出 IPA + OTA 上架到 /var/www/capyroom/_t/，手机开网页装
 #
-# 🔴 签名这半截**直调 xcodebuild**，不走 `tauri ios build --export-method`：
-#    直调是戳了么已经跑通的路子，`-allowProvisioningUpdates` 和三个
-#    -authenticationKey* 参数怎么传都是确定的；而 tauri 的 `-- <ARGS>` 到底
-#    转不转给 xcodebuild，帮助文本没写、也没人验过。Tauri 生成的 Xcode 工程里
-#    有 "Build Rust Code" 预构建阶段会自己编 Rust，所以直调不缺任何东西。
+# 🔴 签名这半截**只能走 `tauri ios build`，不能直调 xcodebuild**。
+#    我一开始照搬戳了么那套直调 xcodebuild，理由是"Tauri 工程里的 Build Rust Code
+#    阶段会自己编 Rust，直调不缺任何东西" —— **这个判断是错的，实测推翻了**：
+#    那个阶段跑的是 `tauri ios xcode-script`，它要读一个由父进程 `tauri ios build`
+#    建的 IPC 地址文件（/var/folders/.../<identifier>-server-addr），
+#    直调没有父进程 → 脚本 panic "failed to read missing addr file" → exit 65。
+#    所以签名参数只能靠 `-- <ARGS>` 透传给 tauri 内部的 xcodebuild。
 # 🔴 导出方式**两套名字别混**：Tauri CLI 的 flag 叫 `release-testing`，
 #    而 ExportOptions.plist 里的 method 仍然叫 `ad-hoc`。
 # 🔴 构建配置是**小写的 release**（探测跑实测：tauri 生成的工程用 debug/release，
@@ -117,61 +119,49 @@ jobs:
           printenv ASC_API_KEY_BASE64 | base64 --decode > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
           echo "密钥 $(wc -c < ~/private_keys/AuthKey_${ASC_KEY_ID}.p8) 字节"
 
-      - name: 'archive（自动创建 Provisioning Profile）'
+      # 🔴 只能走 `tauri ios build`，不能直调 xcodebuild：
+      #    Tauri 工程里的 "Build Rust Code" 阶段跑的是 `tauri ios xcode-script`，
+      #    它要读一个由父进程 `tauri ios build` 建的 IPC 地址文件
+      #    （/var/folders/.../<identifier>-server-addr）。直调 xcodebuild 没有那个
+      #    父进程，脚本直接 panic："failed to read missing addr file"（实测踩到）。
+      #    所以签名参数只能靠 `-- <ARGS>` 透传给它内部的 xcodebuild。
+      - name: '出 IPA（透传签名参数）'
         if: ${{ inputs.sign }}
+        id: build1
+        continue-on-error: true
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
         run: |
-          xcodebuild archive \
-            -project "$XCPROJ" \
-            -scheme "$SCHEME" \
-            -archivePath $RUNNER_TEMP/capyroom.xcarchive \
-            -sdk iphoneos \
-            -configuration release \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
-            -authenticationKeyID $ASC_KEY_ID \
-            -authenticationKeyIssuerID $ASC_ISSUER_ID \
-            DEVELOPMENT_TEAM=$APPLE_TEAM_ID \
-            CODE_SIGN_STYLE=Automatic \
-            COMPILER_INDEX_STORE_ENABLE=NO
+          npx tauri ios build --ci -v --export-method release-testing --             -allowProvisioningUpdates             -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8             -authenticationKeyID $ASC_KEY_ID             -authenticationKeyIssuerID $ASC_ISSUER_ID
 
-      - name: '导出 IPA'
-        if: ${{ inputs.sign }}
+      # 上一步若因为 `--` 参数没被转给 xcodebuild 而失败，就退回不带参数再试一次：
+      # 密钥已经放在 ~/private_keys/AuthKey_<ID>.p8 —— 这是 xcodebuild 会自动搜的
+      # 位置之一，也许不用显式传就能自动创建 Profile。一跑试两条路，别浪费一轮 CI。
+      - name: '出 IPA（退回：不透传，靠密钥自动发现）'
+        if: ${{ inputs.sign && steps.build1.outcome == 'failure' }}
+        continue-on-error: true
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: npx tauri ios build --ci -v --export-method release-testing
+
+      - name: '找出 IPA 落在哪'
+        if: ${{ inputs.sign }}
         run: |
-          cat > $RUNNER_TEMP/ExportOptions.plist <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key><string>ad-hoc</string>
-            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
-            <key>signingStyle</key><string>automatic</string>
-            <key>compileBitcode</key><false/>
-          </dict>
-          </plist>
-          PLIST
-          xcodebuild -exportArchive \
-            -archivePath $RUNNER_TEMP/capyroom.xcarchive \
-            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
-            -exportPath $RUNNER_TEMP/export \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
-            -authenticationKeyID $ASC_KEY_ID \
-            -authenticationKeyIssuerID $ASC_ISSUER_ID
-          ls -l $RUNNER_TEMP/export
+          mkdir -p $RUNNER_TEMP/export
+          echo "===== 全盘找 ipa ====="
+          find src-tauri/gen/apple -name "*.ipa" -o -name "*.xcarchive" | head -20
+          IPA=$(find src-tauri/gen/apple -name "*.ipa" | head -1)
+          if [ -z "$IPA" ]; then
+            echo "❌ 没找到 IPA，两条路都没成"; exit 1
+          fi
+          echo "找到 $IPA"
+          cp "$IPA" $RUNNER_TEMP/export/capyroom.ipa
 
       - name: '生成 manifest.plist + install.html'
         if: ${{ inputs.sign }}
         run: |
-          IPA=$(ls $RUNNER_TEMP/export/*.ipa | head -1)
-          cp "$IPA" $RUNNER_TEMP/export/capyroom.ipa
           BUILD_NUM=$(git rev-list --count HEAD)
           echo "BUILD_NUM=$BUILD_NUM" >> $GITHUB_ENV
           cat > $RUNNER_TEMP/export/manifest.plist <<PLIST
