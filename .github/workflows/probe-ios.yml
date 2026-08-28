@@ -1,0 +1,117 @@
+# iOS 构建链路一次性探测：把 Windows 上验不了的未知一趟问完。
+#
+# 为什么要这么一个 workflow：这台开发机是 Windows，而 tauri CLI 的 ios 子命令
+# 只在 macOS 上存在（Windows 上 `tauri --help` 里只有 android）。所以关于
+# "参数怎么写、iOS 那半边编不编得过"的每一个问题，不跑 CI 就答不了。
+#
+# 设计：**只打印，不出包**。每一步 continue-on-error，挂一步也照样跑完剩下的，
+#      一次拿全信息，而不是"挂一步、改一行、再跑一次"。
+#
+# 🔴 公开仓两条红线：
+#    ① Actions 日志全网可见 —— 任何一步都不许 echo secret 的内容，
+#      只打印字节数、退出码、证书 CN 这类不敏感的东西。
+#    ② 绝不能加 pull_request_target 触发 —— 那会让外部 PR 拿到 secret。
+name: probe-ios
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: '1 环境版本'
+        continue-on-error: true
+        run: |
+          echo "===== macOS ====="; sw_vers
+          echo "===== Xcode ====="; xcodebuild -version; xcode-select -p
+          echo "===== iOS SDK ====="; xcodebuild -showsdks | grep -i ios || true
+          echo "===== rust ====="; rustc -vV; rustup target list --installed
+          echo "===== node ====="; node -v; npm -v
+
+      - name: '2 npm ci'
+        continue-on-error: true
+        run: npm ci
+
+      - name: '3 tauri info'
+        continue-on-error: true
+        run: npx tauri info
+
+      # 🔴 最重要的一步：8-27 做的平台切分从没在 iOS 上编译过。
+      # 故意独立于 tauri 的构建流程跑 —— 就算下面 tauri 那套全挂了，
+      # 这条结果照样拿得到。
+      - name: '4 iOS 那半边 Rust 编不编得过'
+        continue-on-error: true
+        working-directory: src-tauri
+        run: |
+          echo "===== cargo check --lib --target aarch64-apple-ios ====="
+          cargo check --lib --target aarch64-apple-ios 2>&1 | tail -80
+          echo "===== 退出码 ${PIPESTATUS[0]} ====="
+
+      - name: '5 tauri ios 的命令面'
+        continue-on-error: true
+        run: |
+          echo "===== tauri ios --help ====="
+          npx tauri ios --help || true
+          echo "===== tauri ios build --help ====="
+          npx tauri ios build --help || true
+
+      - name: '6 tauri ios init'
+        continue-on-error: true
+        run: npx tauri ios init --verbose 2>&1 | tail -80
+
+      - name: '7 生成的 Xcode 工程长什么样'
+        continue-on-error: true
+        run: |
+          echo "===== gen/apple 结构 ====="
+          find src-tauri/gen/apple -maxdepth 2 2>/dev/null | head -60 || echo "(没生成)"
+          echo "===== scheme / target ====="
+          for p in src-tauri/gen/apple/*.xcodeproj; do
+            echo "--- $p ---"
+            xcodebuild -list -project "$p" || true
+          done
+
+      # 只验"素材装得上"，绝不打印内容
+      - name: '8 签名素材'
+        continue-on-error: true
+        env:
+          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_DEV_CERTIFICATE_BASE64: ${{ secrets.APPLE_DEV_CERTIFICATE_BASE64 }}
+          APPLE_DEV_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEV_CERTIFICATE_PASSWORD }}
+        run: |
+          set +e
+          # printenv 的输出直接进管道，不经过日志
+          printenv ASC_API_KEY_BASE64 | base64 --decode > "$RUNNER_TEMP/asc.p8"
+          echo "ASC .p8 解出 $(wc -c < "$RUNNER_TEMP/asc.p8") 字节；开头是否 PRIVATE KEY: $(head -c 27 "$RUNNER_TEMP/asc.p8" | grep -c 'BEGIN PRIVATE KEY')"
+
+          printenv APPLE_CERTIFICATE_BASE64 | base64 --decode > "$RUNNER_TEMP/dist.p12"
+          printenv APPLE_DEV_CERTIFICATE_BASE64 | base64 --decode > "$RUNNER_TEMP/dev.p12"
+          echo "dist.p12 $(wc -c < "$RUNNER_TEMP/dist.p12") 字节 / dev.p12 $(wc -c < "$RUNNER_TEMP/dev.p12") 字节"
+
+          KC="$RUNNER_TEMP/probe.keychain-db"
+          security create-keychain -p probepw "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p probepw "$KC"
+          security import "$RUNNER_TEMP/dist.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KC"
+          echo "导入 dist 证书 退出码 $?"
+          security import "$RUNNER_TEMP/dev.p12" -P "$APPLE_DEV_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KC"
+          echo "导入 dev 证书 退出码 $?"
+          security list-keychain -d user -s "$KC"
+          echo "===== 可用的签名身份（只有 CN，不含私钥）====="
+          security find-identity -v -p codesigning "$KC"
+
+      - name: '9 汇总'
+        if: always()
+        run: echo "探测跑完。逐步看上面的日志，不要看这一步的绿灯——每步都是 continue-on-error。"
