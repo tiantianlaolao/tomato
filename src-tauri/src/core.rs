@@ -144,6 +144,73 @@ impl Session {
 }
 
 /// 惰性投影：把会话推演到 now 时刻。可能连续吃掉多个自动衔接的阶段。
+/// 一段结束后是否自动接下一段。
+///
+/// 🔴 **单一真相**：内核推进（project）和"给 iOS 排本地通知"（future_switches）
+///    必须用同一个判定。复刻一份就是造第三对同语义双胞胎 —— 这个项目已经被
+///    bridge.js↔core.rs、pet.html↔companion.js 咬过两次，不能再来第三次。
+pub fn auto_advance(cur_kind: &str, next_kind: &str, cfg: &Settings) -> bool {
+    if cur_kind == "work" && next_kind == "break" {
+        // 强制休息：工作→休息必然自动进入（FE-40①，覆盖开关）
+        cfg.auto_work_to_break || cfg.rest_policy == "forced"
+    } else if cur_kind == "break" && next_kind == "work" {
+        cfg.auto_break_to_work
+    } else {
+        true // 同类相接（工作→工作）没有伦理问题，直接续
+    }
+}
+
+/// 未来的一个切换时刻。
+#[cfg_attr(not(mobile), allow(dead_code))] // 桌面端滴答线程一直活着，不需要排期
+pub struct Switch {
+    pub at_ms: u64,
+    /// 切过去之后是什么："work" | "break" | "done" | "awaiting"
+    pub to: String,
+    /// 这一段结束时，第几段（0 基）走完了
+    pub from_idx: usize,
+}
+
+/// 枚举会话未来所有**确定的**切换时刻，给 iOS 提前排本地通知用。
+///
+/// iOS 上 App 进后台就完全冻结，没有线程也没有定时器 —— 所以段末提醒只能提前
+/// 委托给系统。内核"目标时间戳 + 惰性投影"的架构天生适配：所有切换点都是
+/// 已知时间戳，一次能全算出来。
+///
+/// 🔴 遇到"非自动衔接"就停：那之后要等用户点一下才继续，时刻根本不确定，
+///    排了就是在撒谎（用户没点，通知却响了）。所以最后一条是 awaiting。
+#[cfg_attr(not(mobile), allow(dead_code))]
+pub fn future_switches(s: &Session, cfg: &Settings) -> Vec<Switch> {
+    let mut out = Vec::new();
+    if s.status != "running" || s.stages.is_empty() {
+        return out; // 暂停/等待/空闲/完成都没有确定的未来
+    }
+    let mut idx = s.idx;
+    let mut end = s.end_ms;
+    loop {
+        if idx + 1 >= s.stages.len() {
+            out.push(Switch { at_ms: end, to: "done".into(), from_idx: idx });
+            break;
+        }
+        let cur_kind = s.stages[idx].kind.clone();
+        let next_kind = s.stages[idx + 1].kind.clone();
+        let auto = auto_advance(&cur_kind, &next_kind, cfg);
+        out.push(Switch {
+            at_ms: end,
+            to: if auto { next_kind.clone() } else { "awaiting".into() },
+            from_idx: idx,
+        });
+        if !auto {
+            break;
+        }
+        idx += 1;
+        end += s.stages[idx].secs * 1000;
+        if out.len() >= 32 {
+            break; // iOS 待定通知上限 64，留一半余量
+        }
+    }
+    out
+}
+
 pub fn project(s: &mut Session, cfg: &Settings, now: u64) {
     while s.status == "running" && now >= s.end_ms {
         let end = s.end_ms;
@@ -154,14 +221,7 @@ pub fn project(s: &mut Session, cfg: &Settings, now: u64) {
         }
         let cur_kind = s.stages[s.idx].kind.clone();
         let next_kind = s.stages[s.idx + 1].kind.clone();
-        let auto = if cur_kind == "work" && next_kind == "break" {
-            // 强制休息：工作→休息必然自动进入（FE-40①，覆盖开关）
-            cfg.auto_work_to_break || cfg.rest_policy == "forced"
-        } else if cur_kind == "break" && next_kind == "work" {
-            cfg.auto_break_to_work
-        } else {
-            true // 同类相接（工作→工作）没有伦理问题，直接续
-        };
+        let auto = auto_advance(&cur_kind, &next_kind, cfg);
         if auto {
             s.idx += 1;
             s.end_ms += s.stages[s.idx].secs * 1000;
@@ -398,6 +458,45 @@ pub fn view(s: &Session, cfg: &Settings, now: u64) -> View {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ——— 未来切换点：iOS 排通知的地基 ———
+    #[test]
+    fn future_switches_stops_at_manual_boundary() {
+        // 工作25 / 休息5 / 工作25：关掉"休息完自动开工"，
+        // 那么第二个边界（休息→工作）要停在 awaiting，后面的时刻不确定，不许排。
+        let mut cfg = Settings::default();
+        cfg.auto_work_to_break = true;
+        cfg.auto_break_to_work = false;
+        cfg.rest_policy = "flexible".into();
+        let p = plan(&[("work", 1500), ("break", 300), ("work", 1500)]);
+        let mut s = start_session(&p, 0).unwrap();
+        let sw = future_switches(&s, &cfg);
+        assert_eq!(sw.len(), 2, "只能排到第一个非自动衔接点为止");
+        assert_eq!(sw[0].at_ms, 1_500_000);
+        assert_eq!(sw[0].to, "break", "工作完自动进休息");
+        assert_eq!(sw[1].at_ms, 1_800_000);
+        assert_eq!(sw[1].to, "awaiting", "休息完要等人点，不是自动进工作");
+
+        // 打开自动开工，就能一路排到 done
+        cfg.auto_break_to_work = true;
+        let sw = future_switches(&s, &cfg);
+        assert_eq!(sw.len(), 3);
+        assert_eq!(sw[2].to, "done");
+        assert_eq!(sw[2].at_ms, 3_300_000);
+
+        // 非 running 一条都不排：暂停/等待的未来时刻是不确定的
+        s.status = "paused".into();
+        assert!(future_switches(&s, &cfg).is_empty());
+    }
+
+    #[test]
+    fn forced_rest_overrides_auto_switch() {
+        // 强制休息模式下，工作→休息必然自动进入，哪怕开关是关的
+        let mut cfg = Settings::default();
+        cfg.auto_work_to_break = false;
+        cfg.rest_policy = "forced".into();
+        assert!(auto_advance("work", "break", &cfg));
+    }
 
     fn plan(pairs: &[(&str, u64)]) -> Plan {
         Plan {

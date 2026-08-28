@@ -102,6 +102,11 @@ struct App {
     rest_shown: bool,        // 强制休息全屏遮罩当前是否亮着
     last_save_ms: u64,
     remind_armed: bool,      // 强提醒只对"本次运行期间进入等待"的会话催；隔夜恢复的旧会话不该开机就被唠叨
+    /// iOS 本地通知的排期指纹（status/idx/end_ms）。滴答每秒都会推 state，
+    /// 但排期只在这三样真的变了时才需要重排 —— 每秒 cancel_all + 重排一遍
+    /// 是往 Swift 桥上狂敲，白烧电。
+    #[cfg(mobile)]
+    last_arm: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -134,6 +139,7 @@ impl App {
             last_strong_ms: 0, continuous_work_ms: 0, last_sit_ms: 0,
             last_tray: String::new(), last_tray_sec: String::new(),
             rest_shown: false, last_save_ms: 0, remind_armed: false,
+            #[cfg(mobile)] last_arm: String::new(),
         }
     }
     fn save_settings(&self) { if let Ok(s) = serde_json::to_string_pretty(&self.settings) { fs::write(self.dir.join("settings.json"), s).ok(); } }
@@ -247,6 +253,68 @@ fn sfx(app: &AppHandle, kind: &str) {
     let _ = app.emit("sfx", kind);
 }
 
+// ———————————————————————— iOS：把段末提醒提前委托给系统 ————————————————————————
+// iOS 上 App 进后台**完全冻结**：没有线程、没有定时器、没有 JS。桌面端那个每秒
+// 一次的滴答线程一锁屏就死了，段结束时不会有任何提示 —— 而这个产品的定位就是
+// "手机立在桌上当摆件，人去干别的事"，不能叫人就等于不成立。
+//
+// 计时本身不会错（内核是"目标时间戳 + 惰性投影"，回前台一投影就准）。做不到的
+// 只是"在后台叫你"，所以只能提前把所有切换时刻**批量注册成系统本地通知**。
+//
+// 🔴 移动端一律只走排期、滴答不再发切段通知：iOS 的 willPresent 前台也会弹
+//    （插件里返回 [.badge, .sound, ...]），两条路一起走就会双响。
+// 🔴 每次状态变化都要重排：用户暂停/跳过之后，旧的排期绝不能照响。
+#[cfg(mobile)]
+fn arm_notifications(app: &AppHandle) {
+    use tauri_plugin_notification::{NotificationExt, Schedule};
+
+    // 锁内只取快照，放锁后再碰插件 —— 插件调用会派发到主线程，
+    // 持锁去碰就是 8-25 那个死锁的翻版。
+    let switches = {
+        let state: State<Mutex<App>> = app.state();
+        let mut a = state.lock().unwrap();
+        let fp = format!("{}|{}|{}", a.session.status, a.session.idx, a.session.end_ms);
+        if fp == a.last_arm {
+            return; // 排期没变，不用往 Swift 桥上白敲一遍
+        }
+        a.last_arm = fp;
+        let cfg = a.settings.clone();
+        core::future_switches(&a.session, &cfg)
+    };
+
+    let n = app.notification();
+    let _ = n.cancel_all(); // 先撤销未触发的旧排期
+
+    let now = now_ms();
+    for (i, sw) in switches.iter().enumerate() {
+        if sw.at_ms <= now + 1000 {
+            continue; // 已经过去的时刻，iOS 也不会触发
+        }
+        let date = match time::OffsetDateTime::from_unix_timestamp((sw.at_ms / 1000) as i64) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let (title, body) = match sw.to.as_str() {
+            "break"    => ("上岸歇会儿", "这一段专注走完了，去泡一泡。"),
+            "work"     => ("回水里吧", "休息结束，下一段开始了。"),
+            "awaiting" => ("这一段走完了", "回来点一下，接着下一段。"),
+            _          => ("这一场结束了", "整场都跑完了，看看攒了几个橘子。"),
+        };
+        let _ = n
+            .builder()
+            .id(9000 + i as i32)
+            .title(title)
+            .body(body)
+            .schedule(Schedule::At { date, repeating: false, allow_while_idle: true })
+            .show();
+    }
+}
+
+// 桌面端不需要排期：滴答线程一直活着，到点直接发即时通知。
+#[cfg(desktop)]
+#[inline]
+fn arm_notifications(_app: &AppHandle) {}
+
 // ———————————————————————— UI 动作清单：锁内攒、放锁后做 ————————————————————————
 // 前三项两个平台都有（通知/音效/状态推送）；其余全是桌面窗口与托盘的活儿。
 #[derive(Default)]
@@ -303,6 +371,9 @@ fn collect_tick(a: &mut App) -> UiWork {
             "running" => {
                 if let Some(cur) = a.session.stages.get(idx) {
                     let kind = if cur.kind == "work" { "工作" } else { "休息" };
+                    // 🔴 移动端这三类切段通知由 arm_notifications 的**排期**负责：
+                    //    iOS 前台也会弹排期通知，两条路一起走就会双响。
+                    #[cfg(desktop)]
                     if a.prev_status != "idle" && !(a.prev_status == "paused" && a.prev_idx == idx) {
                         w.notices.push((format!("第 {}/{} 段 · {}", idx + 1, total, kind),
                             format!("{} {} 分钟，开始。", kind, (cur.secs + 30) / 60)));
@@ -314,12 +385,16 @@ fn collect_tick(a: &mut App) -> UiWork {
                 // 段间等待有两种方向：休息完等开工（默认），或关了"自动进休息"后工作完等休息 —— 文案要分开
                 let next_is_work = a.session.stages.get(idx + 1).map(|s| s.kind == "work").unwrap_or(true);
                 let body = if next_is_work { "休息结束，准备好了就开始下一段工作。" } else { "这段工作完成了，歇一会儿再继续。" };
+                #[cfg(desktop)]
                 w.notices.push(("这一段走完了".into(), body.into()));
+                #[cfg(mobile)]
+                let _ = body;
                 w.sfx.push("switch");
                 a.last_strong_ms = now;
                 a.remind_armed = true;
             }
             "done" => {
+                #[cfg(desktop)]
                 w.notices.push(("🍅 这一轮收获满满".into(), "整个序列都跑完了，去看看汇总吧。".into()));
                 w.sfx.push("done");
                 #[cfg(desktop)]
@@ -525,6 +600,7 @@ fn apply_ui(app: &AppHandle, w: UiWork) {
     for (t, b) in &w.notices { notify(app, t, b); }
     for k in &w.sfx { sfx(app, k); }
     if let Some(v) = w.state_push { let _ = app.emit("state", v); }
+    arm_notifications(app);
     // 以下全是桌面窗口与托盘的活儿：闪窗、托盘图标/菜单栏/气泡、任务栏进度条、
     // 主窗召回、强制休息遮罩。移动端一样都没有 —— 整块不参与编译。
     #[cfg(desktop)]
@@ -704,6 +780,17 @@ async fn get_state(app: AppHandle) -> core::View {
 }
 
 fn do_session_start(app: &AppHandle, plan: &Plan) -> Result<core::View, String> {
+    // 通知权限在**第一次开始会话时**要，不在冷启动时要 —— 用户刚点了"开始"，
+    // 这时候弹"允许通知"才讲得通；一打开 App 就弹框只会吓跑人。
+    // 没授权的话段末提醒根本响不了，而这个产品 90% 时间用户不看屏幕，只能靠听。
+    #[cfg(mobile)]
+    {
+        use tauri_plugin_notification::{NotificationExt, PermissionState};
+        let n = app.notification();
+        if !matches!(n.permission_state(), Ok(PermissionState::Granted)) {
+            let _ = n.request_permission();
+        }
+    }
     let view = {
         let state: State<Mutex<App>> = app.state();
         let mut a = state.lock().unwrap();
@@ -718,6 +805,7 @@ fn do_session_start(app: &AppHandle, plan: &Plan) -> Result<core::View, String> 
     };
     sync_rest_overlay(app);
     let _ = app.emit("state", view.clone()); // 广播给所有窗口（主窗口/遮罩窗谁发起的都同步）
+    arm_notifications(app);
     Ok(view)
 }
 
@@ -758,6 +846,7 @@ fn do_session_cmd(app: &AppHandle, cmd: &str) -> Result<core::View, String> {
     sync_rest_overlay(app);
     if let Some(s) = settings_push { let _ = app.emit("settings", s); }
     let _ = app.emit("state", view.clone()); // 广播给所有窗口
+    arm_notifications(app);
     Ok(view)
 }
 
@@ -904,6 +993,7 @@ async fn set_activity(app: AppHandle, activity: String) {
         core::view(&a.session, &a.settings, now_ms())
     };
     let _ = app.emit("state", view);
+    arm_notifications(&app);
 }
 
 #[cfg(mobile)]
