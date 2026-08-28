@@ -7,111 +7,49 @@
 <meta name="theme-color" content="#14100d">
 <title>capyroom</title>
 <!--
-  移动端外壳：**只负责接桥和喂数据**，画面全在 scene.js 里。
-  scene.js 不认识 Tauri —— 这样它能在浏览器里用测试夹具直接驱动、
-  playwright 截图验收，也不会再造出一对"同语义双胞胎"。
-
-  🔴 本版全部是占位色块，不含任何美术资产。先把架构跑通：
-     分层（静态层只在尺寸/状态光变化时重画）、限帧 12fps、
-     状态光过渡 ≥1.5s、烧屏平移、木牌数字、橘子进度。
-     资产可以换，架构不行。
-
-  浏览器里验收：index.html?demo=work / break / paused / done / idle
-  （demo 是**测试夹具不是假内核**——它只造静态 view 快照喂给渲染层，
-   不重新实现任何内核语义，所以不构成需要同步的双胞胎。）
+  外壳：只有骨架，画面在 scene.js、流程在 main.js。
+  🔴 本版全部是占位色块，不含任何美术资产 —— 先把架构跑通。资产可以换，架构不行。
+  浏览器验收：?demo=idle | running | pre | break | paused | awaiting | done | grace
 -->
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="stage"></div>
 
-<!-- 临时调试条：真正的"选序列/开始/完成卡片"是下一步的活，
-     这一版先留几个按钮把桥两个方向都走一遍 -->
-<div id="dev">
-  <button id="bStart">开始 5 分钟</button>
-  <button id="bPause">暂停</button>
-  <button id="bSkip">跳过</button>
-  <button id="bStop">结束</button>
-  <span id="tag">—</span>
+<div id="ui">
+  <!-- 空闲：选一个预设就开始（§12 第 5 条：第一版只给预设，不做序列编辑器） -->
+  <div id="picker">
+    <div class="hint">选一支，它就下水陪你</div>
+    <div id="planlist"></div>
+  </div>
+
+  <!-- 运行中：零 UI。轻触画面才临时唤出，3 秒收起 -->
+  <div id="ops" class="hide">
+    <button id="opPause">暂停</button>
+    <button id="opSkip">跳过这段</button>
+  </div>
+
+  <!-- 段间等待 -->
+  <div id="nextbar" class="hide">
+    <button id="nextbtn">开始下一段</button>
+  </div>
+
+  <!-- 完成卡片 -->
+  <div id="donecard" class="hide">
+    <div class="dc-title">这一场结束了</div>
+    <div id="doneMain">—</div>
+    <div id="doneSub">—</div>
+    <button id="doneOk">好</button>
+  </div>
+
+  <!-- 长按结束：规则常驻（§3.3 不提前说，代价就没有威慑力） -->
+  <div id="holdbar" class="hide">
+    <div id="holdring"></div>
+    <span id="holdtip">长按结束</span>
+  </div>
 </div>
 
 <script src="scene.js"></script>
-<script>
-(function () {
-'use strict';
-const T = window.__TAURI__;
-const $ = (id) => document.getElementById(id);
-const qs = new URLSearchParams(location.search);
-let view = null;
-
-Scene.mount($('stage'));
-Scene.start();
-
-function tag(s) { $('tag').textContent = s; }
-function feed(v) { view = v; Scene.update(v); tag(v ? v.status : '—'); }
-
-// ── 测试夹具：浏览器里没有 Tauri 时，造一个静态 view 快照 ──
-// 只为看画面，不实现任何内核语义（推进/暂停/记账全不做）。
-function fixture(kind) {
-  const stages = [
-    { kind:'work', secs:300, activity:'idle' },
-    { kind:'break', secs:120, activity:'' },
-    { kind:'work', secs:300, activity:'idle' },
-    { kind:'break', secs:600, activity:'' },
-  ];
-  const base = { stages, plan_name:'测试序列', idx:2, remaining_ms:184000,
-                 now:Date.now(), end_ms:Date.now()+184000, rest_locked:false,
-                 acc_work_ms:420000, acc_rest_ms:60000, activity:'idle' };
-  if (kind === 'idle')   return Object.assign({}, base, { status:'idle', stages:[], idx:0, remaining_ms:0 });
-  if (kind === 'break')  return Object.assign({}, base, { status:'break', idx:3, remaining_ms:96000 });
-  if (kind === 'paused') return Object.assign({}, base, { status:'paused' });
-  if (kind === 'done')   return Object.assign({}, base, { status:'done', idx:3, remaining_ms:0 });
-  if (kind === 'pre')    return Object.assign({}, base, { status:'work', remaining_ms:9000 });
-  return Object.assign({}, base, { status:'work' });
-}
-
-if (!T || !T.core) {
-  // 浏览器（无 Tauri）：走夹具
-  document.body.classList.add('nobridge');
-  feed(fixture(qs.get('demo') || 'work'));
-  // 让秒数走起来，方便看木牌和段末预告
-  setInterval(() => {
-    if (!view || (view.status !== 'work' && view.status !== 'break')) return;
-    view.remaining_ms = Math.max(0, view.remaining_ms - 1000);
-    Scene.update(view);
-  }, 1000);
-  $('bStart').onclick = () => feed(fixture('work'));
-  $('bPause').onclick = () => feed(fixture('paused'));
-  $('bSkip').onclick  = () => feed(fixture('break'));
-  $('bStop').onclick  = () => feed(fixture('done'));
-} else {
-  // 真机 / 桌面 Tauri：接内核
-  T.event.listen('state', (e) => feed(e.payload));
-  (async () => {
-    try { await T.core.invoke('boot'); } catch (e) {}
-    feed(await T.core.invoke('get_state'));
-    // Rust 每秒推一次 state；本地按时间戳补插，免得秒针一顿一顿
-    setInterval(() => {
-      if (!view || (view.status !== 'work' && view.status !== 'break')) return;
-      view.remaining_ms = Math.max(0, view.end_ms - Date.now());
-      Scene.update(view);
-    }, 250);
-  })();
-  const call = async (n, a) => { try { feed(await T.core.invoke(n, a)); } catch (e) { tag('ERR ' + e); } };
-  $('bStart').onclick = () => call('session_start', { plan: {
-    id:'smoke', name:'冒烟测试', builtin:false,
-    stages:[{kind:'work',secs:300,activity:'idle'},{kind:'break',secs:120,activity:''},
-            {kind:'work',secs:300,activity:'idle'}] } });
-  $('bPause').onclick = () => call('session_cmd', { cmd: view && view.status === 'paused' ? 'resume' : 'pause' });
-  $('bSkip').onclick  = () => call('session_cmd', { cmd:'skip' });
-  $('bStop').onclick  = () => call('session_cmd', { cmd:'stop' });
-}
-
-// 页面不可见时停画（省电；也是 8-25 桌面端就定过的规矩）
-document.addEventListener('visibilitychange', () => {
-  document.visibilityState === 'visible' ? Scene.start() : Scene.stop();
-});
-})();
-</script>
+<script src="main.js"></script>
 </body>
 </html>

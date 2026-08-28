@@ -57,7 +57,8 @@ const Scene = {
   W:0, H:0, DPR:1, U:1,
   view:null,
   light:Object.assign({}, LIGHT.idle), lightFrom:null, lightTo:null, fadeT:1,
-  status:'idle',
+  status:'idle',   // 内核原状态
+  phase:'idle',    // 表演相（LIGHT 的键）
   oranges:[],            // 已完成的工作段 → 漂在水面的橘子
   lastDoneWork:0,
   t:0, lastTs:0, raf:0, running:false,
@@ -97,16 +98,33 @@ const Scene = {
     this.drawOnce();
   },
 
+  // 🔴 内核的 status 只有 idle/running/paused/awaiting/done 五个，**没有 work/break**
+  //    ——是工作段还是休息段，要看 stages[idx].kind。
+  //    状态光是**表演层**概念，内核状态是**数据层**概念，中间必须有这个显式映射。
+  //    （第一版我按 work/break 建表、夹具也自己编成 status:'work'，本地六态全绿，
+  //      一接真内核会全部落到 idle 那一档 —— 自己编的夹具跟内核真相不一致，
+  //      测试就成了自说自话。）
+  phaseOf(v) {
+    if (!v || v.status === 'idle') return 'idle';
+    if (v.status === 'done') return 'done';
+    if (v.status === 'awaiting') return 'awaiting';
+    if (v.status === 'paused') return 'paused';
+    const cur = v.stages && v.stages[v.idx];
+    return (cur && cur.kind === 'break') ? 'break' : 'work';
+  },
+
   // ── 喂数据。渲染层不区分数据是来自 Tauri 事件还是测试夹具 ──
   update(view) {
     if (!view) return;
-    if (view.status !== this.status) {
+    const ph = this.phaseOf(view);
+    if (ph !== this.phase) {
       this.lightFrom = Object.assign({}, this.light);
-      this.lightTo = LIGHT[view.status] || LIGHT.idle;
+      this.lightTo = LIGHT[ph] || LIGHT.idle;
       this.fadeT = 0;
-      this.status = view.status;
+      this.phase = ph;
       this.bgDirty = true;
     }
+    this.status = view.status;
     // 完成一个工作段 → 漂来一个橘子（§3：慢，不弹跳，2~3 秒滑到位）
     const doneWork = this.countDoneWork(view);
     if (doneWork > this.lastDoneWork) {
@@ -221,7 +239,7 @@ const Scene = {
     const sunX = W * (0.22 + p * 0.10);
     const sunY = H * (0.06 + p * 0.26);
     const sunR = 34 * U;
-    if (this.status !== 'done') {
+    if (this.phase !== 'done') {
       const sg = fx.createRadialGradient(sunX, sunY, sunR*0.2, sunX, sunY, sunR*3.2);
       sg.addColorStop(0, 'rgba(200,70,40,' + (0.45*L.bright) + ')');
       sg.addColorStop(1, 'rgba(200,70,40,0)');
@@ -291,13 +309,17 @@ const Scene = {
     if (this.board && v) {
       const B = this.board;
       const secs = Math.max(0, Math.round((v.remaining_ms || 0) / 1000));
-      // 空闲态牌面是空的：没在跑就没有"本段剩余"，显示 00:00 是在说假话
-      const txt = (this.status === 'idle') ? '· ·'
-        : String(Math.floor(secs/60)).padStart(2,'0') + ':' + String(secs%60).padStart(2,'0');
+      // 🔴 木牌表的是"本段剩余"，只有 running/paused 才有这个东西。
+      //    idle / awaiting / done 显示 00:00 都是在说假话 —— 第一版只修了 idle，
+      //    awaiting 和 done 照样在撒谎，是截图逐格看才发现的。
+      const hasTime = (this.phase === 'work' || this.phase === 'break' || this.phase === 'paused');
+      const txt = hasTime
+        ? String(Math.floor(secs/60)).padStart(2,'0') + ':' + String(secs%60).padStart(2,'0')
+        : '· ·';
       // 段末预告：最后 30 秒极缓地亮一点点，绝不闪
-      const pre = (this.status === 'work' || this.status === 'break') && secs <= PRE_ALERT_SEC
+      const pre = (this.phase === 'work' || this.phase === 'break') && secs <= PRE_ALERT_SEC
         ? (1 - secs / PRE_ALERT_SEC) * 0.35 : 0;
-      const alpha = (this.status === 'idle' ? 0.30 : 0.55 + pre);
+      const alpha = (hasTime ? 0.55 + pre : 0.30);
       fx.font = '600 ' + Math.round(B.h * 0.52) + 'px ui-monospace,Menlo,monospace';
       fx.textAlign = 'center'; fx.textBaseline = 'middle';
       fx.fillStyle = 'rgba(58,42,26,' + Math.min(1, alpha + 0.18).toFixed(2) + ')';

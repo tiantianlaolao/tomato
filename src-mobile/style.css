@@ -1,4 +1,4 @@
-/* capyroom 移动端外壳样式。画面全在 canvas 里，这里只管布局和调试条。 */
+/* capyroom 移动端外壳样式。画面全在 canvas 里，这里只管 UI 层。 */
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
   font-family:-apple-system,"PingFang SC",sans-serif;
@@ -6,17 +6,63 @@ html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
 
 #stage{position:fixed;inset:0}
 #stage .layer{position:absolute;inset:0;width:100%;height:100%;display:block}
+/* 规则条由 scene.js 建在 stage 里，这里不用管 */
+#stage #rulebar{display:none}
 
-/* 规则条常驻（§3.3：不提前说，代价就没有威慑力，只会变成"我怎么白干了"的差评） */
-#rulebar{position:absolute;left:0;right:0;bottom:0;z-index:3;text-align:center;
-  font-size:11px;color:rgba(203,184,154,.42);letter-spacing:.3px;
-  padding:8px 12px calc(env(safe-area-inset-bottom) + 8px);pointer-events:none}
+#ui{position:fixed;inset:0;z-index:5;pointer-events:none}
+#ui > *{pointer-events:auto}
+.hide{display:none!important}
 
-/* 临时调试条——真正的会话流程是下一步的活 */
-#dev{position:fixed;left:0;right:0;top:0;z-index:9;display:flex;gap:6px;align-items:center;
-  padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;
-  background:linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,0))}
-#dev button{font:inherit;font-size:12px;padding:7px 9px;border-radius:8px;
-  border:1px solid rgba(120,96,68,.6);background:rgba(28,22,16,.75);color:#cbb89a}
-#dev button:active{background:rgba(58,45,33,.9)}
-#tag{font:11px ui-monospace,Menlo,monospace;color:#8a7a63;margin-left:auto}
+/* ── 空闲：预设 ───────────────────────────────── */
+/* 预设列表压在池子上，加一层压暗让卡片读得清 —— 别指望毛玻璃在深色上够用 */
+#picker{position:absolute;left:0;right:0;bottom:0;
+  padding:26px 16px calc(env(safe-area-inset-bottom) + 22px);
+  background:linear-gradient(rgba(10,8,6,0),rgba(10,8,6,.62) 32%,rgba(10,8,6,.8))}
+#picker .hint{font-size:12px;color:rgba(203,184,154,.5);text-align:center;margin-bottom:10px}
+#planlist{display:flex;flex-direction:column;gap:8px}
+.plan{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;
+  font:inherit;text-align:left;padding:13px 16px;border-radius:14px;
+  border:1px solid rgba(120,96,68,.45);background:rgba(28,22,16,.72);color:#cbb89a;
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.plan:active{background:rgba(58,45,33,.85)}
+.plan b{font-size:16px;font-weight:600}
+.plan span{font-size:11px;color:rgba(203,184,154,.55)}
+
+/* ── 运行中：轻触唤出的操作条。刻意低调、刻意会自己消失 ── */
+#ops{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 62px);
+  display:flex;gap:8px;justify-content:center;padding:0 16px;
+  animation:fadein .25s ease}
+#ops button{font:inherit;font-size:13px;padding:10px 16px;border-radius:11px;
+  border:1px solid rgba(120,96,68,.4);background:rgba(20,16,12,.7);color:rgba(203,184,154,.85);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+
+/* ── 段间等待 ─────────────────────────────────── */
+#nextbar{position:absolute;left:0;right:0;bottom:0;
+  padding:0 16px calc(env(safe-area-inset-bottom) + 22px)}
+#nextbar button{width:100%;font:inherit;font-size:16px;font-weight:600;padding:16px;
+  border-radius:14px;border:1px solid rgba(232,145,92,.5);
+  background:rgba(58,38,22,.8);color:#f0c9a0;
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+
+/* ── 完成卡片 ─────────────────────────────────── */
+#donecard{position:absolute;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom) + 22px);
+  padding:22px 20px;border-radius:18px;text-align:center;
+  border:1px solid rgba(120,96,68,.45);background:rgba(24,19,14,.86);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.dc-title{font-size:12px;color:rgba(203,184,154,.5);margin-bottom:10px}
+#doneMain{font:600 34px/1.1 -apple-system,"PingFang SC",sans-serif;color:#f0c9a0}
+#doneSub{font-size:12px;color:rgba(203,184,154,.6);margin-top:8px}
+#doneOk{margin-top:18px;width:100%;font:inherit;font-size:15px;padding:13px;
+  border-radius:12px;border:1px solid rgba(120,96,68,.5);
+  background:rgba(40,31,22,.9);color:#cbb89a}
+
+/* ── 长按结束：规则常驻 + 长按进度 ────────────────── */
+#holdbar{position:absolute;left:0;right:0;bottom:0;overflow:hidden;
+  padding:14px 12px calc(env(safe-area-inset-bottom) + 14px);
+  text-align:center;touch-action:none}
+#holdtip{position:relative;font-size:11px;color:rgba(203,184,154,.42);letter-spacing:.3px}
+#holdbar.holding #holdtip{color:rgba(240,201,160,.9)}
+#holdring{position:absolute;left:0;bottom:0;top:0;width:0;
+  background:linear-gradient(90deg,rgba(232,89,12,.16),rgba(232,89,12,.34));
+  transition:width .05s linear}

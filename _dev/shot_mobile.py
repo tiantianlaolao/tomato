@@ -16,7 +16,8 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(os.path.dirname(HERE), 'src-mobile')
 PORT = 8941
-STATES = ['idle', 'work', 'pre', 'break', 'paused', 'done']
+# 状态值照抄内核真相：idle/running/paused/awaiting/done（**没有 work/break**）
+STATES = ['idle', 'running', 'grace', 'pre', 'break', 'awaiting', 'paused', 'done']
 
 os.chdir(WEB)
 socketserver.TCPServer.allow_reuse_address = True
