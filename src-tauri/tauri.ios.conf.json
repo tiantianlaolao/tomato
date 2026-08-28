@@ -9,5 +9,10 @@
         "title": "capyroom"
       }
     ]
+  },
+  "bundle": {
+    "iOS": {
+      "developmentTeam": "8J6A847P66"
+    }
   }
 }
