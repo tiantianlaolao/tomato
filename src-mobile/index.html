@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#14100d">
+<title>capyroom</title>
+<!--
+  移动端前端的第一块砖 —— **这不是产品界面，是桥的冒烟页**。
+
+  它只证明一件事：移动端这份前端能不能跟 core.rs 通上
+  （invoke 调得动、state 事件收得到、时间对得上）。
+  真正的渲染层（分层 canvas + 精灵图 + 状态光）在这之后才写。
+
+  🔴 为什么要单独一份 src-mobile 而不是让 src/ 响应式适配：
+     8-27 定的战略是两端＝两个独立产品，而 src/ 全是给鼠标设计的
+     （序列编辑器、右侧列表栏、pet.html 桌宠窗、rest.html 遮罩窗），
+     移动端一个都不要。更硬的理由是：一份代码适配两端会造出**第三对
+     「同语义双胞胎」**——项目里已经有 bridge.js↔core.rs、
+     pet.html↔companion.js 两对，而且两对都咬过人（8-26「休息中暂停
+     后恢复不了」的病根就是抄双胞胎时写错一个条件）。不要再造第三对。
+
+  分家机制：tauri.ios.conf.json 里覆盖 build.frontendDist 指向 ../src-mobile。
+  平台专属配置会被深合并——这一点已经实证过（PRODUCT_BUNDLE_IDENTIFIER /
+  PRODUCT_NAME / DEVELOPMENT_TEAM 三项都进了生成的 project.yml）。
+-->
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#14100d;color:#cbb89a;
+  font-family:-apple-system,"PingFang SC",sans-serif;-webkit-user-select:none;user-select:none}
+#wrap{position:fixed;inset:0;display:flex;flex-direction:column;
+  padding:calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px)}
+h1{margin:0 0 4px;font-size:15px;color:#7e6c55;font-weight:600}
+.sub{font-size:11px;color:#5d5040;margin-bottom:18px;line-height:1.6}
+#clock{font:600 68px/1 ui-monospace,Menlo,monospace;letter-spacing:2px;color:#e8a15c;
+  text-align:center;margin:8px 0 4px}
+#phase{text-align:center;font-size:14px;color:#a89274;margin-bottom:18px}
+#info{font:11px/1.9 ui-monospace,Menlo,monospace;color:#8a7a63;white-space:pre-wrap;
+  background:rgba(0,0,0,.28);border:1px solid #2e2519;border-radius:10px;padding:10px 12px;
+  flex:1;overflow:auto}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+button{flex:1;min-width:88px;font:inherit;font-size:15px;padding:14px 10px;border-radius:12px;
+  border:1px solid #4a3a2a;background:#241d16;color:#cbb89a}
+button:active{background:#3a2d21}
+button.go{background:#e8590c;border-color:#e8590c;color:#fff}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>capyroom · 桥冒烟</h1>
+  <div class="sub">这不是产品界面。它只验证移动端前端能否跟 Rust 计时内核通上。</div>
+  <div id="clock">--:--</div>
+  <div id="phase">未连接</div>
+  <div id="info">启动中…</div>
+  <div class="row">
+    <button class="go" id="bStart">▶ 开始（5分钟测试）</button>
+    <button id="bPause">‖ 暂停</button>
+  </div>
+  <div class="row">
+    <button id="bSkip">跳过这段</button>
+    <button id="bStop">结束</button>
+  </div>
+</div>
+
+<script>
+(function () {
+'use strict';
+const T = window.__TAURI__;
+const $ = (id) => document.getElementById(id);
+let view = null, lastErr = '';
+
+function mmss(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+
+const PHASE = { idle:'空闲', work:'工作', break:'休息', paused:'暂停', awaiting:'等待下一段', done:'完成' };
+
+function render() {
+  if (!view) { $('info').textContent = '还没拿到 view。' + lastErr; return; }
+  const st = view.stages || [];
+  const cur = st[view.idx];
+  $('clock').textContent = mmss(view.remaining_ms);
+  $('phase').textContent = (PHASE[view.status] || view.status)
+    + (cur ? '  ·  第 ' + (view.idx + 1) + '/' + st.length + ' 段（' + (cur.kind === 'work' ? '工作' : '休息') + '）' : '');
+  // 🔴 时间对账：内核按时间戳惰性投影，所以 end_ms - now 才是真相；
+  //    锁屏/切后台回来若这两行对得上，就说明移动端的投影没走样。
+  $('info').textContent =
+    '状态       ' + view.status + '\n' +
+    '计划       ' + (view.plan_name || '(无)') + '\n' +
+    '段         ' + (st.length ? (view.idx + 1) + ' / ' + st.length : '-') + '\n' +
+    '本段剩余   ' + mmss(view.remaining_ms) + '\n' +
+    'end_ms-now ' + mmss(Math.max(0, view.end_ms - view.now)) + '  ← 应与上一行一致\n' +
+    '强制休息   ' + (view.rest_locked ? '锁着' : '未锁') + '\n' +
+    '实际专注   ' + mmss(view.acc_work_ms) + '   实际休息 ' + mmss(view.acc_rest_ms) + '\n' +
+    '活动       ' + (view.activity || '-') + '\n' +
+    (lastErr ? '\n最近错误   ' + lastErr : '');
+  $('bPause').textContent = view.status === 'paused' ? '▶ 继续' : '‖ 暂停';
+}
+
+async function call(name, args) {
+  try {
+    const r = await T.core.invoke(name, args);
+    lastErr = '';
+    return r;
+  } catch (e) {
+    lastErr = name + ': ' + e;
+    render();
+    throw e;
+  }
+}
+
+$('bStart').onclick = async () => {
+  // 临时测试序列：内置预设的读写还没接，先用一个写死的短序列把内核跑起来
+  view = await call('session_start', { plan: {
+    id: 'smoke', name: '冒烟测试', builtin: false,
+    stages: [
+      { kind:'work',  secs:300, activity:'idle' },
+      { kind:'break', secs:120, activity:'' },
+      { kind:'work',  secs:300, activity:'idle' }
+    ]
+  }});
+  render();
+};
+$('bPause').onclick = async () => { view = await call('session_cmd', { cmd: view && view.status === 'paused' ? 'resume' : 'pause' }); render(); };
+$('bSkip').onclick  = async () => { view = await call('session_cmd', { cmd: 'skip' }); render(); };
+$('bStop').onclick  = async () => { view = await call('session_cmd', { cmd: 'stop' }); render(); };
+
+(async function boot() {
+  if (!T || !T.core) { $('info').textContent = '❌ window.__TAURI__ 不存在——不是跑在 Tauri 里，或 withGlobalTauri 没开。'; return; }
+  // Rust 侧每秒滴答会推 state；这里再本地每 250ms 重绘一次，免得秒针看着一顿一顿
+  T.event.listen('state', (e) => { view = e.payload; render(); });
+  try { await call('boot'); } catch (e) {}
+  view = await call('get_state');
+  render();
+  setInterval(() => {
+    if (view && (view.status === 'work' || view.status === 'break')) {
+      view.remaining_ms = Math.max(0, view.end_ms - Date.now());
+      view.now = Date.now();
+      render();
+    }
+  }, 250);
+})();
+})();
+</script>
+</body>
+</html>

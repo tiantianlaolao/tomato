@@ -58,6 +58,19 @@ jobs:
         if: ${{ !inputs.sign }}
         run: npx tauri ios build --ci --no-sign --archive-only --verbose
 
+      # 两端前端分家的实证：iOS 包里必须是 src-mobile 那份，
+      # 桌面那份（序列编辑器/桌宠窗/遮罩窗，全是给鼠标设计的）一个字都不该进来。
+      - name: '🔴 确认打进包的是移动端前端'
+        if: ${{ !inputs.sign }}
+        continue-on-error: true
+        run: |
+          APP=$(find src-tauri/gen/apple/build -maxdepth 5 -name "*.app" -type d | head -1)
+          echo "app bundle = $APP"
+          echo "----- 移动端标记（应该命中）-----"
+          grep -rl "桥冒烟" "$APP" || echo "❌ 没找到移动端页面"
+          echo "----- 桌面端标记（应该找不到）-----"
+          grep -rl "rest-mask-inner" "$APP" && echo "❌ 桌面前端被打进来了" || echo "✅ 桌面前端没进来"
+
       - name: '产物清单'
         if: ${{ !inputs.sign }}
         continue-on-error: true
