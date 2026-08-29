@@ -25,17 +25,11 @@
     <button id="diagRing">试响</button>
   </div>
 
-  <!-- 空闲：选一支预设开始；三个入口通向桌面端那些核心功能。
-       ⚠️ 这一行按钮是**临时形态**：《移动端产品定义说明书》§2.3 定的是入口伪装成家具
-       （木牌/竹筒/石灯笼…），等真美术进来再挂上去，功能本身先做齐。 -->
+  <!-- 空闲：画面里没有悬浮按钮（§9 功能入口伪装成场景里的物件）。
+       点岸边的木牌＝开始/编排，石灯笼＝设置，石头＝记录。
+       ⚠️ 可发现性靠这行提示兜底：不写的话，新用户看着一张画不知道能点。 -->
   <div id="picker">
-    <div class="hint">选一支，它就下水陪你</div>
-    <div id="planlist"></div>
-    <div id="entries">
-      <button id="entEdit">编排</button>
-      <button id="entHist">记录</button>
-      <button id="entSet">设置</button>
-    </div>
+    <div class="hint">点岸边的木牌开始 · 石灯笼是设置 · 石头是记录</div>
   </div>
 
   <!-- 面板：编排 / 记录 / 设置 共用一个底部抽屉 -->
@@ -73,7 +67,9 @@
   </div>
 </div>
 
+<!-- 引擎 → 场景包 → 外壳。加第二个场景就在这儿多挂一份 scene_xxx.js -->
 <script src="scene.js"></script>
+<script src="scene_onsen.js"></script>
 <script src="main.js"></script>
 </body>
 </html>

@@ -116,12 +116,34 @@ struct App {
     /// 屏幕常亮当前是开是关（只在翻转时才去动 UIApplication）
     #[cfg(mobile)]
     keep_awake: bool,
+    /// 长期统计（两端都记：桌面端也会有"来过几次"的用处）
+    stats: Stats,
 }
 
 #[derive(Serialize, Deserialize)]
 struct SavedSession {
     saved_at: u64,
     session: Session,
+}
+
+/// 长期统计（`stats.json`）。
+///
+/// 🔴 2026-08-29 用户拍板：「攒什么能吸引用户」以后再定，**但打开次数这类数据现在
+///    就要开始记，以后用得到**。所以这里只管**攒数**，不做任何解释和展示 ——
+///    等养成/拜访那条线定了，再决定拿哪几个数字说事。
+/// ⚠️ 只增不改：以后要加字段直接加（`#[serde(default)]` 保证老文件照读），
+///    但已有字段的**含义不许改**，否则历史数字会变成一笔糊涂账。
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+struct Stats {
+    launches: u64,           // 冷启动次数（"来过几次"最朴素的那个数）
+    first_launch_ms: u64,    // 第一次打开的时刻 —— 以后算"认识多久了"要用
+    last_launch_ms: u64,
+    sessions_started: u64,
+    sessions_done: u64,      // 完整跑完的场次
+    sessions_abandoned: u64, // 中途结束且够门槛入账的场次
+    work_ms: u64,            // 累计专注（按**实际经过时间**，跟流水同口径）
+    rest_ms: u64,
 }
 
 impl App {
@@ -139,6 +161,13 @@ impl App {
             .map(|w| core::restore(w.session, &settings, w.saved_at))
             .unwrap_or_else(Session::idle);
         let schedules: Vec<Schedule> = read("schedules.json").and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        // 打开次数在这儿 +1（App::load 每个进程只跑一次＝一次冷启动）
+        let mut stats: Stats = read("stats.json").and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        stats.launches += 1;
+        let boot_now = now_ms();
+        if stats.first_launch_ms == 0 { stats.first_launch_ms = boot_now; }
+        stats.last_launch_ms = boot_now;
+        if let Ok(s) = serde_json::to_string_pretty(&stats) { fs::write(dir.join("stats.json"), s).ok(); }
         // prev_* 直接对齐恢复出来的会话：否则滴答线程会把"恢复"误判成"刚发生的切换"，
         // 启动即重发完成/等待通知，restored done 还会在静默自启时强行弹主窗（曾依赖前端 boot 在 1s 内抢先对齐，竞态）
         let (prev_status, prev_idx) = (session.status.clone(), session.idx);
@@ -152,6 +181,7 @@ impl App {
             #[cfg(mobile)] arm_count: 0,
             #[cfg(mobile)] arm_err: String::new(),
             #[cfg(mobile)] keep_awake: false,
+            stats,
         }
     }
     fn save_settings(&self) { if let Ok(s) = serde_json::to_string_pretty(&self.settings) { fs::write(self.dir.join("settings.json"), s).ok(); } }
@@ -164,6 +194,9 @@ impl App {
     }
     /// 追加一行 JSONL 流水（history.jsonl）。将来的番茄园/统计都从这里长。
     /// 时长按 acc_* 实际经过时间入账（跳过不虚记、暂停不算、放弃记部分）。
+    fn save_stats(&self) {
+        if let Ok(s) = serde_json::to_string_pretty(&self.stats) { fs::write(self.dir.join("stats.json"), s).ok(); }
+    }
     fn write_history(&mut self, completed: bool) {
         let rec = HistoryRecord {
             plan_name: &self.session.plan_name,
@@ -180,6 +213,11 @@ impl App {
                 let _ = writeln!(f, "{line}");
             }
         }
+        // 统计跟流水同一个口径、同一个时刻入账：流水记明细，stats 记总数
+        if completed { self.stats.sessions_done += 1; } else { self.stats.sessions_abandoned += 1; }
+        self.stats.work_ms += self.session.acc_work_ms;
+        self.stats.rest_ms += self.session.acc_rest_ms;
+        self.save_stats();
         self.session.logged = true;
         self.save_session();
     }
@@ -908,6 +946,8 @@ fn do_session_start(app: &AppHandle, plan: &Plan) -> Result<core::View, String> 
         let mut a = state.lock().unwrap();
         let now = now_ms();
         a.session = core::start_session(plan, now)?;
+        a.stats.sessions_started += 1;
+        a.save_stats();
         a.prev_status = "running".into();
         a.prev_idx = 0;
         a.continuous_work_ms = 0;
@@ -1040,6 +1080,15 @@ async fn get_history(app: AppHandle, limit: usize) -> Vec<serde_json::Value> {
     let n = v.len();
     if n > limit { v.drain(0..n - limit); }
     v
+}
+
+/// 长期统计。现在没有任何界面用它 —— 存在的理由是**数据不补记**：
+/// 等以后"攒什么"定了，回头就有账可查；今天不记，那段历史永远没有了。
+#[tauri::command]
+async fn get_stats(app: AppHandle) -> Stats {
+    let state: State<Mutex<App>> = app.state();
+    let a = state.lock().unwrap();
+    a.stats.clone()
 }
 
 // ———————————————————————— 诊断（移动端内测用，上架前连同前端诊断条一起删） ————————————————————————
@@ -1375,7 +1424,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             boot, get_state, session_start, session_cmd,
             save_settings, save_plans, save_schedules, get_history, rest_focus, set_activity,
-            open_main, pet_menu, diag, test_notify
+            open_main, pet_menu, diag, test_notify, get_stats
         ])
         .run(tauri::generate_context!())
         .expect("番茄时钟启动失败")

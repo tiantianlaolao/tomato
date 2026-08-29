@@ -1,13 +1,21 @@
-// capyroom 移动端渲染层（骨架版，全部占位色块，不含任何美术资产）
+// capyroom 移动端渲染引擎（骨架版，全部占位色块，不含任何美术资产）
 //
 // 🔴 这一层**只吃 view 对象，不认识 Tauri**。桥在 index.html 里接。
 //    这么切有两个好处：①能在浏览器里用假 view 直接驱动、playwright 截图验收，
 //    迭代成本几乎为零 ②不会再造出一对"同语义双胞胎"（项目里已有
 //    bridge.js↔core.rs、pet.html↔companion.js 两对，两对都咬过人）。
 //
+// 🔴🔴 引擎不认识任何一个具体场景（2026-08-29 用户定：温泉只是**初始场景之一**，
+//    以后一定会有别的场景）。场景相关的东西全在场景包里（scene_onsen.js）：
+//    状态光表、底色、怎么画、时间显示挂在哪个物件上、五个入口分别是哪件东西。
+//    引擎只管这些**跟场景无关**的事：
+//      分层与脏标记 · 限帧 · 状态光渐变 · 烧屏平移 · 全局明度 · 把 MM:SS 写进
+//      场景给的那个框 · 内核状态→表演相的映射
+//    加第二个场景 = 再写一份场景包 + Scene.use('xxx')，引擎一行不动。
+//
 // 分层严格按《场景与美术方案说明书》§8.3：
-//   bgc  静态层：天空/林子/岸台/池盆/灯笼身/木牌 —— **只在尺寸或状态光变化时重画**
-//   fxc  动态层：落日/灯笼光晕/水面反光/橘子/木牌数字 —— 每帧，且限帧
+//   bgc  静态层：**只在尺寸或状态光变化时重画**
+//   fxc  动态层：每帧，且限帧
 // 8-28 打样实测：整屏每帧重铺（A 模式）比背景不重绘（B 模式）慢一倍，所以静态的
 // 东西一帧都不该重画。
 (function () {
@@ -26,41 +34,22 @@ function mix(a, b, t) { return [0,1,2].map(i => Math.round(a[i] + (b[i]-a[i])*t)
 function css(c) { return 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')'; }
 function rgba(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
 function lerp(a, b, t) { return a + (b-a)*t; }
+// 场景包要用同一套工具，别各写一份
+window.SceneUtil = { RGB, mix, css, rgba, lerp };
 
-// ── 状态光表（§7.4）。状态之间只改"光"，不改底色 ──────────────
-// 🔴 硬纪律：相邻状态过渡 ≥1.5 秒。余光里任何突变都会被读成"有事发生"，
-//    抬头一看没事 —— 这是最伤人的干扰。
-const LIGHT = {
-  idle:     { sky:RGB('#e8956b'), lamp:RGB('#ff9f3c'), lampI:0.00, bright:0.85 },
-  work:     { sky:RGB('#c9744e'), lamp:RGB('#ff9f3c'), lampI:0.50, bright:0.75 },
-  break:    { sky:RGB('#ffb45c'), lamp:RGB('#ffd25e'), lampI:1.00, bright:1.00 },
-  paused:   { sky:RGB('#8a8175'), lamp:RGB('#8a8175'), lampI:0.35, bright:0.60 },
-  awaiting: { sky:RGB('#d98a5c'), lamp:RGB('#ffb45c'), lampI:0.70, bright:0.88 },
-  done:     { sky:RGB('#2a2740'), lamp:RGB('#ffd25e'), lampI:1.10, bright:1.05 },
-};
-const FADE_MS = 1600;          // ≥1.5s
+const FADE_MS = 1600;          // ≥1.5s：余光里任何突变都会被读成"有事发生"
 const PRE_ALERT_SEC = 30;      // 段末预告：最后 30 秒极缓地亮一点点，绝不闪
-
-// ── 底色（§7.3，打样页跑过两轮 25 分钟的那组，手机上耐看）────────
-const C = {
-  skyTop:RGB('#191411'), skyLow:RGB('#241b13'),
-  forest:RGB('#15110e'),
-  bank:RGB('#2c2016'), bankHi:RGB('#3b2c1d'),
-  water:RGB('#3a2f22'),
-  stone:RGB('#4b4640'), lampStone:RGB('#5a544c'),
-  board:RGB('#8a6b45'), boardEdge:RGB('#5a4530'),
-  sun:RGB('#b93b22'), lampCore:RGB('#ffdca0'), orange:RGB('#e8801c'),
-};
 
 const Scene = {
   root:null, bgc:null, fxc:null, bx:null, fx:null,
   W:0, H:0, DPR:1, U:1,
   view:null,
-  light:Object.assign({}, LIGHT.idle), lightFrom:null, lightTo:null, fadeT:1,
+  scene:null,                          // 当前场景包
+  slots:{ time:null, entries:null },   // 场景回填：时间显示的框、入口命中区
+  light:null, lightFrom:null, lightTo:null, fadeT:1,
+  map:null, mapW:null,                 // 底图 cover 变换（remap 里算）
   status:'idle',   // 内核原状态
-  phase:'idle',    // 表演相（LIGHT 的键）
-  oranges:[],            // 已完成的工作段 → 漂在水面的橘子
-  lastDoneWork:0,
+  phase:'idle',    // 表演相（场景光表的键）
   t:0, lastTs:0, raf:0, running:false, lastFps:0,
   drift:{x:0, y:0, t:0},  // 烧屏平移
   bgDirty:true,
@@ -70,16 +59,38 @@ const Scene = {
                           //    83.3ms 会被凑到 100ms，实测只有 10.7fps。
   nextFrameAt:0,
 
-  mount(root) {
+  // 换场景：以后加了第二个场景，这里就是唯一的开关
+  use(id) {
+    const s = (window.SCENES || {})[id];
+    if (!s) { console.error('没有这个场景：' + id); return; }
+    this.scene = s;
+    if (this.bgi) {
+      this.bgi.style.display = s.bgImage ? '' : 'none';
+      if (s.bgImage && this.bgi.getAttribute('src') !== s.bgImage) this.bgi.src = s.bgImage;
+    }
+    this.light = Object.assign({}, s.light[this.phase] || s.light.idle);
+    this.lightFrom = this.lightTo = null; this.fadeT = 1;
+    this.bgDirty = true;
+    // 🔴 mount 里 use() 跑在 resize() 之前，那时候 W/H 还是 0、变换还没算出来。
+    //    第一版直接 drawOnce，场景包拿到的 map 是 undefined → 每帧抛异常 →
+    //    实测帧率 0.0（跟 8-28 那次 addColorStop 抛异常一模一样的死法）。
+    if (this.root && this.W) { this.remap(); this.drawOnce(); }
+  },
+
+  mount(root, sceneId) {
     this.root = root;
+    // 🔴 第 0 层是 <img> 不是 canvas：8-28 打样实测整屏位图每帧重铺比背景不重绘
+    //    慢一倍（§8.3）。底图交给浏览器合成器，我们一帧都不用画它。
     root.innerHTML =
+      '<img class="layer" id="bgi" alt="">' +
       '<canvas class="layer" id="bgc"></canvas>' +
-      '<canvas class="layer" id="fxc"></canvas>' +
-      '<div id="rulebar">长按取消 · 开始 30 秒内取消无损</div>';
+      '<canvas class="layer" id="fxc"></canvas>';
+    this.bgi = root.querySelector('#bgi');
     this.bgc = root.querySelector('#bgc');
     this.fxc = root.querySelector('#fxc');
     this.bx = this.bgc.getContext('2d');
     this.fx = this.fxc.getContext('2d');
+    this.use(sceneId || 'onsen');
     // 🔴 只听 window.resize 不够：同页面内的布局变化不发这个事件
     //    （8-26 桌面端"序列开合把水豚拉伸"就是这个坑）。
     new ResizeObserver(() => this.resize()).observe(root);
@@ -94,8 +105,22 @@ const Scene = {
     if (w === this.W && h === this.H) return;
     this.W = w; this.H = h; this.U = h / 1000;
     for (const c of [this.bgc, this.fxc]) { c.width = w; c.height = h; }
+    this.remap();
     this.bgDirty = true;
     this.drawOnce();
+  },
+
+  // 底图按 cover 铺满（CSS 那边 object-fit:cover），这里算出**同一套**变换，
+  // 好让场景包用归一化坐标标出来的槽位/命中区跟画面严丝合缝。
+  // 🔴 手机比图更窄更长，cover 会裁掉两侧 —— 不算这个变换，木牌和入口就会漂。
+  remap() {
+    const sz = (this.scene && this.scene.imageSize) || [this.W, this.H];
+    const iw = sz[0], ih = sz[1];
+    const s = Math.max(this.W / iw, this.H / ih);
+    const dw = iw * s, dh = ih * s;
+    const ox = (this.W - dw) / 2, oy = (this.H - dh) / 2;
+    this.map  = (nx, ny) => [ox + nx * dw, oy + ny * dh];
+    this.mapW = (n) => n * dw;
   },
 
   // 🔴 内核的 status 只有 idle/running/paused/awaiting/done 五个，**没有 work/break**
@@ -115,47 +140,22 @@ const Scene = {
 
   // ── 喂数据。渲染层不区分数据是来自 Tauri 事件还是测试夹具 ──
   update(view) {
-    if (!view) return;
+    if (!view || !this.scene) return;
     const ph = this.phaseOf(view);
     if (ph !== this.phase) {
       this.lightFrom = Object.assign({}, this.light);
-      this.lightTo = LIGHT[ph] || LIGHT.idle;
+      this.lightTo = this.scene.light[ph] || this.scene.light.idle;
       this.fadeT = 0;
       this.phase = ph;
       this.bgDirty = true;
     }
     this.status = view.status;
-    // 完成一个工作段 → 漂来一个橘子（§3：慢，不弹跳，2~3 秒滑到位）
-    const doneWork = this.countDoneWork(view);
-    if (doneWork > this.lastDoneWork) {
-      for (let i = this.lastDoneWork; i < doneWork; i++) this.addOrange();
-    } else if (doneWork < this.lastDoneWork) {
-      this.oranges.length = 0;          // 新会话，清空
-    }
-    this.lastDoneWork = doneWork;
     this.view = view;
   },
 
-  countDoneWork(v) {
-    if (!v.stages || v.status === 'idle') return 0;
-    let n = 0;
-    for (let i = 0; i < v.idx && i < v.stages.length; i++) {
-      if (v.stages[i].kind === 'work') n++;
-    }
-    return n;
-  },
-
-  addOrange() {
-    // 从池子左缘慢慢漂到目标位；目标位错开排布，别叠在一起
-    const k = this.oranges.length;
-    this.oranges.push({
-      tx: 0.24 + (k % 4) * 0.17 + (k >= 4 ? 0.06 : 0),
-      ty: 0.80 + Math.floor(k / 4) * 0.045,
-      x: 0.06, y: 0.84, born: this.t
-    });
-  },
-
-  // ── 整场进度 → 天色（§4：水豚是晨昏动物，光就是它的生物钟）──
+  // 整场跑了多少（0~1）。给场景当气氛用（比如天色）——
+  // ⚠️ 这**不是进度条**：8-29 用户否掉了"橘子＝进度"那个设计，
+  //    "还剩多久"由木牌上的本段倒计时负责，不另外做进度显示。
   sessionProgress(v) {
     if (!v || !v.stages || !v.stages.length || v.status === 'idle') return 0;
     let total = 0, left = 0;
@@ -168,171 +168,37 @@ const Scene = {
     return total ? Math.min(1, Math.max(0, 1 - left / total)) : 0;
   },
 
-  // ── 静态层：只在尺寸变化或状态光变化时重画 ──────────────
   drawBg() {
     this.bgDirty = false;   // 先落旗：万一下面抛异常，也不会每帧重抛把循环卡死
-    const { bx, W, H, U } = this;
-    const L = this.light;
-    const SKY = Math.round(H * 0.30), MID = Math.round(H * 0.60), POOL = Math.round(H * 0.95);
-
-    bx.clearRect(0, 0, W, H);
-    // 天空：底色 + 状态天光（只改光不改底色 §7.2）
-    const g = bx.createLinearGradient(0, 0, 0, MID);
-    g.addColorStop(0, css(mix(C.skyTop, L.sky, 0.10 * L.bright)));
-    g.addColorStop(1, css(mix(C.skyLow, L.sky, 0.26 * L.bright)));
-    bx.fillStyle = g; bx.fillRect(0, 0, W, MID);
-
-    // 林子剪影（占位：一排三角）
-    bx.fillStyle = css(C.forest);
-    bx.beginPath();
-    bx.moveTo(0, SKY + 40*U);
-    for (let x = 0, i = 0; x < W + 60*U; x += 46*U, i++) {
-      const h = (48 + ((i * 37) % 40)) * U;
-      bx.lineTo(x, SKY + 40*U - h); bx.lineTo(x + 23*U, SKY + 40*U);
-    }
-    bx.lineTo(W, MID); bx.lineTo(0, MID); bx.closePath(); bx.fill();
-
-    // 岸台
-    bx.fillStyle = css(mix(C.bank, L.sky, 0.08 * L.bright));
-    bx.fillRect(0, MID, W, POOL - MID);
-    bx.fillStyle = css(mix(C.bankHi, L.sky, 0.10 * L.bright));
-    bx.fillRect(0, MID, W, 10 * U);
-
-    // 汤池（占位椭圆盆）§7.4：水是深色的，明度接近周围石头
-    const cx = W * 0.5, cy = H * 0.815, rx = W * 0.42, ry = H * 0.115;
-    bx.fillStyle = css(C.stone);
-    bx.beginPath(); bx.ellipse(cx, cy, rx + 16*U, ry + 12*U, 0, 0, Math.PI*2); bx.fill();
-    bx.fillStyle = css(mix(C.water, L.sky, 0.06 * L.bright));
-    bx.beginPath(); bx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI*2); bx.fill();
-
-    // 石灯笼（占位：柱 + 灯室），只画身体，光晕在动态层
-    const lx = W * 0.80, ly = MID - 4*U;
-    bx.fillStyle = css(C.lampStone);
-    bx.fillRect(lx - 13*U, ly - 90*U, 26*U, 90*U);
-    bx.fillRect(lx - 30*U, ly - 148*U, 60*U, 58*U);
-    bx.fillRect(lx - 40*U, ly - 162*U, 80*U, 16*U);
-
-    // 木牌（占位：牌面 + 两腿），数字在动态层
-    const bw = W * 0.46, bh = bw * 0.44, bxx = W * 0.10, byy = MID - bh - 26*U;
-    bx.fillStyle = css(C.boardEdge);
-    bx.fillRect(bxx + bw*0.18, byy + bh, 9*U, 30*U);
-    bx.fillRect(bxx + bw*0.72, byy + bh, 9*U, 30*U);
-    bx.fillStyle = css(mix(C.board, L.sky, 0.12 * L.bright));
-    bx.fillRect(bxx, byy, bw, bh);
-    bx.fillStyle = css(C.boardEdge);
-    bx.fillRect(bxx, byy, bw, 5*U);
-    this.board = { x:bxx, y:byy, w:bw, h:bh };
-    this.lamp = { x:lx, y:ly - 119*U };
-    this.pool = { cx, cy, rx, ry };
+    if (!this.scene || !this.map) return;
+    this.slots = { time:null, entries:null };
+    this.scene.drawBg({
+      bx:this.bx, W:this.W, H:this.H, U:this.U, light:this.light, slots:this.slots,
+      map:this.map, mapW:this.mapW,
+    });
   },
 
-  // ── 动态层：每帧，但限到 12fps ──────────────────────
   drawFx(dt) {
     const { fx, W, H, U } = this;
     const L = this.light, v = this.view;
+    if (!this.scene || !L || !this.map) return;
     fx.clearRect(0, 0, W, H);
     fx.save();
     fx.translate(this.drift.x, this.drift.y);   // 烧屏平移（§8.4）
 
-    // 落日：整场剩余 ∝ 太阳高度
-    const p = this.sessionProgress(v);
-    const sunX = W * (0.22 + p * 0.10);
-    const sunY = H * (0.06 + p * 0.26);
-    const sunR = 34 * U;
-    if (this.phase !== 'done') {
-      const sg = fx.createRadialGradient(sunX, sunY, sunR*0.2, sunX, sunY, sunR*3.2);
-      sg.addColorStop(0, 'rgba(200,70,40,' + (0.45*L.bright) + ')');
-      sg.addColorStop(1, 'rgba(200,70,40,0)');
-      fx.fillStyle = sg;
-      fx.beginPath(); fx.arc(sunX, sunY, sunR*3.2, 0, Math.PI*2); fx.fill();
-      fx.fillStyle = css(mix(C.sun, L.sky, 0.35));
-      fx.beginPath(); fx.arc(sunX, sunY, sunR, 0, Math.PI*2); fx.fill();
-    } else {
-      // 完成＝天黑星星出来
-      for (let i = 0; i < 40; i++) {
-        const sx = ((i*137) % 100) / 100 * W, sy = ((i*61) % 55) / 100 * H * 0.5;
-        const tw = 0.35 + 0.35 * Math.sin(this.t*1.6 + i);
-        fx.fillStyle = 'rgba(255,240,210,' + tw.toFixed(2) + ')';
-        fx.fillRect(sx, sy, 2.2*U, 2.2*U);
-      }
-    }
+    this.scene.drawFx({
+      fx, W, H, U, light:L, t:this.t, dt:dt || 0,
+      phase:this.phase, view:v, progress:this.sessionProgress(v),
+      map:this.map, mapW:this.mapW,
+    });
 
-    // 灯笼光晕 + 落地暖光
-    if (this.lamp && L.lampI > 0.01) {
-      const flick = 1 + Math.sin(this.t * 3.1) * 0.05;
-      const R = 200 * U * L.lampI * flick;
-      const gg = fx.createRadialGradient(this.lamp.x, this.lamp.y, 6*U, this.lamp.x, this.lamp.y, R);
-      gg.addColorStop(0, 'rgba(255,170,70,' + (0.42*L.lampI) + ')');
-      gg.addColorStop(1, 'rgba(255,150,50,0)');
-      fx.fillStyle = gg;
-      fx.beginPath(); fx.arc(this.lamp.x, this.lamp.y, R, 0, Math.PI*2); fx.fill();
-      fx.fillStyle = css(mix(C.lampCore, L.lamp, 0.4));
-      fx.fillRect(this.lamp.x - 9*U, this.lamp.y - 12*U, 18*U, 24*U);
-    }
-
-    // 水面：只有靠灯笼那一侧有一小片暖橙反光（§7.4 的绝对参照）
-    if (this.pool && L.lampI > 0.01) {
-      const P = this.pool;
-      fx.save();
-      fx.beginPath(); fx.ellipse(P.cx, P.cy, P.rx, P.ry, 0, 0, Math.PI*2); fx.clip();
-      const rg = fx.createLinearGradient(P.cx + P.rx*0.15, 0, P.cx + P.rx, 0);
-      rg.addColorStop(0, 'rgba(255,150,60,0)');
-      rg.addColorStop(0.55, 'rgba(255,150,60,' + (0.22*L.lampI) + ')');
-      rg.addColorStop(1, 'rgba(255,150,60,0)');
-      fx.fillStyle = rg;
-      const wob = Math.sin(this.t*1.3) * 3 * U;
-      fx.fillRect(P.cx, P.cy - P.ry + wob, P.rx, P.ry*2);
-      fx.restore();
-    }
-
-    // 橘子＝进度条＝货币（§3）。程序画的静态小图，漂在水面这个固定平面上，
-    // 不用追踪头顶锚点 → 零动画成本。
-    if (this.pool) {
-      for (const o of this.oranges) {
-        const age = this.t - o.born;
-        const k = Math.min(1, age / 2.6);            // 2.6 秒慢慢滑到位，不弹跳
-        const e = 1 - Math.pow(1 - k, 3);
-        const ox = lerp(o.x, o.tx, e) * W;
-        const oy = lerp(o.y, o.ty, e) * H + Math.sin(this.t*0.9 + o.tx*9) * 2 * U;
-        const r = 15 * U;
-        fx.fillStyle = 'rgba(0,0,0,.22)';
-        fx.beginPath(); fx.ellipse(ox, oy + r*0.5, r*1.05, r*0.42, 0, 0, Math.PI*2); fx.fill();
-        fx.fillStyle = css(mix(C.orange, L.lamp, 0.25 * L.lampI));
-        fx.beginPath(); fx.arc(ox, oy, r, 0, Math.PI*2); fx.fill();
-        fx.fillStyle = 'rgba(255,214,150,.5)';
-        fx.beginPath(); fx.arc(ox - r*0.28, oy - r*0.3, r*0.3, 0, Math.PI*2); fx.fill();
-      }
-    }
-
-    // 木牌数字（本段剩余 MM:SS）。§4：一米外可读，占屏宽 ≥40%；
-    // 余光态要弱、一瞥态要亮 —— 这里先做"弱"，抬手提亮等做交互时再接。
-    if (this.board && v) {
-      const B = this.board;
-      const secs = Math.max(0, Math.round((v.remaining_ms || 0) / 1000));
-      // 🔴 木牌表的是"本段剩余"，只有 running/paused 才有这个东西。
-      //    idle / awaiting / done 显示 00:00 都是在说假话 —— 第一版只修了 idle，
-      //    awaiting 和 done 照样在撒谎，是截图逐格看才发现的。
-      const hasTime = (this.phase === 'work' || this.phase === 'break' || this.phase === 'paused');
-      const txt = hasTime
-        ? String(Math.floor(secs/60)).padStart(2,'0') + ':' + String(secs%60).padStart(2,'0')
-        : '· ·';
-      // 段末预告：最后 30 秒极缓地亮一点点，绝不闪
-      const pre = (this.phase === 'work' || this.phase === 'break') && secs <= PRE_ALERT_SEC
-        ? (1 - secs / PRE_ALERT_SEC) * 0.35 : 0;
-      const alpha = (hasTime ? 0.55 + pre : 0.30);
-      fx.font = '600 ' + Math.round(B.h * 0.52) + 'px ui-monospace,Menlo,monospace';
-      fx.textAlign = 'center'; fx.textBaseline = 'middle';
-      fx.fillStyle = 'rgba(58,42,26,' + Math.min(1, alpha + 0.18).toFixed(2) + ')';
-      fx.fillText(txt, B.x + B.w/2 + 1.5*U, B.y + B.h/2 + 1.5*U);
-      fx.fillStyle = 'rgba(250,228,190,' + Math.min(1, alpha).toFixed(2) + ')';
-      fx.fillText(txt, B.x + B.w/2, B.y + B.h/2);
-    }
+    this.drawTime();
     fx.restore();
 
     // 🔴 整体亮度（§7.4 的 bright）必须是**全局明度乘子**，不能只当混色比例——
     //    只混色的话工作态反而比空闲态亮，直接违反"工作段是全片最暗最静一档"
     //    的第一原理（0.75 vs 0.85）。fx 层盖在 bg 之上，所以在这里整屏叠一次
-    //    就能压住全部内容（天空、灯光、橘子一起压）。一个 fillRect，很便宜。
+    //    就能压住全部内容。一个 fillRect，很便宜。
     if (L.bright < 1) {
       fx.fillStyle = 'rgba(8,6,4,' + (1 - L.bright).toFixed(3) + ')';
       fx.fillRect(0, 0, W, H);
@@ -342,6 +208,45 @@ const Scene = {
       fx.fillRect(0, 0, W, H);
       fx.globalCompositeOperation = 'source-over';
     }
+  },
+
+  // ── 时间显示：本段剩余 MM:SS，画进场景指定的那个框 ──────────
+  // 🔴 位置由场景说了算（这一版是岸边木牌，换个场景可能是台历、收银屏、墙上的钟）。
+  // 🔴 木牌表的是"本段剩余"，只有 running/paused 才有这个东西。
+  //    idle / awaiting / done 显示 00:00 都是在说假话 —— 第一版只修了 idle，
+  //    awaiting 和 done 照样在撒谎，是截图逐格看才发现的。
+  drawTime() {
+    const B = this.slots.time, v = this.view, fx = this.fx, U = this.U;
+    if (!B || !v) return;
+    const secs = Math.max(0, Math.round((v.remaining_ms || 0) / 1000));
+    const hasTime = (this.phase === 'work' || this.phase === 'break' || this.phase === 'paused');
+    const txt = hasTime
+      ? String(Math.floor(secs/60)).padStart(2,'0') + ':' + String(secs%60).padStart(2,'0')
+      : '· ·';
+    // 段末预告：最后 30 秒极缓地亮一点点，绝不闪
+    const pre = (this.phase === 'work' || this.phase === 'break') && secs <= PRE_ALERT_SEC
+      ? (1 - secs / PRE_ALERT_SEC) * 0.35 : 0;
+    const alpha = (hasTime ? 0.55 + pre : 0.30);
+    const ink = B.ink || '#3a2a1a', paper = B.paper || '#fae4be';
+    fx.font = '600 ' + Math.round(B.h * 0.52) + 'px ui-monospace,Menlo,monospace';
+    fx.textAlign = 'center'; fx.textBaseline = 'middle';
+    fx.fillStyle = rgba(RGB(ink), Math.min(1, alpha + 0.18).toFixed(2));
+    fx.fillText(txt, B.x + B.w/2 + 1.5*U, B.y + B.h/2 + 1.5*U);
+    fx.fillStyle = rgba(RGB(paper), Math.min(1, alpha).toFixed(2));
+    fx.fillText(txt, B.x + B.w/2, B.y + B.h/2);
+  },
+
+  // 点到场景里的哪个入口物件了（'start'/'settings'/…；没点到返回 null）。
+  // 坐标是 CSS 像素，内部按 DPR 换算。
+  hitEntry(cssX, cssY) {
+    const E = this.slots.entries;
+    if (!E) return null;
+    const x = cssX * this.DPR, y = cssY * this.DPR;
+    for (const k in E) {
+      const r = E[k];
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return k;
+    }
+    return null;
   },
 
   drawOnce() {
@@ -372,6 +277,7 @@ const Scene = {
         lamp: mix(a.lamp, b.lamp, k),
         lampI: lerp(a.lampI, b.lampI, k),
         bright: lerp(a.bright, b.bright, k),
+        tint: lerp(a.tint || 0, b.tint || 0, k),
       };
       this.bgDirty = true;
     }

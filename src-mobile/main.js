@@ -106,8 +106,9 @@ function syncUI() {
   if (st === 'done' && view) {
     const done = (view.stages || []).filter(s => s.kind === 'work').length;
     $('doneMain').textContent = human(view.acc_work_ms || 0);
-    $('doneSub').textContent = '专注 ' + done + ' 段 · 休息 ' + human(view.acc_rest_ms || 0)
-      + ' · 攒了 ' + done + ' 个橘子';
+    // ⚠️ 原来这儿写"攒了 N 个橘子"——8-29 用户把"橘子＝进度/货币"整个否了，
+    //    而"攒什么"要等他想好。没定的事就别在成果卡片上先许愿。
+    $('doneSub').textContent = '专注 ' + done + ' 段 · 休息 ' + human(view.acc_rest_ms || 0);
   }
   if (st === 'paused') $('opPause').textContent = '继续';
   else $('opPause').textContent = '暂停';
@@ -127,6 +128,7 @@ function syncUI() {
 // ═══════════════ 预设 ═══════════════
 function renderPlans() {
   const box = $('planlist');
+  if (!box) return;          // 预设列表现在只活在"今天泡多久"那个面板里
   box.innerHTML = '';
   for (const p of plans) {
     const work = p.stages.filter(s => s.kind === 'work').reduce((a,s) => a + s.secs, 0);
@@ -198,9 +200,29 @@ function openSheet(kind, title) {
 $('sheetClose').onclick = closeSheet;
 
 function renderSheet() {
+  if (sheetKind === 'start') return renderStart();
   if (sheetKind === 'edit') return renderEditor();
   if (sheetKind === 'set')  return renderSettings();
   if (sheetKind === 'hist') return renderHistory();
+}
+
+// ── 木牌：今天泡多久（预设列表 + 去编排）──────────────
+function renderStart() {
+  const box = $('sheetBody');
+  box.innerHTML = '';
+  const list = document.createElement('div');
+  list.id = 'planlist';
+  box.appendChild(list);
+  renderPlans();
+  const go = document.createElement('button');
+  go.className = 'btn wide'; go.style.marginTop = '14px';
+  go.textContent = '自己编排一支';
+  go.onclick = () => openSheet('edit', '编排');
+  box.appendChild(go);
+  const tip = document.createElement('div');
+  tip.className = 'tip';
+  tip.textContent = '长按一支自定义的可以删掉；长按内置的会载进编排器当底子改。';
+  box.appendChild(tip);
 }
 
 // ── 编排：序列编辑器 + 快捷生成 + 存为预设 ──────────────
@@ -470,9 +492,17 @@ async function renderHistory() {
   box.appendChild(n.firstElementChild);
 }
 
-$('entEdit').onclick = () => openSheet('edit', '编排');
-$('entHist').onclick = () => openSheet('hist', '记录');
-$('entSet').onclick  = () => openSheet('set',  '设置');
+// 🔴 入口在**场景物件**上（§9：画面里没有悬浮按钮）。点哪件东西开哪个面板，
+//    映射由场景包给（换个场景就是换一组物件），引擎只负责命中判定。
+const ENTRY_SHEET = { start:['start','今天泡多久'], settings:['set','设置'], stats:['hist','记录'] };
+function tapScene(e) {
+  // 运行态零 UI：跑起来之后点画面只唤出那条操作条，不开面板
+  if (view && view.status !== 'idle' && view.status !== 'done') return popOps();
+  const r = $('stage').getBoundingClientRect();
+  const hit = Scene.hitEntry(e.clientX - r.left, e.clientY - r.top);
+  if (!hit || !ENTRY_SHEET[hit]) return;
+  openSheet(ENTRY_SHEET[hit][0], ENTRY_SHEET[hit][1]);
+}
 
 // ═══════════════ 命令 ═══════════════
 async function start(plan) {
@@ -498,7 +528,7 @@ function popOps() {
   opsTimer = 3;
   syncUI();
 }
-$('stage').addEventListener('click', popOps);
+$('stage').addEventListener('click', tapScene);
 setInterval(() => {
   if (opsTimer > 0) { opsTimer--; if (opsTimer === 0) syncUI(); }
 }, 1000);

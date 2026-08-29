@@ -4,10 +4,11 @@ html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
   font-family:-apple-system,"PingFang SC",sans-serif;
   -webkit-user-select:none;user-select:none}
 
-#stage{position:fixed;inset:0}
+#stage{position:fixed;inset:0;background:#14100d}
 #stage .layer{position:absolute;inset:0;width:100%;height:100%;display:block}
-/* 规则条由 scene.js 建在 stage 里，这里不用管 */
-#stage #rulebar{display:none}
+/* 底图铺满。🔴 手机比图更窄更长，cover 会裁掉两侧 —— scene.js 的 remap()
+   算的是**同一套**变换，槽位和入口命中区才跟画面对得上 */
+#stage img.layer{object-fit:cover;object-position:center}
 
 #ui{position:fixed;inset:0;z-index:5;pointer-events:none}
 #ui > *{pointer-events:auto}
@@ -24,10 +25,12 @@ html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
 
 /* ── 空闲：预设 ───────────────────────────────── */
 /* 预设列表压在池子上，加一层压暗让卡片读得清 —— 别指望毛玻璃在深色上够用 */
+/* 空闲态只剩一行提示（入口在场景物件上），别再压一大块渐变盖住画 */
 #picker{position:absolute;left:0;right:0;bottom:0;
-  padding:26px 16px calc(env(safe-area-inset-bottom) + 22px);
-  background:linear-gradient(rgba(10,8,6,0),rgba(10,8,6,.62) 32%,rgba(10,8,6,.8))}
-#picker .hint{font-size:12px;color:rgba(203,184,154,.5);text-align:center;margin-bottom:10px}
+  padding:26px 16px calc(env(safe-area-inset-bottom) + 18px);
+  background:linear-gradient(rgba(10,8,6,0),rgba(10,8,6,.45))}
+#picker .hint{font-size:12px;color:rgba(230,214,190,.62);text-align:center;
+  text-shadow:0 1px 3px rgba(0,0,0,.7)}
 #planlist{display:flex;flex-direction:column;gap:8px}
 .plan{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;
   font:inherit;text-align:left;padding:13px 16px;border-radius:14px;
