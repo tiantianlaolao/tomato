@@ -140,6 +140,36 @@ window.SCENES.onsen = {
       fx.globalAlpha = 1;
     }
 
+    // 蒸汽：三缕半透明的汽从桶口两侧缓慢升起，边升边被风带着晃、越高越淡。
+    // 🔴 蒸汽归程序画（§5.1：除水豚外所有的"动"都是二级）——烘进生成视频里
+    //    会被逐帧抠图抠得忽隐忽闪，而且节奏被冻死在 5 秒循环里；画在这儿
+    //    全天候都有、快慢可调、不花一分生成费。底图里画死的那两缕当"底"，
+    //    这三缕活的叠在上面，静动结合看起来最自然。
+    // 每缕 = 一串小圆片沿正弦路径上飘：慢（周期 ~11s）、淡（峰值 alpha 0.10）、
+    // 12fps 下一共 ~40 个圆片，便宜。暂停态汽也跟着弱下去（乘 lampI 挂钩状态）。
+    {
+      const base = map(0.50, 0.68);           // 桶口上方（归一化 y=0.68 ≈ 桶沿）
+      const span = mapW(0.30);                // 三缕的横向散布
+      // 🔴 飘的高度要在木牌下缘就散干净：第一版 0.42 冲过木牌，汽从牌面上
+      //    穿过去一眼假（截图看出来的）。0.20 ≈ 到牌底正好淡出。
+      const rise = mapW(0.20);
+      const strength = 0.55 + 0.45 * L.lampI; // 状态弱光时蒸汽也收敛
+      for (let w = 0; w < 3; w++) {
+        const phase = (t / (10 + w * 1.7) + w * 0.37) % 1;   // 各缕错开、周期略不同
+        const ox = base[0] + (w - 1) * span * 0.5 + Math.sin(w * 7.3) * span * 0.12;
+        for (let i = 0; i < 13; i++) {
+          const k = (phase + i / 13) % 1;                    // 0=桶口 1=顶端消散
+          const y = base[1] - k * rise;
+          const x = ox + Math.sin(k * 5.2 + t * 0.55 + w * 2.1) * mapW(0.028) * (0.4 + k);
+          const a = Math.sin(k * Math.PI) * 0.10 * (1 - k * 0.45) * strength;
+          if (a < 0.008) continue;
+          const r = mapW(0.016) * (0.7 + k * 1.5);
+          fx.fillStyle = 'rgba(238,232,222,' + a.toFixed(3) + ')';
+          fx.beginPath(); fx.arc(x, y, r, 0, Math.PI * 2); fx.fill();
+        }
+      }
+    }
+
     // 水面：灯笼那一侧的倒影随水轻轻晃（底图里那道倒影是死的，加一点活气）
     if (L.lampI > 0.01) {
       const c = map(P.pool.cx, P.pool.cy);
