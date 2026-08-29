@@ -37,6 +37,80 @@ html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
 .plan b{font-size:16px;font-weight:600}
 .plan span{font-size:11px;color:rgba(203,184,154,.55)}
 
+/* 三个功能入口（临时形态，等真美术进来改成家具） */
+#entries{display:flex;gap:8px;justify-content:center;margin-top:12px}
+#entries button{flex:1;font:inherit;font-size:12px;padding:9px 0;border-radius:10px;
+  border:1px solid rgba(120,96,68,.35);background:rgba(20,16,12,.6);color:rgba(203,184,154,.7)}
+#entries button:active{background:rgba(58,45,33,.85)}
+
+/* ── 底部抽屉：编排 / 记录 / 设置 ─────────────────── */
+#sheet{position:absolute;left:0;right:0;bottom:0;top:22%;display:flex;flex-direction:column;
+  border-radius:18px 18px 0 0;border-top:1px solid rgba(120,96,68,.45);
+  background:#120e0a;animation:slideup .22s ease}
+/* 抽屉开着就把预设列表收起来：留 4% 透明度会把下面的字透上来，读起来是脏的 */
+body.sheeton #picker{display:none}
+.gcell{flex:1;text-align:center}
+.gcell .sub{margin-bottom:4px}
+.gcell .num{width:100%}
+@keyframes slideup{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}
+#sheetHead{flex:none;display:flex;align-items:center;justify-content:space-between;
+  padding:14px 16px 10px;border-bottom:1px solid rgba(120,96,68,.22)}
+#sheetTitle{font-size:15px;font-weight:600;color:#f0c9a0}
+#sheetClose{font:inherit;font-size:12px;padding:6px 12px;border-radius:9px;
+  border:1px solid rgba(120,96,68,.4);background:transparent;color:rgba(203,184,154,.7)}
+#sheetBody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding:12px 16px calc(env(safe-area-inset-bottom) + 20px)}
+
+/* 抽屉里的通用零件 */
+.row{display:flex;align-items:center;gap:8px;padding:9px 0;
+  border-bottom:1px solid rgba(120,96,68,.16)}
+.row .lb{flex:1;font-size:13px;color:rgba(203,184,154,.85)}
+.row .sub{font-size:11px;color:rgba(203,184,154,.45);margin-top:2px}
+.sec{font-size:11px;color:rgba(203,184,154,.45);margin:16px 0 4px;letter-spacing:.5px}
+.btn{font:inherit;font-size:13px;padding:11px 14px;border-radius:11px;
+  border:1px solid rgba(120,96,68,.45);background:rgba(30,24,17,.9);color:#cbb89a}
+.btn.pri{border-color:rgba(232,145,92,.55);background:rgba(58,38,22,.9);color:#f0c9a0;font-weight:600}
+.btn:active{background:rgba(58,45,33,.95)}
+.btn.wide{width:100%;text-align:center}
+.btns{display:flex;gap:8px;margin-top:14px}
+.btns .btn{flex:1;text-align:center}
+.mini{font:inherit;font-size:14px;width:34px;height:34px;flex:none;border-radius:9px;
+  border:1px solid rgba(120,96,68,.4);background:rgba(28,22,16,.85);color:#cbb89a}
+.mini:active{background:rgba(58,45,33,.95)}
+.mini.del{color:rgba(214,120,90,.9)}
+.seg{display:flex;gap:6px}
+.seg button{font:inherit;font-size:12px;padding:7px 12px;border-radius:9px;
+  border:1px solid rgba(120,96,68,.4);background:transparent;color:rgba(203,184,154,.6)}
+.seg button.on{border-color:rgba(232,145,92,.6);background:rgba(58,38,22,.85);color:#f0c9a0}
+.sw{width:46px;height:27px;flex:none;border-radius:14px;border:1px solid rgba(120,96,68,.45);
+  background:rgba(28,22,16,.9);position:relative}
+.sw::after{content:'';position:absolute;top:2px;left:2px;width:21px;height:21px;border-radius:50%;
+  background:rgba(203,184,154,.45);transition:left .15s,background .15s}
+.sw.on{border-color:rgba(232,145,92,.6);background:rgba(78,44,20,.9)}
+.sw.on::after{left:21px;background:#f0c9a0}
+.num{font:inherit;font-size:13px;width:64px;padding:7px 8px;text-align:center;border-radius:9px;
+  border:1px solid rgba(120,96,68,.4);background:rgba(28,22,16,.9);color:#cbb89a}
+.txt{font:inherit;font-size:14px;width:100%;padding:11px 12px;border-radius:11px;
+  border:1px solid rgba(120,96,68,.4);background:rgba(28,22,16,.9);color:#cbb89a}
+input[type=range]{flex:1;accent-color:#e8915c}
+.stage{display:flex;align-items:center;gap:6px;padding:7px 0}
+.stage .kind{font:inherit;font-size:12px;width:44px;flex:none;padding:7px 0;border-radius:9px;
+  border:1px solid rgba(120,96,68,.4);background:rgba(28,22,16,.9);color:#cbb89a}
+.stage .kind.work{border-color:rgba(232,145,92,.5);color:#f0c9a0}
+.stage .mm{flex:1;text-align:center;font-size:14px;color:#cbb89a}
+.tip{font-size:11px;line-height:1.7;color:rgba(203,184,154,.45);margin-top:10px}
+.tip.warn{color:rgba(224,150,96,.8)}
+.hist{padding:9px 0;border-bottom:1px solid rgba(120,96,68,.16);font-size:12px}
+.hist b{font-weight:600;color:#cbb89a}
+.hist span{color:rgba(203,184,154,.45)}
+.hist.aband b{color:rgba(203,184,154,.5)}
+
+/* 自绘确认条（不用系统 confirm/prompt） */
+#ask{position:absolute;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom) + 22px);
+  padding:18px 18px 16px;border-radius:16px;z-index:9;
+  border:1px solid rgba(120,96,68,.5);background:rgba(24,19,14,.97)}
+.asktxt{font-size:14px;color:#cbb89a;text-align:center}
+
 /* ── 运行中：轻触唤出的操作条。刻意低调、刻意会自己消失 ── */
 #ops{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 62px);
   display:flex;gap:8px;justify-content:center;padding:0 16px;

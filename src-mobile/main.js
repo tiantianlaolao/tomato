@@ -85,6 +85,10 @@ function syncUI() {
   show('donecard', st === 'done');
   show('holdbar',  st === 'running' || st === 'paused');
   show('ops',      (st === 'running' || st === 'paused') && opsTimer > 0);
+  // 强制休息（FE-40）：内核本来就会拒绝 skip/prev/reset（护栏在 core.rs，跨平台），
+  // 界面上就别再摆一个按了没用的按钮 —— "说了做不到的事"比少个按钮伤得多
+  show('opSkip',   !(view && view.rest_locked));
+  if (st !== 'idle') closeSheet();   // 一开跑就收起面板，运行态是零 UI
 
   if (st === 'awaiting') {
     const nxt = view.stages && view.stages[view.idx + 1];
@@ -107,9 +111,11 @@ function syncUI() {
   // 不提前说，代价就没有威慑力，只会变成"我怎么白干了"的差评）
   if (view && (st === 'running' || st === 'paused')) {
     const inGrace = Date.now() - (view.started_ms || 0) < GRACE_SEC * 1000;
-    $('holdtip').textContent = inGrace
-      ? '长按结束 · 开始 ' + GRACE_SEC + ' 秒内结束不计代价'
-      : '长按结束 · 本段不计入';
+    $('holdtip').textContent = view.rest_locked
+      ? '强制休息中 · 按住 5 秒才能结束'
+      : (inGrace
+          ? '长按结束 · 开始 ' + GRACE_SEC + ' 秒内结束不计代价'
+          : '长按结束 · 本段不计入');
   }
 }
 
@@ -121,18 +127,329 @@ function renderPlans() {
     const work = p.stages.filter(s => s.kind === 'work').reduce((a,s) => a + s.secs, 0);
     const el = document.createElement('button');
     el.className = 'plan';
-    el.innerHTML = '<b>' + p.name + '</b><span>' + p.stages.length + ' 段 · 专注 '
-                 + Math.round(work/60) + ' 分钟</span>';
+    const mins = work >= 60 ? Math.round(work/60) + ' 分钟' : work + ' 秒';
+    el.innerHTML = '<b>' + p.name + '</b><span>' + p.stages.length + ' 段 · 专注 ' + mins + '</span>';
     el.onclick = () => start(p);
+    // 长按：自定义预设 → 删除确认；内置的 → 载进编排器改（改完可另存，内置本身不动）
+    let lt = 0;
+    const cancel = () => { clearTimeout(lt); lt = 0; };
+    el.addEventListener('pointerdown', () => {
+      lt = setTimeout(() => {
+        lt = 0;
+        if (p.builtin) {
+          // 内置的改不了，但可以拿来当底子改完另存 —— 桌面端也是这个规矩
+          draft = { name:'', stages: p.stages.map(s => Object.assign({}, s)) };
+          openSheet('edit', '编排');
+        } else {
+          askConfirm('删除预设「' + p.name + '」？', () => {
+            pushPlans(plans.filter(x => !x.builtin && x.id !== p.id));
+          });
+        }
+      }, 600);
+    });
+    ['pointerup','pointercancel','pointerleave'].forEach(ev => el.addEventListener(ev, cancel));
     box.appendChild(el);
   }
 }
 
+// 自绘确认条。🔴 不用 window.confirm/prompt：WKWebView 里 prompt 是 no-op
+// （桌面端 8-26 为这个把存预设的取名框改成自绘），confirm 也依赖宿主实现，别赌。
+function askConfirm(text, onYes) {
+  const wrap = document.createElement('div');
+  wrap.id = 'ask';
+  const p = document.createElement('div'); p.className = 'asktxt'; p.textContent = text;
+  const no = document.createElement('button'); no.className = 'btn'; no.textContent = '算了';
+  const yes = document.createElement('button'); yes.className = 'btn pri'; yes.textContent = '删掉';
+  const row = document.createElement('div'); row.className = 'btns';
+  row.appendChild(no); row.appendChild(yes);
+  wrap.appendChild(p); wrap.appendChild(row);
+  document.getElementById('ui').appendChild(wrap);
+  const close = () => wrap.remove();
+  no.onclick = close;
+  yes.onclick = () => { close(); onYes(); };
+}
+
+// ═══════════════ 面板：编排 / 记录 / 设置 ═══════════════
+// 用户 2026-08-29 定的边界：**桌面端的核心功能一定要保留，只是换手机的实现法**。
+// 所以序列编排、预设增删、强制休息、记录、设置全都要有 —— 变的是交互形态：
+//   桌面拖拽排序 → 手机上下箭头（滚动列表里拖拽必然误触）
+//   桌面 window.prompt 取名 → 自绘输入框（WKWebView 的 prompt 是 no-op，桌面端 8-26 栽过）
+//   桌面右栏常驻 → 手机底部抽屉，一开跑就收起（运行态零 UI 是第一原理）
+let sheetKind = '', draft = null;
+
+function closeSheet() {
+  if (!sheetKind) return;
+  sheetKind = '';
+  $('sheet').classList.add('hide');
+  document.body.classList.remove('sheeton');
+}
+function openSheet(kind, title) {
+  sheetKind = kind;
+  $('sheetTitle').textContent = title;
+  $('sheet').classList.remove('hide');
+  document.body.classList.add('sheeton');
+  renderSheet();
+}
+$('sheetClose').onclick = closeSheet;
+
+function renderSheet() {
+  if (sheetKind === 'edit') return renderEditor();
+  if (sheetKind === 'set')  return renderSettings();
+  if (sheetKind === 'hist') return renderHistory();
+}
+
+// ── 编排：序列编辑器 + 快捷生成 + 存为预设 ──────────────
+function planTotals(stages) {
+  const w = stages.filter(s => s.kind === 'work').reduce((a,s) => a + s.secs, 0);
+  const r = stages.filter(s => s.kind === 'break').reduce((a,s) => a + s.secs, 0);
+  return { w, r };
+}
+function ensureDraft() {
+  if (draft) return;
+  const base = plans.find(p => p.id === (settings && settings.selected_plan_id)) || plans[0];
+  draft = { name: '', stages: base ? base.stages.map(s => Object.assign({}, s)) : [] };
+}
+function renderEditor() {
+  ensureDraft();
+  const box = $('sheetBody');
+  box.innerHTML = '';
+  // 🔴 先把 firstElementChild 抓出来再 append：append 会把它从 d 里**搬走**，
+  //    搬走之后 d.firstElementChild 就是 null 了（第一版直接 return，全线 null）
+  const add = (html) => {
+    const d = document.createElement('div'); d.innerHTML = html;
+    const el = d.firstElementChild; box.appendChild(el); return el;
+  };
+
+  add('<div class="sec">序列（点左边那格切工作／休息）</div>');
+  draft.stages.forEach((s, i) => {
+    const row = add('<div class="stage"></div>');
+    const kind = document.createElement('button');
+    kind.className = 'kind' + (s.kind === 'work' ? ' work' : '');
+    kind.textContent = s.kind === 'work' ? '工作' : '休息';
+    kind.onclick = () => { s.kind = s.kind === 'work' ? 'break' : 'work'; renderEditor(); };
+    const dec = document.createElement('button'); dec.className = 'mini'; dec.textContent = '−';
+    const mm  = document.createElement('div');    mm.className = 'mm';
+    mm.textContent = (s.secs >= 60 ? Math.round(s.secs/60) + ' 分' : s.secs + ' 秒');
+    const inc = document.createElement('button'); inc.className = 'mini'; inc.textContent = '+';
+    // 长按连加：手机上点 25 下调不动一小时（桌面端也有步进加速）
+    const step = (d) => { s.secs = Math.max(60, s.secs + d * 60); renderEditor(); };
+    bindRepeat(dec, () => step(-1)); bindRepeat(inc, () => step(1));
+    const up = document.createElement('button'); up.className = 'mini'; up.textContent = '↑';
+    up.onclick = () => { if (i > 0) { const t = draft.stages[i-1]; draft.stages[i-1] = s; draft.stages[i] = t; renderEditor(); } };
+    const dn = document.createElement('button'); dn.className = 'mini'; dn.textContent = '↓';
+    dn.onclick = () => { if (i < draft.stages.length-1) { const t = draft.stages[i+1]; draft.stages[i+1] = s; draft.stages[i] = t; renderEditor(); } };
+    const del = document.createElement('button'); del.className = 'mini del'; del.textContent = '×';
+    del.onclick = () => { draft.stages.splice(i, 1); renderEditor(); };
+    [kind, dec, mm, inc, up, dn, del].forEach(el => row.appendChild(el));
+  });
+
+  const addRow = add('<div class="btns"></div>');
+  const bw = document.createElement('button'); bw.className = 'btn'; bw.textContent = '+ 工作 25 分';
+  bw.onclick = () => { draft.stages.push({ kind:'work', secs:1500, activity:'' }); renderEditor(); };
+  const bb = document.createElement('button'); bb.className = 'btn'; bb.textContent = '+ 休息 5 分';
+  bb.onclick = () => { draft.stages.push({ kind:'break', secs:300, activity:'' }); renderEditor(); };
+  addRow.appendChild(bw); addRow.appendChild(bb);
+
+  // 总览 + 休息占比软提示（桌面端 P1 就有这条：休息 <10% 提醒一句，但不拦着）
+  const t = planTotals(draft.stages);
+  const pct = t.w > 0 ? Math.round(t.r * 100 / t.w) : 0;
+  const ov = add('<div class="tip"></div>');
+  ov.textContent = '共 ' + draft.stages.length + ' 段 · 专注 ' + Math.round(t.w/60)
+    + ' 分 · 休息 ' + Math.round(t.r/60) + ' 分（休息约为专注的 ' + pct + '%）';
+  if (t.w > 0 && pct < 10) { ov.classList.add('warn'); ov.textContent += ' —— 休息偏少，容易撑不到最后'; }
+
+  add('<div class="sec">快捷生成</div>');
+  const gen = add('<div class="row"></div>');
+  const mk = (v, w) => { const el = document.createElement('input'); el.className='num'; el.type='number';
+    el.inputMode='numeric'; el.value=v; el.style.width=w||'56px'; return el; };
+  const gw = mk(25), gn = mk(4), gb = mk(5), gl = mk(15);
+  [['工作', gw], ['段数', gn], ['休息', gb], ['末段', gl]].forEach(([t, el]) => {
+    const cell = document.createElement('div'); cell.className = 'gcell';
+    const lab = document.createElement('div'); lab.className = 'sub'; lab.textContent = t;
+    cell.appendChild(lab); cell.appendChild(el); gen.appendChild(cell);
+  });
+  const genBtn = add('<button class="btn wide">按上面四个数生成序列</button>');
+  genBtn.onclick = () => {
+    const w = Math.max(1, +gw.value||25), n = Math.max(1, +gn.value||4);
+    const b = Math.max(1, +gb.value||5), l = Math.max(1, +gl.value||15);
+    draft.stages = [];
+    for (let i = 0; i < n; i++) {
+      draft.stages.push({ kind:'work', secs:w*60, activity:'' });
+      draft.stages.push({ kind:'break', secs:(i === n-1 ? l : b)*60, activity:'' });
+    }
+    renderEditor();
+  };
+  add('<div class="tip">四个数依次是：工作分钟、几段、休息分钟、最后一段休息分钟</div>');
+
+  add('<div class="sec">存为预设</div>');
+  const nameEl = document.createElement('input');
+  nameEl.className = 'txt'; nameEl.type = 'text'; nameEl.placeholder = '给它起个名字';
+  nameEl.value = draft.name || '';
+  nameEl.oninput = () => { draft.name = nameEl.value; };
+  box.appendChild(nameEl);
+
+  const acts = add('<div class="btns"></div>');
+  const save = document.createElement('button'); save.className = 'btn'; save.textContent = '存为预设';
+  save.onclick = savePreset;
+  const go = document.createElement('button'); go.className = 'btn pri'; go.textContent = '直接开始';
+  go.onclick = () => {
+    if (!draft.stages.length) return;
+    start({ id:'custom', name: draft.name || '临时编排', stages: draft.stages, builtin:false });
+  };
+  acts.appendChild(save); acts.appendChild(go);
+  add('<div class="tip">列表里长按一支自定义预设可以删掉它（内置的删不了）</div>');
+}
+
+// 按住不放连续调整（桌面端的步进长按加速，手机上更需要）
+function bindRepeat(el, fn) {
+  let t = 0, iv = 0;
+  const stop = () => { clearTimeout(t); clearInterval(iv); t = iv = 0; };
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); fn();
+    t = setTimeout(() => { iv = setInterval(fn, 90); }, 420);
+  });
+  ['pointerup','pointercancel','pointerleave'].forEach(ev => el.addEventListener(ev, stop));
+}
+
+async function savePreset() {
+  if (!draft || !draft.stages.length) return;
+  const name = (draft.name || '').trim() || ('我的编排 ' + (plans.filter(p => !p.builtin).length + 1));
+  const customs = plans.filter(p => !p.builtin);
+  customs.push({ id: 'p' + Date.now().toString(36), name, stages: draft.stages, builtin: false });
+  await pushPlans(customs);
+  draft.name = '';
+  renderEditor();
+}
+async function pushPlans(customs) {
+  if (!HAS_BRIDGE) { plans = plans.filter(p => p.builtin).concat(customs); renderPlans(); return; }
+  try {
+    plans = await T.core.invoke('save_plans', { plans: customs });   // Rust 会把内置的并回来
+    renderPlans();
+  } catch (e) { console.error('save_plans', e); }
+}
+
+// ── 设置：桌面端那份的手机版（托盘/自启/桌宠三类手机上不存在，不列）──
+function renderSettings() {
+  const box = $('sheetBody');
+  box.innerHTML = '';
+  if (!settings) { box.textContent = '读不到设置'; return; }
+  const rowEl = (label, sub) => {
+    const r = document.createElement('div'); r.className = 'row';
+    const l = document.createElement('div'); l.className = 'lb';
+    l.textContent = label;
+    if (sub) { const s = document.createElement('div'); s.className = 'sub'; s.textContent = sub; l.appendChild(s); }
+    r.appendChild(l); box.appendChild(r); return r;
+  };
+  const sec = (t) => { const d = document.createElement('div'); d.className = 'sec'; d.textContent = t; box.appendChild(d); };
+  const sw = (r, key) => {
+    const b = document.createElement('button');
+    b.className = 'sw' + (settings[key] ? ' on' : '');
+    b.onclick = () => { settings[key] = !settings[key]; b.classList.toggle('on', settings[key]); pushSettings(); };
+    r.appendChild(b);
+  };
+  const num = (r, key, min, max, unit) => {
+    const i = document.createElement('input');
+    i.className = 'num'; i.type = 'number'; i.inputMode = 'numeric'; i.value = settings[key];
+    i.onchange = () => {
+      let v = Math.round(+i.value || 0);
+      v = Math.max(min, Math.min(max, v));
+      i.value = v; settings[key] = v; pushSettings();
+    };
+    r.appendChild(i);
+    if (unit) { const u = document.createElement('span'); u.className = 'sub'; u.textContent = unit; r.appendChild(u); }
+  };
+
+  sec('衔接');
+  sw(rowEl('工作结束自动进休息'), 'auto_work_to_break');
+  sw(rowEl('休息结束自动开工', '默认关着：防止一段接一段停不下来'), 'auto_break_to_work');
+
+  sec('休息模式');
+  const rp = rowEl('强制休息', '休息期间跳过/回退/重来全部按不动，只剩按住 5 秒的紧急出口');
+  const seg = document.createElement('div'); seg.className = 'seg';
+  [['flexible','弹性'],['forced','强制']].forEach(([v, t]) => {
+    const b = document.createElement('button');
+    b.textContent = t; b.className = settings.rest_policy === v ? 'on' : '';
+    b.onclick = () => { settings.rest_policy = v; pushSettings(); renderSettings(); };
+    seg.appendChild(b);
+  });
+  rp.appendChild(seg);
+  if (settings.rest_policy === 'forced') {
+    sw(rowEl('最后一段休息可解锁一次', '用掉即失效，下次会话重新给'), 'final_break_unlock');
+  }
+
+  sec('声音');
+  sw(rowEl('提示音'), 'sound_on');
+  const vr = rowEl('音量');
+  const rg = document.createElement('input');
+  rg.type = 'range'; rg.min = 0; rg.max = 1; rg.step = 0.05; rg.value = settings.volume;
+  rg.onchange = () => { settings.volume = +rg.value; pushSettings(); beep('switch'); };
+  vr.appendChild(rg);
+  const sr = rowEl('铃声');
+  const sseg = document.createElement('div'); sseg.className = 'seg';
+  [['chime','清脆'],['bell','钟'],['wood','木鱼']].forEach(([v, t]) => {
+    const b = document.createElement('button');
+    b.textContent = t; b.className = settings.sound_id === v ? 'on' : '';
+    b.onclick = () => { settings.sound_id = v; pushSettings(); renderSettings(); beep('switch'); };
+    sseg.appendChild(b);
+  });
+  sr.appendChild(sseg);
+  num(rowEl('段末预告', '结束前多少秒先滴一声，0＝不预告'), 'pre_alert_sec', 0, 60, '秒');
+
+  sec('提醒');
+  num(rowEl('久坐提醒', '连续工作多久提醒一次，0＝关'), 'sit_remind_min', 0, 240, '分');
+  sw(rowEl('休息结束没反应就一直催'), 'strong_remind');
+
+  const tip = document.createElement('div'); tip.className = 'tip';
+  tip.textContent = '托盘、开机自启、桌宠小窗是桌面端专有的，手机上没有这些概念，所以这里不列。';
+  box.appendChild(tip);
+}
+async function pushSettings() {
+  if (!HAS_BRIDGE) return;
+  try { settings = await T.core.invoke('save_settings', { settings }); }
+  catch (e) { console.error('save_settings', e); }
+}
+
+// ── 记录：会话流水（按实际经过时间记，不是计划时长）──
+async function renderHistory() {
+  const box = $('sheetBody');
+  box.innerHTML = '<div class="tip">读取中…</div>';
+  let rows = [];
+  if (HAS_BRIDGE) {
+    try { rows = await T.core.invoke('get_history', { limit: 50 }); }
+    catch (e) { box.innerHTML = '<div class="tip">读不到记录：' + e + '</div>'; return; }
+  }
+  if (!rows.length) { box.innerHTML = '<div class="tip">还没有记录。跑完一场就会记一笔。</div>'; return; }
+  box.innerHTML = '';
+  rows.slice().reverse().forEach(r => {
+    const d = new Date(r.started_ms || r.ended_ms || Date.now());
+    const el = document.createElement('div');
+    el.className = 'hist' + (r.completed === false ? ' aband' : '');
+    const dt = (d.getMonth()+1) + '月' + d.getDate() + '日 '
+             + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+    // 🔴 字段名照抄 Rust 的 HistoryRecord：work_secs / rest_secs（**不是 _ms**），
+    //    自己编字段名就会全显示 0 分钟，而且看起来"没报错"
+    el.innerHTML = '<b>' + (r.plan_name || '临时编排') + '</b> <span>· 专注 '
+      + Math.round((r.work_secs || 0)/60) + ' 分 · 休息 ' + Math.round((r.rest_secs || 0)/60) + ' 分</span>'
+      + '<div class="sub">' + dt + (r.completed === false ? ' · 中途结束' : ' · 完成') + '</div>';
+    box.appendChild(el);
+  });
+}
+
+$('entEdit').onclick = () => openSheet('edit', '编排');
+$('entHist').onclick = () => openSheet('hist', '记录');
+$('entSet').onclick  = () => openSheet('set',  '设置');
+
 // ═══════════════ 命令 ═══════════════
 async function start(plan) {
+  closeSheet();
   if (!HAS_BRIDGE) return feed(fixture('running'));
   try { feed(await T.core.invoke('session_start', { plan })); }
   catch (e) { console.error('session_start', e); }
+  // 记住这次用的是哪支：下次开 App 的编排器就从它起手（桌面端同规矩）
+  if (settings && plan.id && plan.id !== 'custom' && settings.selected_plan_id !== plan.id) {
+    settings.selected_plan_id = plan.id;
+    pushSettings();
+  }
 }
 async function cmd(c) {
   if (!HAS_BRIDGE) return feed(fixture(c === 'stop' ? 'done' : 'running'));
@@ -182,11 +499,15 @@ setInterval(refreshDiag, 5000);
 // ═══════════════ Hold to cancel（§3.3）═══════════════
 // 🔴 长按 1.5 秒才算数，防误触；而且**规则常驻印在屏幕上**，
 //    不提前说代价就没有威慑力。
+// 🔴 强制休息期间加长到 5 秒：桌面端的招牌戏是全屏遮罩 + 内核拒绝 skip/prev/reset，
+//    手机上整屏就是它、遮罩没有意义，所以"强制"落在**出口更难**上
+//    （跟桌面端遮罩里那个"按住 5 秒紧急结束"是同一个设计）。
+function holdMs() { return view && view.rest_locked ? 5000 : HOLD_MS; }
 (function bindHold() {
   const bar = $('holdbar'), ring = $('holdring');
   let t0 = 0, raf = 0;
   const tick = () => {
-    const k = Math.min(1, (performance.now() - t0) / HOLD_MS);
+    const k = Math.min(1, (performance.now() - t0) / holdMs());
     ring.style.width = (k * 100).toFixed(1) + '%';
     if (k >= 1) { end(true); return; }
     raf = requestAnimationFrame(tick);
@@ -231,6 +552,8 @@ function fixture(kind) {
     case 'done':     return Object.assign({}, base, { status:'done', idx:3, remaining_ms:0 });
     case 'pre':      return Object.assign({}, base, { status:'running', remaining_ms:9000 });
     case 'grace':    return Object.assign({}, base, { status:'running', started_ms:now-8000 });
+    // 强制休息：内核算出的 rest_locked=true —— 跳过按钮要消失、长按变 5 秒
+    case 'forced':   return Object.assign({}, base, { status:'running', idx:3, remaining_ms:96000, rest_locked:true });
     default:         return Object.assign({}, base, { status:'running' });
   }
 }
@@ -238,6 +561,10 @@ function fixture(kind) {
 // ═══════════════ 启动 ═══════════════
 if (!HAS_BRIDGE) {
   document.body.classList.add('nobridge');
+  // 🔴 夹具的字段名照抄 core.rs 的 Settings，别自己编（编了本地全绿、真机全歪）
+  settings = { auto_work_to_break:true, auto_break_to_work:false, rest_policy:'flexible',
+               final_break_unlock:false, sound_on:true, volume:0.7, pre_alert_sec:5,
+               sound_id:'chime', sit_remind_min:60, strong_remind:true, selected_plan_id:'classic' };
   plans = [
     { id:'classic', name:'经典番茄', builtin:true, stages:fixture('run').stages },
     { id:'deep',    name:'深度专注', builtin:true, stages:[{kind:'work',secs:3000,activity:'idle'},{kind:'break',secs:600,activity:''}] },
@@ -254,6 +581,12 @@ if (!HAS_BRIDGE) {
   T.event.listen('state', (e) => feed(e.payload));
   // 前台切段音：Rust 滴答线程发 sfx（switch / pre / remind / done）
   T.event.listen('sfx', (e) => beep(e.payload));
+  // 设置被 Rust 侧改过（比如强制休息的一次性解锁被用掉）要同步回来，
+  // 否则界面上还亮着、再存一次又把 true 写回去＝解锁悄悄重新武装（桌面端 8-26 的坑）
+  T.event.listen('settings', (e) => {
+    settings = e.payload || settings;
+    if (sheetKind === 'set') renderSettings();
+  });
   (async () => {
     try {
       const b = await T.core.invoke('boot');
@@ -272,6 +605,12 @@ if (!HAS_BRIDGE) {
       Scene.update(view); syncUI();
     }, 250);
   })();
+}
+
+// 截图验收用：?sheet=edit|set|hist 直接把面板打开（浏览器里跑，不进真机路径）
+if (qs.get('sheet')) {
+  const k = qs.get('sheet');
+  setTimeout(() => openSheet(k, k === 'edit' ? '编排' : (k === 'set' ? '设置' : '记录')), 60);
 }
 
 // 页面不可见就停画（省电）

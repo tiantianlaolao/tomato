@@ -25,10 +25,26 @@
     <button id="diagRing">试响</button>
   </div>
 
-  <!-- 空闲：选一个预设就开始（§12 第 5 条：第一版只给预设，不做序列编辑器） -->
+  <!-- 空闲：选一支预设开始；三个入口通向桌面端那些核心功能。
+       ⚠️ 这一行按钮是**临时形态**：《移动端产品定义说明书》§2.3 定的是入口伪装成家具
+       （木牌/竹筒/石灯笼…），等真美术进来再挂上去，功能本身先做齐。 -->
   <div id="picker">
     <div class="hint">选一支，它就下水陪你</div>
     <div id="planlist"></div>
+    <div id="entries">
+      <button id="entEdit">编排</button>
+      <button id="entHist">记录</button>
+      <button id="entSet">设置</button>
+    </div>
+  </div>
+
+  <!-- 面板：编排 / 记录 / 设置 共用一个底部抽屉 -->
+  <div id="sheet" class="hide">
+    <div id="sheetHead">
+      <span id="sheetTitle">编排</span>
+      <button id="sheetClose">收起</button>
+    </div>
+    <div id="sheetBody"></div>
   </div>
 
   <!-- 运行中：零 UI。轻触画面才临时唤出，3 秒收起 -->

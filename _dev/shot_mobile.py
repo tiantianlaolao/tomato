@@ -17,7 +17,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(os.path.dirname(HERE), 'src-mobile')
 PORT = 8941
 # 状态值照抄内核真相：idle/running/paused/awaiting/done（**没有 work/break**）
-STATES = ['idle', 'running', 'grace', 'pre', 'break', 'awaiting', 'paused', 'done']
+STATES = ['idle', 'running', 'grace', 'pre', 'break', 'forced', 'awaiting', 'paused', 'done']
 
 os.chdir(WEB)
 socketserver.TCPServer.allow_reuse_address = True
@@ -37,6 +37,11 @@ async def main():
             await pg.goto(f"http://127.0.0.1:{PORT}/index.html?demo={s}")
             await pg.wait_for_timeout(3000)          # 真等，让 rAF 跑起来
             await pg.screenshot(path=os.path.join(HERE, f"_m_{s}.png"))
+        # 三块面板（编排/设置/记录）——桌面端核心功能的手机实现，各截一张
+        for k in ('edit', 'set', 'hist'):
+            await pg.goto(f"http://127.0.0.1:{PORT}/index.html?demo=idle&sheet={k}")
+            await pg.wait_for_timeout(1500)
+            await pg.screenshot(path=os.path.join(HERE, f"_m_sheet_{k}.png"))
         # 限帧实测：数 3 秒里究竟画了多少帧
         fps = await pg.evaluate("""async () => {
             let n = 0; const d0 = Scene.drawFx.bind(Scene);

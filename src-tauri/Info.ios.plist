@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  iOS 专属 Info.plist 增量。Tauri 会自动找 tauri.conf.json 同目录下的
+  Info.ios.plist 并合并进 tauri ios init 生成的那份
+  （config.schema.json 的 bundle.iOS.infoPlist 原文写明这条），
+  所以不用去动 gen/apple/（那目录是 .gitignore 掉的，CI 每次 init 重新生成）。
+
+  🔴 锁竖屏：产品形态是"手机立在桌上当摆件"，一个机位演完程（《场景与美术方案
+     说明书》§1）。横过来整套构图就不成立了，而且 tauri ios init 生成的工程
+     默认横竖屏全开。iPad 那条一起锁上。
+-->
+<plist version="1.0">
+<dict>
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+  </array>
+  <key>UISupportedInterfaceOrientations~ipad</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+  </array>
+</dict>
+</plist>

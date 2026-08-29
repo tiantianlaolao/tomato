@@ -259,7 +259,12 @@ struct TrayUi {
 
 // ———————————————————————— 通知 + 音效（音效发给前端 WebAudio 播） ————————————————————————
 fn notify(app: &AppHandle, title: &str, body: &str) {
-    let _ = app.notification().builder().title(title).body(body).show();
+    let b = app.notification().builder().title(title).body(body);
+    // iOS 上不显式给 sound 就是静默横幅（见下面 SOUND 那条注释）。
+    // 走这条路的是强提醒和久坐提醒 —— 它们本来就是"要把人叫回来"的，没声音等于没有。
+    #[cfg(mobile)]
+    let b = b.sound(SOUND);
+    let _ = b.show();
 }
 fn sfx(app: &AppHandle, kind: &str) {
     let _ = app.emit("sfx", kind);
