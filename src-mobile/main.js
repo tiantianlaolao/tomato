@@ -22,10 +22,40 @@ const HAS_BRIDGE = !!(T && T.core);
 const GRACE_SEC = 30;      // §3.3 开始 30 秒内取消无代价
 const HOLD_MS = 1500;      // §3.3 长按 1.5 秒才算取消（防误触）
 
-let view = null, plans = [], opsTimer = 0;
+let view = null, plans = [], opsTimer = 0, settings = null;
 
 Scene.mount($('stage'));
 Scene.start();
+
+// ═══════════════ 声音 ═══════════════
+// 🔴 Rust 每次切段都 emit('sfx')，桌面端 app.js 接了去 beep，移动端第一版**根本没接** ——
+//    所以哪怕人正看着屏幕，段末也是悄无声息的（2026-08-29 真机反馈"没听到声音"的其中一因）。
+//    后台/锁屏那条路归系统排期通知管，这里管的是"App 在前台开着"的那条。
+let actx = null;
+function tone(t0, freq, dur, vol, type) {
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type || 'sine'; o.frequency.value = freq;
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(vol, t0 + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function beep(kind) {
+  if (settings && settings.sound_on === false) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    // 🔴 没有用户手势创建的 AudioContext 是 suspended（自启/定时开跑那条路径上没人点过屏幕），
+    //    先唤醒再排音 —— 桌面端 8-26 栽过一次全静音。
+    if (actx.state === 'suspended') actx.resume();
+    const v = ((settings && settings.volume) || 0.7) * 0.3;
+    const t0 = actx.currentTime;
+    if (kind === 'pre')    { tone(t0, 1320, 0.08, v * 0.5); return; }
+    if (kind === 'remind') { tone(t0, 660, 0.25, v); tone(t0 + 0.35, 660, 0.25, v); return; }
+    if (kind === 'done')   { [523, 659, 784, 1046].forEach((f, i) => tone(t0 + i * 0.15, f, 0.4, v)); return; }
+    tone(t0, 660, 0.3, v); tone(t0 + 0.14, 880, 0.35, v);   // 切段
+  } catch (e) {}
+}
 
 // ═══════════════ 数据入口 ═══════════════
 function feed(v) {
@@ -126,6 +156,29 @@ $('opSkip').onclick  = (e) => { e.stopPropagation(); cmd('skip'); opsTimer = 3; 
 $('nextbtn').onclick = () => cmd('start_next');
 $('doneOk').onclick  = () => cmd('stop');
 
+// ═══════════════ 诊断条（内测专用，上架前连同 Rust 的 diag/test_notify 一起删）═══════════════
+// 🔴 存在的理由：真机上"没听到声音"至少有四种可能 —— 没授权 / 没排上 / 排上了但静音 /
+//    手机侧边静音开关。看不见就只能一轮一轮猜，而每猜一轮都要用户 25 分钟。
+async function refreshDiag() {
+  if (!HAS_BRIDGE) { $('diagTxt').textContent = '浏览器模式'; return; }
+  try {
+    const d = await T.core.invoke('diag');
+    $('diagTxt').textContent = '通知' + d.perm + ' · 已排 ' + d.armed + ' 条'
+      + (d.err ? ' · 错:' + d.err : '') + ' · 时区+' + d.tz_min + '分 · ' + Scene.lastFps.toFixed(1) + 'fps';
+  } catch (e) { $('diagTxt').textContent = 'diag 调不到：' + e; }
+}
+$('diagRing').onclick = async () => {
+  beep('switch');                       // 先证明前台声音这条通了
+  $('diagTxt').textContent = '排期中…';
+  if (!HAS_BRIDGE) return;
+  try {
+    const r = await T.core.invoke('test_notify');
+    $('diagTxt').textContent = r.join(' | ');
+  } catch (e) { $('diagTxt').textContent = 'test_notify 失败：' + e; }
+};
+$('diagTxt').onclick = refreshDiag;
+setInterval(refreshDiag, 5000);
+
 // ═══════════════ Hold to cancel（§3.3）═══════════════
 // 🔴 长按 1.5 秒才算数，防误触；而且**规则常驻印在屏幕上**，
 //    不提前说代价就没有威慑力。
@@ -199,10 +252,13 @@ if (!HAS_BRIDGE) {
   }, 1000);
 } else {
   T.event.listen('state', (e) => feed(e.payload));
+  // 前台切段音：Rust 滴答线程发 sfx（switch / pre / remind / done）
+  T.event.listen('sfx', (e) => beep(e.payload));
   (async () => {
     try {
       const b = await T.core.invoke('boot');
       plans = b.plans || [];
+      settings = b.settings || null;
       renderPlans();
       feed(b.view);
     } catch (e) {

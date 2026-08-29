@@ -61,7 +61,7 @@ const Scene = {
   phase:'idle',    // 表演相（LIGHT 的键）
   oranges:[],            // 已完成的工作段 → 漂在水面的橘子
   lastDoneWork:0,
-  t:0, lastTs:0, raf:0, running:false,
+  t:0, lastTs:0, raf:0, running:false, lastFps:0,
   drift:{x:0, y:0, t:0},  // 烧屏平移
   bgDirty:true,
   fps:12,                 // 🔴 限帧：打样实测动画只要 12fps 而页面在按 55fps 画，
@@ -358,6 +358,10 @@ const Scene = {
 
     const dt = Math.min(0.25, (ts - this.lastTs) / 1000 || 1/this.fps);
     this.lastTs = ts; this.t += dt;
+
+    // 实测帧率（诊断条用）：滑动平均，不是"某一刻的值"——
+    // 8-28 那次"帧率 0.0"就是靠这个数看出来的，留着
+    this.lastFps = this.lastFps ? this.lastFps * 0.8 + (1/dt) * 0.2 : 1/dt;
 
     // 状态光过渡（≥1.5 秒，绝不突变）
     if (this.fadeT < 1 && this.lightTo) {

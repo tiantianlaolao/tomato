@@ -107,6 +107,15 @@ struct App {
     /// 是往 Swift 桥上狂敲，白烧电。
     #[cfg(mobile)]
     last_arm: String,
+    /// 诊断条用：上一次真排上了几条、报的什么错。真机上"排没排上"必须看得见 ——
+    /// 第一版就是因为看不见，"没听到声音"到底是没排上、没授权还是静音，三种可能分不开。
+    #[cfg(mobile)]
+    arm_count: usize,
+    #[cfg(mobile)]
+    arm_err: String,
+    /// 屏幕常亮当前是开是关（只在翻转时才去动 UIApplication）
+    #[cfg(mobile)]
+    keep_awake: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -140,6 +149,9 @@ impl App {
             last_tray: String::new(), last_tray_sec: String::new(),
             rest_shown: false, last_save_ms: 0, remind_armed: false,
             #[cfg(mobile)] last_arm: String::new(),
+            #[cfg(mobile)] arm_count: 0,
+            #[cfg(mobile)] arm_err: String::new(),
+            #[cfg(mobile)] keep_awake: false,
         }
     }
     fn save_settings(&self) { if let Ok(s) = serde_json::to_string_pretty(&self.settings) { fs::write(self.dir.join("settings.json"), s).ok(); } }
@@ -264,51 +276,133 @@ fn sfx(app: &AppHandle, kind: &str) {
 // 🔴 移动端一律只走排期、滴答不再发切段通知：iOS 的 willPresent 前台也会弹
 //    （插件里返回 [.badge, .sound, ...]），两条路一起走就会双响。
 // 🔴 每次状态变化都要重排：用户暂停/跳过之后，旧的排期绝不能照响。
+// 🔴🔴 时区修正（2026-08-29 加，第一版真机"到点没有任何动静"的头号嫌疑）：
+//    插件 iOS 侧解析我们发过去的日期串用的是
+//      dateFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
+//    —— 那个 'Z' 只是个**字面量字符**，而 formatter 没有设 timeZone，默认取设备本地时区。
+//    我们发的是 UTC 时刻，它按东八区读 → 提前 8 小时 → 落在过去 →
+//    插件直接 throw pastScheduledTime，一条都排不上（源码：ios/Sources/Notification.swift:179-188）。
+//    对策：把要发的时刻**先加上本地偏移**，让序列化出来的 UTC 墙上时间恰好等于本地墙上时间，
+//    被它误读一次正好还原。用 chrono 取偏移（time 的 current_local_offset 在多线程程序里会拒绝返回）。
+//    ⚠️ 这是绕插件的坑，不是正道；插件哪天修好了这里要跟着去掉 —— 所以单独拎成一个函数，
+//    真机上到底哪一版能响由 test_notify 的 A/B 三连当场判定，不靠猜。
+#[cfg(mobile)]
+fn sched_date(at_ms: u64, shift: bool) -> Option<time::OffsetDateTime> {
+    let off = if shift {
+        chrono::Local::now().offset().local_minus_utc() as i64
+    } else {
+        0
+    };
+    time::OffsetDateTime::from_unix_timestamp((at_ms / 1000) as i64 + off).ok()
+}
+
+// 通知声音：插件只有在我们显式传了 sound 才会去设 content.sound，不传就是 nil＝静默横幅
+//（源码：ios/Sources/Notification.swift:65-66）。第一版没传，所以就算排上了也不会响。
+#[cfg(mobile)]
+const SOUND: &str = "default";
+
 #[cfg(mobile)]
 fn arm_notifications(app: &AppHandle) {
-    use tauri_plugin_notification::{NotificationExt, Schedule};
+    use tauri_plugin_notification::{NotificationExt, PermissionState, Schedule};
 
     // 锁内只取快照，放锁后再碰插件 —— 插件调用会派发到主线程，
     // 持锁去碰就是 8-25 那个死锁的翻版。
-    let switches = {
+    let (awake_change, switches) = {
         let state: State<Mutex<App>> = app.state();
         let mut a = state.lock().unwrap();
+        // 常亮只在"在跑没跑"真的翻转时才去动。滴答每秒都会走到这儿，
+        // 每秒往主线程派一条 ObjC 消息是白烧电 —— 而省电正是我们要量的东西。
+        let want = a.session.status == "running";
+        let awake_change = if a.keep_awake != want { a.keep_awake = want; Some(want) } else { None };
         let fp = format!("{}|{}|{}", a.session.status, a.session.idx, a.session.end_ms);
         if fp == a.last_arm {
-            return; // 排期没变，不用往 Swift 桥上白敲一遍
+            (awake_change, None) // 排期没变，不用往 Swift 桥上白敲一遍
+        } else {
+            a.last_arm = fp;
+            let cfg = a.settings.clone();
+            (awake_change, Some(core::future_switches(&a.session, &cfg)))
         }
-        a.last_arm = fp;
-        let cfg = a.settings.clone();
-        core::future_switches(&a.session, &cfg)
+    };
+
+    // 屏幕常亮跟着"在跑没跑"走：跑着就别让它息屏（摆件形态的前提），
+    // 一暂停/等待/完成立刻还给系统 —— 常亮和省电是对着干的，不能一直占着。
+    if let Some(on) = awake_change {
+        set_keep_awake(app, on);
+    }
+
+    let switches = match switches {
+        Some(s) => s,
+        None => return,
     };
 
     let n = app.notification();
     let _ = n.cancel_all(); // 先撤销未触发的旧排期
 
+    // 没授权就别排：排了也不会响，还会让诊断条上的数字骗人
+    let granted = matches!(n.permission_state(), Ok(PermissionState::Granted));
+
     let now = now_ms();
-    for (i, sw) in switches.iter().enumerate() {
-        if sw.at_ms <= now + 1000 {
-            continue; // 已经过去的时刻，iOS 也不会触发
+    let mut count = 0usize;
+    let mut err = String::new();
+    if granted {
+        for (i, sw) in switches.iter().enumerate() {
+            if sw.at_ms <= now + 1000 {
+                continue; // 已经过去的时刻，iOS 也不会触发
+            }
+            let date = match sched_date(sw.at_ms, true) {
+                Some(d) => d,
+                None => continue,
+            };
+            let (title, body) = match sw.to.as_str() {
+                "break"    => ("上岸歇会儿", "这一段专注走完了，去泡一泡。"),
+                "work"     => ("回水里吧", "休息结束，下一段开始了。"),
+                "awaiting" => ("这一段走完了", "回来点一下，接着下一段。"),
+                _          => ("这一场结束了", "整场都跑完了，看看攒了几个橘子。"),
+            };
+            match n
+                .builder()
+                .id(9000 + i as i32)
+                .title(title)
+                .body(body)
+                .sound(SOUND)
+                .schedule(Schedule::At { date, repeating: false, allow_while_idle: true })
+                .show()
+            {
+                Ok(_) => count += 1,
+                Err(e) => if err.is_empty() { err = e.to_string(); },
+            }
         }
-        let date = match time::OffsetDateTime::from_unix_timestamp((sw.at_ms / 1000) as i64) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-        let (title, body) = match sw.to.as_str() {
-            "break"    => ("上岸歇会儿", "这一段专注走完了，去泡一泡。"),
-            "work"     => ("回水里吧", "休息结束，下一段开始了。"),
-            "awaiting" => ("这一段走完了", "回来点一下，接着下一段。"),
-            _          => ("这一场结束了", "整场都跑完了，看看攒了几个橘子。"),
-        };
-        let _ = n
-            .builder()
-            .id(9000 + i as i32)
-            .title(title)
-            .body(body)
-            .schedule(Schedule::At { date, repeating: false, allow_while_idle: true })
-            .show();
+    } else if !switches.is_empty() {
+        err = "未授权".into();
     }
+
+    // 落进诊断条：真机上"到底排上几条、报的什么错"必须看得见，不能只能靠猜
+    let state: State<Mutex<App>> = app.state();
+    let mut a = state.lock().unwrap();
+    a.arm_count = count;
+    a.arm_err = err;
 }
+
+// ———————————————————————— 屏幕常亮（iOS） ————————————————————————
+// Tauri 没有这个 API，自己给 UIApplication 发一条 setIdleTimerDisabled:。
+// 🔴 必须回主线程：UIKit 的属性不能在滴答线程上写。
+#[cfg(target_os = "ios")]
+fn set_keep_awake(app: &AppHandle, on: bool) {
+    let _ = app.run_on_main_thread(move || unsafe {
+        use objc2::runtime::{AnyObject, Bool};
+        use objc2::{class, msg_send};
+        let shared: *mut AnyObject = msg_send![class!(UIApplication), sharedApplication];
+        if !shared.is_null() {
+            let _: () = msg_send![shared, setIdleTimerDisabled: Bool::new(on)];
+        }
+    });
+}
+
+// 桌面端与 Android：没有 idleTimer 这个概念（桌面息屏归系统电源策略管）
+#[cfg(not(target_os = "ios"))]
+#[allow(dead_code)]
+#[inline]
+fn set_keep_awake(_app: &AppHandle, _on: bool) {}
 
 // 桌面端不需要排期：滴答线程一直活着，到点直接发即时通知。
 #[cfg(desktop)]
@@ -783,6 +877,8 @@ fn do_session_start(app: &AppHandle, plan: &Plan) -> Result<core::View, String> 
     // 通知权限在**第一次开始会话时**要，不在冷启动时要 —— 用户刚点了"开始"，
     // 这时候弹"允许通知"才讲得通；一打开 App 就弹框只会吓跑人。
     // 没授权的话段末提醒根本响不了，而这个产品 90% 时间用户不看屏幕，只能靠听。
+    // 🔴 要等授权真的落定再往下走：request_permission 会一直等到用户点了那个系统弹框
+    //    才返回。第一版把返回值丢了、紧接着就去排期 —— 授权还没点，排期就已经发出去了。
     #[cfg(mobile)]
     {
         use tauri_plugin_notification::{NotificationExt, PermissionState};
@@ -925,6 +1021,83 @@ async fn get_history(app: AppHandle, limit: usize) -> Vec<serde_json::Value> {
     let n = v.len();
     if n > limit { v.drain(0..n - limit); }
     v
+}
+
+// ———————————————————————— 诊断（移动端内测用，上架前连同前端诊断条一起删） ————————————————————————
+// 存在的理由：真机上"没听到声音"至少有四种可能 —— 没授权 / 没排上 / 排上了但静音 /
+// 手机侧边静音开关。看不见就只能一轮一轮猜，而每猜一轮都要用户的时间。
+#[derive(Serialize, Default)]
+struct Diag {
+    perm: String,      // 通知权限
+    armed: usize,      // 上次真排上几条
+    err: String,       // 排期报的错（空＝没错）
+    tz_min: i32,       // 本地时区偏移（分钟），东八区应当是 480
+}
+
+#[tauri::command]
+async fn diag(app: AppHandle) -> Diag {
+    #[cfg(mobile)]
+    {
+        use tauri_plugin_notification::{NotificationExt, PermissionState};
+        let perm = match app.notification().permission_state() {
+            Ok(PermissionState::Granted) => "已授权",
+            Ok(PermissionState::Denied) => "被拒绝",
+            Ok(_) => "未询问",
+            Err(_) => "查不到",
+        };
+        let state: State<Mutex<App>> = app.state();
+        let a = state.lock().unwrap();
+        return Diag {
+            perm: perm.into(),
+            armed: a.arm_count,
+            err: a.arm_err.clone(),
+            tz_min: chrono::Local::now().offset().local_minus_utc() / 60,
+        };
+    }
+    #[cfg(desktop)]
+    {
+        let _ = &app;
+        Diag { perm: "桌面端".into(), ..Default::default() }
+    }
+}
+
+/// A/B/C 三连试响：一次把"通知到底卡在哪"问清楚，用户等 12 秒就有全部结论。
+///   A = 不做时区修正 + 带声音   → 若 A 报 pastScheduledTime，时区那条推断就坐实了
+///   B = 做时区修正   + 不带声音 → 若 B 弹出来但没声，"没声＝没设 sound" 坐实
+///   C = 做时区修正   + 带声音   → 这就是段末提醒现在用的配置，它响了就等于全对
+#[tauri::command]
+async fn test_notify(app: AppHandle) -> Vec<String> {
+    #[cfg(mobile)]
+    {
+        use tauri_plugin_notification::{NotificationExt, Schedule};
+        let n = app.notification();
+        let now = now_ms();
+        let cases: [(&str, u64, bool, bool); 3] = [
+            ("A 未修正+有声", 6_000, false, true),
+            ("B 已修正+无声", 9_000, true, false),
+            ("C 已修正+有声", 12_000, true, true),
+        ];
+        let mut out = vec![];
+        for (i, (name, delay, shift, sound)) in cases.iter().enumerate() {
+            let date = match sched_date(now + delay, *shift) {
+                Some(d) => d,
+                None => { out.push(format!("{}：日期算不出来", name)); continue; }
+            };
+            let mut b = n.builder().id(9500 + i as i32).title(*name).body("试响");
+            if *sound { b = b.sound(SOUND); }
+            let r = b.schedule(Schedule::At { date, repeating: false, allow_while_idle: true }).show();
+            out.push(match r {
+                Ok(_) => format!("{}：已排", name),
+                Err(e) => format!("{}：{}", name, e),
+            });
+        }
+        return out;
+    }
+    #[cfg(desktop)]
+    {
+        let _ = &app;
+        vec!["桌面端不需要排期".into()]
+    }
 }
 
 /// 回主窗口（编排/跳过/结束都在那边）。桌宠右键菜单的「打开主窗口」走这条。
@@ -1183,7 +1356,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             boot, get_state, session_start, session_cmd,
             save_settings, save_plans, save_schedules, get_history, rest_focus, set_activity,
-            open_main, pet_menu
+            open_main, pet_menu, diag, test_notify
         ])
         .run(tauri::generate_context!())
         .expect("番茄时钟启动失败")

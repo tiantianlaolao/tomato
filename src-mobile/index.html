@@ -17,6 +17,14 @@
 <div id="stage"></div>
 
 <div id="ui">
+  <!-- 🔴 诊断条：内测专用，上架前连同 Rust 的 diag / test_notify 一起删。
+       点左边文字＝刷新，点「试响」＝A/B/C 三连排期（6/9/12 秒后依次响），
+       一轮 12 秒就能判定"通知到底卡在哪"，不用真等一个番茄段。 -->
+  <div id="diag">
+    <span id="diagTxt">诊断…</span>
+    <button id="diagRing">试响</button>
+  </div>
+
   <!-- 空闲：选一个预设就开始（§12 第 5 条：第一版只给预设，不做序列编辑器） -->
   <div id="picker">
     <div class="hint">选一支，它就下水陪你</div>

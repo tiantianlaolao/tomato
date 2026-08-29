@@ -30,6 +30,12 @@ serde_json = "1"
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 time = "0.3"
 
+# iOS 专属：屏幕常亮要调 UIApplication.isIdleTimerDisabled，Tauri 没有这个 API，
+# 只能自己发一条 objc 消息。objc2 本来就在 tauri 的 iOS 依赖树里（Cargo.lock 已有 0.6.4），
+# 直接拿来用比引一个社区插件少一层 Swift 包。⚠️ 这段代码 Windows 上编不到，只有 CI 能验。
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+
 # 桌面独有的三样：托盘、开机自启、全局快捷键 —— iOS/Android 上根本不存在这些概念。
 # 放进 target 块，移动端构建连这几个 crate 都不会去拉（它们内部依赖 win32/AppKit/X11，
 # 留在通用 dependencies 里的话，iOS 会挂在依赖树上，跟我们自己的代码没关系）。
