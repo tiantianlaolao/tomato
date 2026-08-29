@@ -259,11 +259,20 @@ struct TrayUi {
 
 // ———————————————————————— 通知 + 音效（音效发给前端 WebAudio 播） ————————————————————————
 fn notify(app: &AppHandle, title: &str, body: &str) {
-    let b = app.notification().builder().title(title).body(body);
-    // iOS 上不显式给 sound 就是静默横幅（见下面 SOUND 那条注释）。
-    // 走这条路的是强提醒和久坐提醒 —— 它们本来就是"要把人叫回来"的，没声音等于没有。
+    // iOS 上不显式给 sound 就是静默横幅（见下面 SOUND 那条注释）。走这条路的是强提醒和
+    // 久坐提醒 —— 它们本来就是"要把人叫回来"的，没声音等于没有。
+    // 🔴 但必须听「提示音」这个开关：用户 8-29 反馈"关了提示音到点还是响"，
+    //    因为声音其实是系统通知发的，而那条路当时根本没看设置 —— 开关说了不算＝在说假话。
+    // ⚠️ 取完 sound_on 立刻放锁再去碰插件：持锁调插件就是 8-25 那个死锁的翻版。
     #[cfg(mobile)]
-    let b = b.sound(SOUND);
+    let want_sound = {
+        let state: State<Mutex<App>> = app.state();
+        let on = state.lock().unwrap().settings.sound_on;
+        on
+    };
+    let b = app.notification().builder().title(title).body(body);
+    #[cfg(mobile)]
+    let b = if want_sound { b.sound(SOUND) } else { b };
     let _ = b.show();
 }
 fn sfx(app: &AppHandle, kind: &str) {
@@ -312,20 +321,23 @@ fn arm_notifications(app: &AppHandle) {
 
     // 锁内只取快照，放锁后再碰插件 —— 插件调用会派发到主线程，
     // 持锁去碰就是 8-25 那个死锁的翻版。
-    let (awake_change, switches) = {
+    let (awake_change, switches, sound_on) = {
         let state: State<Mutex<App>> = app.state();
         let mut a = state.lock().unwrap();
+        let sound_on = a.settings.sound_on;
         // 常亮只在"在跑没跑"真的翻转时才去动。滴答每秒都会走到这儿，
         // 每秒往主线程派一条 ObjC 消息是白烧电 —— 而省电正是我们要量的东西。
         let want = a.session.status == "running";
         let awake_change = if a.keep_awake != want { a.keep_awake = want; Some(want) } else { None };
-        let fp = format!("{}|{}|{}", a.session.status, a.session.idx, a.session.end_ms);
+        // 🔴 指纹里必须带上 sound_on：排期是**提前**发出去的，改设置时那批通知已经躺在
+        //    系统里了。不带的话"关掉提示音"要等下一次切段才生效，本次会话照响。
+        let fp = format!("{}|{}|{}|{}", a.session.status, a.session.idx, a.session.end_ms, sound_on);
         if fp == a.last_arm {
-            (awake_change, None) // 排期没变，不用往 Swift 桥上白敲一遍
+            (awake_change, None, sound_on) // 排期没变，不用往 Swift 桥上白敲一遍
         } else {
             a.last_arm = fp;
             let cfg = a.settings.clone();
-            (awake_change, Some(core::future_switches(&a.session, &cfg)))
+            (awake_change, Some(core::future_switches(&a.session, &cfg)), sound_on)
         }
     };
 
@@ -364,12 +376,11 @@ fn arm_notifications(app: &AppHandle) {
                 "awaiting" => ("这一段走完了", "回来点一下，接着下一段。"),
                 _          => ("这一场结束了", "整场都跑完了，看看攒了几个橘子。"),
             };
-            match n
-                .builder()
-                .id(9000 + i as i32)
-                .title(title)
-                .body(body)
-                .sound(SOUND)
+            // 🔴「提示音」开关要管到这儿：段末那一声其实是系统排期通知发的，
+            //    不看设置的话，用户把开关关了照样响 ＝ 开关在说假话
+            let mut b = n.builder().id(9000 + i as i32).title(title).body(body);
+            if sound_on { b = b.sound(SOUND); }
+            match b
                 .schedule(Schedule::At { date, repeating: false, allow_while_idle: true })
                 .show()
             {
@@ -980,6 +991,9 @@ async fn save_settings(app: AppHandle, settings: Settings) -> Settings {
     if pet_changed { apply_pet_visibility(&app, saved.pet_hidden); }
     // 休息策略被改（强制→非强制）时，遮罩要立刻跟着收
     sync_rest_overlay(&app);
+    // 🔴 改完设置要重排通知：段末那批是**提前**发进系统的，
+    //    关掉提示音/改了自动衔接，不重排就还是按老设置响
+    arm_notifications(&app);
     saved
 }
 

@@ -53,7 +53,12 @@ function beep(kind) {
     if (kind === 'pre')    { tone(t0, 1320, 0.08, v * 0.5); return; }
     if (kind === 'remind') { tone(t0, 660, 0.25, v); tone(t0 + 0.35, 660, 0.25, v); return; }
     if (kind === 'done')   { [523, 659, 784, 1046].forEach((f, i) => tone(t0 + i * 0.15, f, 0.4, v)); return; }
-    tone(t0, 660, 0.3, v); tone(t0 + 0.14, 880, 0.35, v);   // 切段
+    // 切段：三款铃声照搬桌面端 app.js。
+    // 🔴 8-29 反馈"三种声音听不出区别"＝这里第一版根本没读 sound_id，三档都在放同一个音
+    const id = (settings && settings.sound_id) || 'chime';
+    if (id === 'bell')      { [1568, 1245, 1047].forEach((f, i) => tone(t0 + i * 0.18, f, 0.9, v * 0.8)); }
+    else if (id === 'wood') { tone(t0, 220, 0.09, v * 1.4, 'square'); tone(t0 + 0.16, 196, 0.09, v * 1.4, 'square'); }
+    else                    { tone(t0, 660, 0.3, v); tone(t0 + 0.14, 880, 0.35, v); }
   } catch (e) {}
 }
 
@@ -204,6 +209,19 @@ function planTotals(stages) {
   const r = stages.filter(s => s.kind === 'break').reduce((a,s) => a + s.secs, 0);
   return { w, r };
 }
+let totalsEl = null;
+function paintTotals() {
+  if (!totalsEl || !draft) return;
+  const t = planTotals(draft.stages);
+  const pct = t.w > 0 ? Math.round(t.r * 100 / t.w) : 0;
+  totalsEl.className = 'tip';
+  totalsEl.textContent = '共 ' + draft.stages.length + ' 段 · 专注 ' + Math.round(t.w/60)
+    + ' 分 · 休息 ' + Math.round(t.r/60) + ' 分（休息约为专注的 ' + pct + '%）';
+  if (t.w > 0 && pct < 10) {
+    totalsEl.className = 'tip warn';
+    totalsEl.textContent += ' —— 休息偏少，容易撑不到最后';
+  }
+}
 function ensureDraft() {
   if (draft) return;
   const base = plans.find(p => p.id === (settings && settings.selected_plan_id)) || plans[0];
@@ -213,6 +231,7 @@ function renderEditor() {
   ensureDraft();
   const box = $('sheetBody');
   box.innerHTML = '';
+  totalsEl = null;   // 上一轮那个节点已经被 innerHTML 清掉了，别再往它身上写
   // 🔴 先把 firstElementChild 抓出来再 append：append 会把它从 d 里**搬走**，
   //    搬走之后 d.firstElementChild 就是 null 了（第一版直接 return，全线 null）
   const add = (html) => {
@@ -229,10 +248,12 @@ function renderEditor() {
     kind.onclick = () => { s.kind = s.kind === 'work' ? 'break' : 'work'; renderEditor(); };
     const dec = document.createElement('button'); dec.className = 'mini'; dec.textContent = '−';
     const mm  = document.createElement('div');    mm.className = 'mm';
-    mm.textContent = (s.secs >= 60 ? Math.round(s.secs/60) + ' 分' : s.secs + ' 秒');
+    const paint = () => { mm.textContent = (s.secs >= 60 ? Math.round(s.secs/60) + ' 分' : s.secs + ' 秒'); paintTotals(); };
+    paint();
     const inc = document.createElement('button'); inc.className = 'mini'; inc.textContent = '+';
-    // 长按连加：手机上点 25 下调不动一小时（桌面端也有步进加速）
-    const step = (d) => { s.secs = Math.max(60, s.secs + d * 60); renderEditor(); };
+    // 长按连加：手机上点 25 下调不动一小时（桌面端也有步进加速）。
+    // 🔴 只重画这一行的数字和总览，绝不整表重绘 —— 重绘会把正在被按的按钮销毁
+    const step = (d) => { s.secs = Math.max(60, s.secs + d * 60); paint(); };
     bindRepeat(dec, () => step(-1)); bindRepeat(inc, () => step(1));
     const up = document.createElement('button'); up.className = 'mini'; up.textContent = '↑';
     up.onclick = () => { if (i > 0) { const t = draft.stages[i-1]; draft.stages[i-1] = s; draft.stages[i] = t; renderEditor(); } };
@@ -251,12 +272,9 @@ function renderEditor() {
   addRow.appendChild(bw); addRow.appendChild(bb);
 
   // 总览 + 休息占比软提示（桌面端 P1 就有这条：休息 <10% 提醒一句，但不拦着）
-  const t = planTotals(draft.stages);
-  const pct = t.w > 0 ? Math.round(t.r * 100 / t.w) : 0;
   const ov = add('<div class="tip"></div>');
-  ov.textContent = '共 ' + draft.stages.length + ' 段 · 专注 ' + Math.round(t.w/60)
-    + ' 分 · 休息 ' + Math.round(t.r/60) + ' 分（休息约为专注的 ' + pct + '%）';
-  if (t.w > 0 && pct < 10) { ov.classList.add('warn'); ov.textContent += ' —— 休息偏少，容易撑不到最后'; }
+  totalsEl = ov;
+  paintTotals();
 
   add('<div class="sec">快捷生成</div>');
   const gen = add('<div class="row"></div>');
@@ -301,14 +319,27 @@ function renderEditor() {
 }
 
 // 按住不放连续调整（桌面端的步进长按加速，手机上更需要）
+// 🔴🔴 8-29 真机反馈"点一下减号就一路掉到 1、加号一直闪"＝这里两个错叠在一起：
+//    ① 停止监听挂在按钮自己身上，而每步都整表重绘 → 按钮当场被销毁 →
+//       pointerup 永远等不到 → setInterval 永远停不下来（"停不住"的真凶）
+//    ② 整表重绘＝每 90ms 重建一次 DOM（"数字一直在闪"）
+//    改法：停止监听挂到 **document**（元素没了照样收得到抬手），
+//    并且连调期间只改那一行的文字、不重绘（见 renderEditor 里的 paint）
 function bindRepeat(el, fn) {
   let t = 0, iv = 0;
-  const stop = () => { clearTimeout(t); clearInterval(iv); t = iv = 0; };
+  const stop = () => {
+    clearTimeout(t); clearInterval(iv); t = iv = 0;
+    document.removeEventListener('pointerup', stop);
+    document.removeEventListener('pointercancel', stop);
+  };
   el.addEventListener('pointerdown', (e) => {
-    e.preventDefault(); fn();
-    t = setTimeout(() => { iv = setInterval(fn, 90); }, 420);
+    e.preventDefault();
+    stop();          // 防止上一次没停干净
+    fn();
+    document.addEventListener('pointerup', stop);
+    document.addEventListener('pointercancel', stop);
+    t = setTimeout(() => { iv = setInterval(fn, 110); }, 450);
   });
-  ['pointerup','pointercancel','pointerleave'].forEach(ev => el.addEventListener(ev, stop));
 }
 
 async function savePreset() {
@@ -384,7 +415,7 @@ function renderSettings() {
   rg.type = 'range'; rg.min = 0; rg.max = 1; rg.step = 0.05; rg.value = settings.volume;
   rg.onchange = () => { settings.volume = +rg.value; pushSettings(); beep('switch'); };
   vr.appendChild(rg);
-  const sr = rowEl('铃声');
+  const sr = rowEl('铃声', '只管 App 开着时的提示音；锁屏后那一声是系统通知发的，音色归系统');
   const sseg = document.createElement('div'); sseg.className = 'seg';
   [['chime','清脆'],['bell','钟'],['wood','木鱼']].forEach(([v, t]) => {
     const b = document.createElement('button');
@@ -418,7 +449,9 @@ async function renderHistory() {
     try { rows = await T.core.invoke('get_history', { limit: 50 }); }
     catch (e) { box.innerHTML = '<div class="tip">读不到记录：' + e + '</div>'; return; }
   }
-  if (!rows.length) { box.innerHTML = '<div class="tip">还没有记录。跑完一场就会记一笔。</div>'; return; }
+  const note = '<div class="tip">跑完的每一场都会记。中途结束的：满 1 分钟才记（免得误触也留痕），'
+             + '所以拿「调试 · 20 秒 ×2」测的时候，只要没跑完就一条都不会留。</div>';
+  if (!rows.length) { box.innerHTML = '<div class="tip">还没有记录。</div>' + note; return; }
   box.innerHTML = '';
   rows.slice().reverse().forEach(r => {
     const d = new Date(r.started_ms || r.ended_ms || Date.now());
@@ -433,6 +466,8 @@ async function renderHistory() {
       + '<div class="sub">' + dt + (r.completed === false ? ' · 中途结束' : ' · 完成') + '</div>';
     box.appendChild(el);
   });
+  const n = document.createElement('div'); n.innerHTML = note;
+  box.appendChild(n.firstElementChild);
 }
 
 $('entEdit').onclick = () => openSheet('edit', '编排');
