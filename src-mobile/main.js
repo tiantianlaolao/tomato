@@ -24,6 +24,7 @@ const HOLD_MS = 1500;      // §3.3 长按 1.5 秒才算取消（防误触）
 
 let view = null, plans = [], opsTimer = 0, settings = null;
 
+if (qs.get('boxes')) window.__SHOWBOXES = true;   // 验收用：画出入口命中区
 Scene.mount($('stage'));
 Scene.start();
 

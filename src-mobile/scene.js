@@ -193,6 +193,18 @@ const Scene = {
     });
 
     this.drawTime();
+    // 验收用：?boxes=1 把入口命中区画出来。入口挂在画上的东西上，
+    // 光看截图分不清"点不到"是位置错了还是命中区错了 —— 画出来一眼就知道。
+    if (window.__SHOWBOXES && this.slots.entries) {
+      fx.lineWidth = 2 * this.DPR; fx.strokeStyle = 'rgba(120,255,180,.85)';
+      fx.font = (14 * this.DPR) + 'px sans-serif'; fx.fillStyle = 'rgba(120,255,180,.95)';
+      fx.textAlign = 'left'; fx.textBaseline = 'top';
+      for (const k in this.slots.entries) {
+        const r = this.slots.entries[k];
+        fx.strokeRect(r.x, r.y, r.w, r.h);
+        fx.fillText(k, r.x + 4 * this.DPR, r.y + 4 * this.DPR);
+      }
+    }
     fx.restore();
 
     // 🔴 整体亮度（§7.4 的 bright）必须是**全局明度乘子**，不能只当混色比例——
@@ -226,9 +238,12 @@ const Scene = {
     // 段末预告：最后 30 秒极缓地亮一点点，绝不闪
     const pre = (this.phase === 'work' || this.phase === 'break') && secs <= PRE_ALERT_SEC
       ? (1 - secs / PRE_ALERT_SEC) * 0.35 : 0;
-    const alpha = (hasTime ? 0.55 + pre : 0.30);
+    // 🔴 8-29 用户："倒计时太小了……一眼能瞄见"。原来 0.55 的半透明是"余光态要弱"
+    //    那条纪律用力过猛：弱到瞄不见就不成立了。改成 0.88，靠**尺寸和对比**读，
+    //    靠整体明度乘子压住存在感（工作段整屏本来就最暗）。
+    const alpha = (hasTime ? 0.88 + pre * 0.3 : 0.34);
     const ink = B.ink || '#3a2a1a', paper = B.paper || '#fae4be';
-    fx.font = '600 ' + Math.round(B.h * 0.52) + 'px ui-monospace,Menlo,monospace';
+    fx.font = '700 ' + Math.round(B.h * 0.56) + 'px ui-monospace,Menlo,monospace';
     fx.textAlign = 'center'; fx.textBaseline = 'middle';
     fx.fillStyle = rgba(RGB(ink), Math.min(1, alpha + 0.18).toFixed(2));
     fx.fillText(txt, B.x + B.w/2 + 1.5*U, B.y + B.h/2 + 1.5*U);

@@ -13,7 +13,7 @@
 //    写归一化坐标，槽位和命中区才不会跟着裁切漂走。
 (function () {
 'use strict';
-const { RGB, mix, css } = window.SceneUtil;
+const { RGB, mix, css, rgba } = window.SceneUtil;
 
 // ── 状态光表（§7.4）：状态之间只改"光"，不改底色 ──────────────
 // 🔴 硬纪律：相邻状态过渡 ≥1.5 秒（引擎负责渐变）。余光里任何突变都会被读成
@@ -37,13 +37,23 @@ const P = {
   // 🔴 木牌必须落在**裁切安全区**里：手机比图窄，cover 会把两侧各裁掉约 9%
   //    （430×932 实测）。第一版摆在 x=0.045，左半块直接被裁到屏幕外。
   //    安全区按 x∈[0.12, 0.88] 取，比实测再留一点余量给更窄的机型。
-  board: { x:0.135, y:0.487, w:0.300, h:0.076 },     // 木牌要摆的空地（图里没有木牌，我们画）
-  stone: { x:0.545, y:0.500, w:0.165, h:0.062 },     // 岸上那几块石头（记录入口）
-  lampBox:{ x:0.700, y:0.335, w:0.215, h:0.235 },    // 石灯笼整体（设置入口）
+  // 🔴 8-29 用户："倒计时太小了……希望能明显一些一眼能瞄见" →
+  //    牌子放大到屏宽约 2/3，数字横向占屏宽 ~48%（《场景与美术方案说明书》§4：
+  //    一米外可读、占屏宽 ≥40%）。w/h 都是**图宽**单位（mapW 按宽缩放）。
+  board: { x:0.115, y:0.447, w:0.550, h:0.225 },
+  // 🔴 命中区要落在**画上真有那件东西**的地方。第一版这个框摆在灯笼左下的空地上，
+  //    画着调试框才看出来底下根本没有石头 —— 点一片空气就是"看得见摸不着"。
+  //    改到池子右下那圈大石（画里最明确的一块石头）。
+  stone: { x:0.735, y:0.880, w:0.180, h:0.075 },     // 池沿右下那块大石（记录入口）
+  lampBox:{ x:0.700, y:0.350, w:0.205, h:0.215 },    // 石灯笼整体（设置入口）
 };
 
-// 木牌的木色照着底图里那只木桶取，别用一块突兀的亮色板（它已经够格格不入了）
-const C = { board:RGB('#6b4f33'), boardEdge:RGB('#3d2c1c'), lampCore:RGB('#ffdca0') };
+// 🔴 木色**直接从 v4 图里取样**（木桶那一片的主色/暗箍/高光），不靠感觉调 ——
+//    8-29 用户说新木牌不如旧的搭，病根就是我自己配了一个暗棕色块。
+const C = {
+  board:RGB('#de9d60'), boardDark:RGB('#985839'), boardEdge:RGB('#724737'),
+  boardHi:RGB('#f0bd88'), lampCore:RGB('#ffdca0'),
+};
 
 window.SCENES = window.SCENES || {};
 window.SCENES.onsen = {
@@ -62,25 +72,37 @@ window.SCENES.onsen = {
 
     const b = map(P.board.x, P.board.y);
     const bw = mapW(P.board.w), bh = mapW(P.board.h);
-    // 两条腿
-    bx.fillStyle = css(C.boardEdge);
-    bx.fillRect(b[0] + bw*0.18, b[1] + bh, 7*U, 26*U);
-    bx.fillRect(b[0] + bw*0.72, b[1] + bh, 7*U, 26*U);
+    const legY = b[1] + bh, legH = mapW(0.048), legW = mapW(0.022);
+
     // 落地影子：没有影子的东西看着是浮在画上的
-    bx.fillStyle = 'rgba(0,0,0,.28)';
+    bx.fillStyle = 'rgba(0,0,0,.30)';
     bx.beginPath();
-    bx.ellipse(b[0] + bw*0.5, b[1] + bh + 26*U, bw*0.42, 7*U, 0, 0, Math.PI*2);
+    bx.ellipse(b[0] + bw*0.5, legY + legH, bw*0.46, mapW(0.016), 0, 0, Math.PI*2);
     bx.fill();
-    // 牌面（跟着状态光走一点点，别让它在暗场里发白）
-    bx.fillStyle = css(mix(C.board, L.sky, 0.18 * L.tint * 6));
-    bx.fillRect(b[0], b[1], bw, bh);
-    // 上下沿加深，模拟木板的厚度
+    // 两根立柱
     bx.fillStyle = css(C.boardEdge);
-    bx.fillRect(b[0], b[1], bw, 5*U);
-    bx.fillRect(b[0], b[1] + bh - 4*U, bw, 4*U);
+    bx.fillRect(b[0] + bw*0.17, legY, legW, legH);
+    bx.fillRect(b[0] + bw*0.83 - legW, legY, legW, legH);
+    // 牌面（跟着状态光走一点点，别让它在暗场里发白）
+    const face = mix(C.board, L.sky, 0.18 * L.tint * 6);
+    bx.fillStyle = css(face);
+    bx.fillRect(b[0], b[1], bw, bh);
+    // 三条横向木纹：一块纯色板一眼就是"程序画的"，加了纹理才像木头
+    bx.fillStyle = rgba(C.boardEdge, 0.14);
+    for (let i = 1; i <= 3; i++) bx.fillRect(b[0], b[1] + bh * i/4, bw, Math.max(1, mapW(0.0035)));
+    // 上沿高光 + 下沿暗边 ＝ 板子的厚度
+    bx.fillStyle = rgba(C.boardHi, 0.55);
+    bx.fillRect(b[0], b[1], bw, mapW(0.010));
+    bx.fillStyle = css(C.boardDark);
+    bx.fillRect(b[0], b[1] + bh - mapW(0.014), bw, mapW(0.014));
+    // 左右包边（横木两端的绑扎），跟木桶上的箍呼应
+    bx.fillRect(b[0], b[1], mapW(0.016), bh);
+    bx.fillRect(b[0] + bw - mapW(0.016), b[1], mapW(0.016), bh);
 
     // 回填槽位：时间显示挂在木牌上（🔴 位置由场景说了算，换场景就换物件）
-    slots.time = { x:b[0], y:b[1], w:bw, h:bh, ink:'#3a2a1a', paper:'#fae4be' };
+    // 🔴 数字是**刻在浅木牌上的深色字**（暖木底 + 深棕字 + 下方一道浅色凹凸边），
+    //    不是原来那种"深色板 + 米色字"。ink 是那道凹凸边，paper 是字本身。
+    slots.time = { x:b[0], y:b[1], w:bw, h:bh, ink:'#f7d3a4', paper:'#4a2b16' };
 
     // 🔴 只挂**功能真的存在**的入口。环境音和商店还没有这个功能，
     //    图里也没有竹筒和竹筐 —— 摆一个点了没反应的东西，比少一个入口伤得多。
