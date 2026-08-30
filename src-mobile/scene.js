@@ -248,7 +248,9 @@ const Scene = {
     //    靠整体明度乘子压住存在感（工作段整屏本来就最暗）。
     const alpha = (hasTime ? 0.88 + pre * 0.3 : 0.34);
     const ink = B.ink || '#3a2a1a', paper = B.paper || '#fae4be';
-    fx.font = '700 ' + Math.round(B.h * 0.56) + 'px ui-monospace,Menlo,monospace';
+    // 🔴 字号受槽位**宽高双约束**：只按高算，"03:01" 五个字符会横向撑出牌面
+    //    （8-30 画进背景的木牌比程序牌窄，第一版数字直接溢出到画外）
+    fx.font = '700 ' + Math.round(Math.min(B.h * 0.56, B.w * 0.30)) + 'px ui-monospace,Menlo,monospace';
     fx.textAlign = 'center'; fx.textBaseline = 'middle';
     fx.fillStyle = rgba(RGB(ink), Math.min(1, alpha + 0.18).toFixed(2));
     fx.fillText(txt, B.x + B.w/2 + 1.5*U, B.y + B.h/2 + 1.5*U);

@@ -22,17 +22,13 @@ const Capy = {
   frozen:false,         // paused＝冻结当前帧（§设计：暂停不换段，画面停住光变暗）
   t:0,
 
-  // Scene.mount 里调：建两层，插在 bgi 之后、bgc 之前
+  // Scene.mount 里调：建角色画布，插在 bgi 之后、bgc 之前。
+  // 薄雾也画在这块画布上（角色之后、lighter 叠加）——8-30 重设计：
+  // <video> 单实例硬循环被否（循环感/三炷香），换精灵图多实例。
   mountInto(root, bgi) {
     this.cv = document.createElement('canvas');
     this.cv.className = 'layer'; this.cv.id = 'cpc';
-    this.steamBox = document.createElement('div');
-    this.steamBox.id = 'steamBox';
-    this.steamV = document.createElement('video');
-    this.steamV.muted = true; this.steamV.loop = true; this.steamV.autoplay = true;
-    this.steamV.playsInline = true; this.steamV.setAttribute('playsinline', '');
-    this.steamBox.appendChild(this.steamV);
-    bgi.after(this.cv, this.steamBox);
+    bgi.after(this.cv);
     this.cx = this.cv.getContext('2d');
     fetch('assets/capy/meta.json').then(r => r.json()).then(m => { this.meta = m; });
   },
@@ -54,20 +50,23 @@ const Capy = {
   },
 
   onPhase(phase, view) {
+    this.phase = phase;
     const seg = this.segFor(phase, view);
     this.frozen = (phase === 'paused');
     if (seg !== this.cur) { this.cur = seg; this.t = 0; if (seg) this.load(seg); }
+    const mc = window.Scene && Scene.scene && Scene.scene.mist;
+    if (mc && mc.sheet) this.load(mc.sheet, true);   // 薄雾常驻，不参与 2 段上限
   },
 
-  load(seg) {
+  load(seg, pinned) {
     if (this.sheets[seg]) return;
     const img = new Image();
     img.src = 'assets/capy/' + seg + '.webp';
-    const rec = { img, ready:false };
+    const rec = { img, ready:false, pinned:!!pinned };
     img.onload = () => { rec.ready = true; };
     this.sheets[seg] = rec;
-    // 🔴 常驻上限 2 段：踢掉最早的非当前段（src 置空让浏览器能回收位图）
-    const keys = Object.keys(this.sheets);
+    // 🔴 常驻上限＝2 段角色 + 常驻雾（pinned）：踢掉最早的非当前非常驻段
+    const keys = Object.keys(this.sheets).filter(k => !this.sheets[k].pinned);
     while (keys.length > 2) {
       const k = keys.find(x => x !== seg && x !== this.cur) || keys[0];
       if (k === seg) break;
@@ -81,17 +80,44 @@ const Capy = {
     if (!this.cv || !window.Scene || !Scene.W) return;
     this.cv.width = Scene.W; this.cv.height = Scene.H;
     this.draw();               // resize 后立即补一帧，别等下个 tick
-    // 蒸汽层定位（CSS 像素）：场景包给归一化的 {x,y,w}，y=蒸汽底边（池面）
-    const sc = Scene.scene && Scene.scene.steam;
-    if (!sc) { this.steamBox.style.display = 'none'; return; }
-    const p = Scene.map(sc.x, sc.y);
-    const w = Scene.mapW(sc.w) / Scene.DPR;
-    const bx = p[0] / Scene.DPR, by = p[1] / Scene.DPR;
-    Object.assign(this.steamBox.style, {
-      display:'', left:(bx - w/2) + 'px', top:(by - w) + 'px',
-      width:w + 'px', height:w + 'px',
-    });
-    if (!this.steamV.getAttribute('src')) { this.steamV.src = 'assets/fx_steam.mp4'; this.steamV.play().catch(()=>{}); }
+  },
+
+  // 往返循环帧号（0..n-1..0 无接缝）
+  ppFrame(t, m, t0) {
+    const n = m.frames, cycle = Math.max(1, 2 * n - 2);
+    let fi = Math.floor((t + (t0 || 0)) * m.fps) % cycle;
+    return fi >= n ? cycle - fi : fi;
+  },
+
+  // 薄雾：多实例不同相位/镜像铺满整池，lighter 叠加（黑=不加光=透明）。
+  // 素材是视频出的，这里只做摆位——不违「动效尽量视频出」。
+  drawMist() {
+    const S = window.Scene, mc = S.scene && S.scene.mist;
+    if (!mc || !this.meta || !this.meta[mc.sheet]) return;
+    const rec = this.sheets[mc.sheet];
+    if (!rec || !rec.ready) return;
+    const m = this.meta[mc.sheet];
+    const alpha = (mc.alphaByPhase && mc.alphaByPhase[this.phase]) != null
+      ? mc.alphaByPhase[this.phase] : 0.4;
+    if (alpha <= 0.01) return;
+    const cx = this.cx;
+    cx.save();
+    cx.globalCompositeOperation = 'lighter';
+    for (const it of mc.instances || []) {
+      const fi = this.ppFrame(this.t, m, it.t0);
+      const sx = (fi % m.cols) * m.cellW, sy = Math.floor(fi / m.cols) * m.cellH;
+      const a = S.map(it.x, it.y);
+      const w = S.mapW(it.w), h = w * m.cellH / m.cellW;
+      cx.globalAlpha = alpha;
+      if (it.flip) {
+        cx.save(); cx.translate(a[0], 0); cx.scale(-1, 1);
+        cx.drawImage(rec.img, sx, sy, m.cellW, m.cellH, -w / 2, a[1] - h, w, h);
+        cx.restore();
+      } else {
+        cx.drawImage(rec.img, sx, sy, m.cellW, m.cellH, a[0] - w / 2, a[1] - h, w, h);
+      }
+    }
+    cx.restore();
   },
 
   // Scene.frame 每帧调（已限 12fps）。往返循环：0..n-1..0，无接缝
@@ -106,25 +132,35 @@ const Capy = {
     const c = this.cfg(), S = window.Scene;
     if (!this.cx || !c || !S || !S.map) return;
     this.cx.clearRect(0, 0, this.cv.width, this.cv.height);
-    const seg = this.cur;   // ''/null＝这个状态画面里没有水豚，清掉即止
+    this.drawChar(c, S);
+    this.drawMist();          // 雾画在角色之后＝飘在水面和身前
+  },
+
+  drawChar(c, S) {
+    const seg = this.cur;   // ''/null＝这个状态画面里没有水豚（done=人去汤空）
     if (!seg || !this.meta || !this.meta[seg]) return;
     const rec = this.sheets[seg];
     if (!rec || !rec.ready) { this.load(seg); return; }
     const m = this.meta[seg];
-    const n = m.frames;
-    const cycle = Math.max(1, 2 * n - 2);
-    let fi = Math.floor(this.t * m.fps) % cycle;
-    if (fi >= n) fi = cycle - fi;                  // 往返
+    const fi = this.ppFrame(this.t, m, 0);         // 往返循环
     const sx = (fi % m.cols) * m.cellW, sy = Math.floor(fi / m.cols) * m.cellH;
-    // 放置：把整个 768 源帧的底边中心锚到 anchor，等比缩放到 frameW；
-    // 单元格按 offX/offY 摆回原位，跨段大小关系与生成时一致。
+    // 🔴 放置按**量出来的水豚 bbox**缩放，不按生成帧（8-30 用户打回：各段裁切比例
+    //    不同（85%/60%），按帧宽缩放＝各场景水豚大小不一）。cell 就是管线裁出的
+    //    bbox+pad：配置的 w＝"水豚在屏上多宽"，素材裁多松都不影响上屏大小。
+    //    锚点＝bbox 底边中心＝脚底/水线，落点即接地点（上岸必须整只在岸上）。
     const per = (c.perSeg && c.perSeg[seg]) || {};
     const a = S.map(per.x != null ? per.x : c.x, per.y != null ? per.y : c.y);
-    const frameW = S.mapW(per.w != null ? per.w : c.w) * (per.k || 1);
-    const k = frameW / m.srcScale;
-    const ox = a[0] - frameW / 2, oy = a[1] - m.srcScale * k;
+    const cw = S.mapW(per.w != null ? per.w : c.w) * (per.k || 1);
+    const k = cw / m.cellW;
     this.cx.drawImage(rec.img, sx, sy, m.cellW, m.cellH,
-      ox + m.offX * k, oy + m.offY * k, m.cellW * k, m.cellH * k);
+      a[0] - cw / 2, a[1] - m.cellH * k, cw, m.cellH * k);
+    // 验收用：?boxes=1 把角色 bbox 和接地锚点画出来（脚出石台一眼就看到）
+    if (window.__SHOWBOXES) {
+      this.cx.strokeStyle = 'rgba(255,180,120,.9)'; this.cx.lineWidth = 2;
+      this.cx.strokeRect(a[0] - cw / 2, a[1] - m.cellH * k, cw, m.cellH * k);
+      this.cx.fillStyle = 'rgba(255,80,80,.9)';
+      this.cx.fillRect(a[0] - 4, a[1] - 4, 8, 8);
+    }
   },
 };
 
