@@ -41,21 +41,54 @@ ssh.connect(HOST, PORT, USER, PWD, timeout=25)
 
 run(ssh, f"rm -rf {STAGE} && mkdir -p {STAGE}")
 
-# 🔴 大文件传输走原生 scp，不用 paramiko SFTP——
-#    paramiko 单流小窗口在中美高延迟链路上只有 ~8KB/s（35MB 传了 50 分钟，8-30 实测），
-#    OpenSSH scp 大窗口对延迟不敏感，同一条线快一个数量级（agentos-ios 同款做法）。
-#    sshpass 现装（脚本内装，不动 workflow 文件）。
-import subprocess, shutil, time
+# 🔴 大文件传输＝并行分流 scp（8-30 实测：这条 runner→国内链路单流只有 ~8KB/s，
+#    paramiko 和原生 scp 一个样——瓶颈是链路每条 TCP 流的份额，不是工具。
+#    档案实测并行 8 流提速 ~6 倍：切 4MB 块、十条 scp 并发、远端 cat 拼回）。
+import subprocess, shutil, time, tempfile
 if not shutil.which("sshpass"):
     subprocess.run(["brew", "install", "hudochenkov/sshpass/sshpass"], check=True)
+
+CHUNK = 4 * 1024 * 1024
+MAXP = 10
+SCP = ["sshpass", "-p", PWD, "scp", "-o", "StrictHostKeyChecking=no", "-P", str(PORT)]
+
 t0 = time.time()
-subprocess.run(
-    ["sshpass", "-p", PWD, "scp", "-o", "StrictHostKeyChecking=no", "-P", str(PORT)]
-    + FILES + [f"{USER}@{HOST}:{STAGE}/"],
-    check=True)
+tmpd = tempfile.mkdtemp()
+uploads = []          # (本地路径, 远端文件名)
+assembles = []        # (目标名, 块数)
+for f in FILES:
+    name = os.path.basename(f)
+    size = os.path.getsize(f)
+    if size <= CHUNK:
+        uploads.append((f, name))
+        continue
+    with open(f, "rb") as src:
+        i = 0
+        while True:
+            buf = src.read(CHUNK)
+            if not buf:
+                break
+            p = os.path.join(tmpd, f"{name}.part{i:03d}")
+            with open(p, "wb") as w:
+                w.write(buf)
+            uploads.append((p, os.path.basename(p)))
+            i += 1
+    assembles.append((name, i))
+
+procs = []
+for local, remote in uploads:
+    while len([p for p in procs if p.poll() is None]) >= MAXP:
+        time.sleep(0.3)
+    procs.append(subprocess.Popen(SCP + [local, f"{USER}@{HOST}:{STAGE}/{remote}"]))
+fails = sum(1 for p in procs if p.wait() != 0)
+if fails:
+    sys.exit(f"{fails} 条并行 scp 失败")
+for name, n in assembles:
+    run(ssh, f"cat {STAGE}/{name}.part* > {STAGE}/{name} && rm {STAGE}/{name}.part*")
+    print(f"  远端拼回 {name}（{n} 块）")
 tot = sum(os.path.getsize(f) for f in FILES)
 dt = max(1, time.time() - t0)
-print(f"  scp 传完 {len(FILES)} 个文件 {tot//1024}KB，{dt:.0f}s（{tot/1024/dt:.0f}KB/s）")
+print(f"  并行 scp 传完 {tot//1024}KB，{dt:.0f}s（{tot/1024/dt:.0f}KB/s，{len(uploads)} 块 ×{MAXP} 并发）")
 
 # 只覆盖同名文件，不清空目录
 run(ssh, f"mkdir -p {LIVE} && cp -a {STAGE}/. {LIVE}/ "
