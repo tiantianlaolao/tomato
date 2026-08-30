@@ -9,8 +9,13 @@ html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
 /* 底图铺满。🔴 手机比图更窄更长，cover 会裁掉两侧 —— scene.js 的 remap()
    算的是**同一套**变换，槽位和入口命中区才跟画面对得上 */
 #stage img.layer{object-fit:cover;object-position:center}
-/* 角色+薄雾画布（capy.js）：雾走精灵图多实例 lighter 叠加，不再用 video 层 */
-#cpc{pointer-events:none}
+/* 整场视频状态机（8-30 定案）：双 video 交替 + 雾吞吐转场 + 数字叠加层 */
+#stage video.layer{object-fit:cover;object-position:center;opacity:0;transition:opacity .5s}
+#stage video.layer.on{opacity:1}
+#ovc{pointer-events:none}
+#fog{position:absolute;inset:0;pointer-events:none;z-index:3;opacity:0;transition:opacity .9s;
+  background:radial-gradient(ellipse at 50% 70%, #cfd6d8 0%, #aab4b8 60%, #97a1a6 100%)}
+#fog.on{opacity:.96}
 
 #ui{position:fixed;inset:0;z-index:5;pointer-events:none}
 #ui > *{pointer-events:auto}

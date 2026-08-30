@@ -42,14 +42,14 @@ async def main():
             await pg.goto(f"http://127.0.0.1:{PORT}/index.html?demo=idle&sheet={k}")
             await pg.wait_for_timeout(1500)
             await pg.screenshot(path=os.path.join(HERE, f"_m_sheet_{k}.png"))
-        # 限帧实测：数 3 秒里究竟画了多少帧
+        # 叠加层帧率实测（视频状态机版：drawFx 已退役，钩 draw；视频本身 24fps 硬解不在此数）
         fps = await pg.evaluate("""async () => {
-            let n = 0; const d0 = Scene.drawFx.bind(Scene);
-            Scene.drawFx = function (dt) { n++; return d0(dt); };
+            let n = 0; const d0 = Scene.draw.bind(Scene);
+            Scene.draw = function () { n++; return d0(); };
             await new Promise(r => setTimeout(r, 3000));
             return n / 3;
         }""")
-        print("实测渲染帧率 = %.1f fps（目标 12）" % fps)
+        print("叠加层帧率 = %.1f fps（目标 8）" % fps)
         print("JS 报错:", errs or "无")
         await b.close()
         return len(errs)
