@@ -90,6 +90,9 @@ const Scene = {
     this.fxc = root.querySelector('#fxc');
     this.bx = this.bgc.getContext('2d');
     this.fx = this.fxc.getContext('2d');
+    // 角色层+蒸汽层（capy.js）：插在 bgi 之后、bgc 之前。
+    // 层序 bgi→水豚→蒸汽→bgc→fxc —— fxc 的全局明度乘子要压住下面所有层
+    if (window.Capy) window.Capy.mountInto(root, this.bgi);
     this.use(sceneId || 'onsen');
     // 🔴 只听 window.resize 不够：同页面内的布局变化不发这个事件
     //    （8-26 桌面端"序列开合把水豚拉伸"就是这个坑）。
@@ -108,6 +111,7 @@ const Scene = {
     this.remap();
     this.bgDirty = true;
     this.drawOnce();
+    if (window.Capy) window.Capy.onResize();
   },
 
   // 底图按 cover 铺满（CSS 那边 object-fit:cover），这里算出**同一套**变换，
@@ -151,6 +155,7 @@ const Scene = {
     }
     this.status = view.status;
     this.view = view;
+    if (window.Capy) window.Capy.onPhase(ph, view);
   },
 
   // 整场跑了多少（0~1）。给场景当气氛用（比如天色）——
@@ -307,6 +312,7 @@ const Scene = {
 
     if (this.bgDirty) this.drawBg();
     this.drawFx(dt);
+    if (window.Capy) window.Capy.tick(dt);   // 角色层随引擎限帧走，不另起循环
   },
 
   start() { if (this.running) return; this.running = true; this.lastTs = 0; this.nextFrameAt = 0; this.raf = requestAnimationFrame((t) => this.frame(t)); },

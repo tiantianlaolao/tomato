@@ -9,6 +9,14 @@ html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
 /* 底图铺满。🔴 手机比图更窄更长，cover 会裁掉两侧 —— scene.js 的 remap()
    算的是**同一套**变换，槽位和入口命中区才跟画面对得上 */
 #stage img.layer{object-fit:cover;object-position:center}
+/* 蒸汽层（capy.js 定位）：黑底视频 plus-lighter 叠加＝黑等于全透明（8-30 验证档）。
+   即梦"黑底"实为炭黑纸纹+底边奶白亮带 → contrast 压黑位 + 底部 7% 裁掉 + 椭圆渐隐 */
+#steamBox{position:absolute;overflow:hidden;pointer-events:none;
+  -webkit-mask-image:radial-gradient(ellipse 62% 80% at 50% 88%,#000 35%,transparent 78%);
+  mask-image:radial-gradient(ellipse 62% 80% at 50% 88%,#000 35%,transparent 78%)}
+#steamBox video{position:absolute;left:0;bottom:-7%;width:100%;height:107%;
+  mix-blend-mode:plus-lighter;opacity:.38;filter:contrast(2) brightness(.85)}
+#cpc{pointer-events:none}
 
 #ui{position:fixed;inset:0;z-index:5;pointer-events:none}
 #ui > *{pointer-events:auto}
