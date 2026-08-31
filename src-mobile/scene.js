@@ -12,7 +12,7 @@
 'use strict';
 
 const FOG_MS = 950;
-const PRE_ALERT_SEC = 30;
+const PRE_ALERT_SEC = 30;   // 场景包经 Scene.preAlertSec 取用（末 30 秒计时渐醒目）
 
 const Scene = {
   root:null, vids:[], vi:0, fog:null, cv:null, cx:null,
@@ -22,11 +22,27 @@ const Scene = {
   raf:0, running:false, lastFps:12, lastTs:0, nextFrameAt:0,
   frameGap:1000/8 - 8,      // 数字层 8fps 足够（视频自己 24fps 硬解）
   swapToken:0,
+  preAlertSec: PRE_ALERT_SEC,
+  brush: '"onsen-brush","STXingkai","KaiTi",serif',   // 毛笔字栈，场景包共用
 
   use(id) {
     const s = (window.SCENES || {})[id];
     if (!s) { console.error('没有这个场景：' + id); return; }
     this.scene = s;
+    // 主题资产与首屏海报都归场景包管（9-1 双主题起）
+    if (window.AS && s.assets) AS.configure(s.assets);
+    if (this.vids) for (const el of this.vids) el.poster = s.poster || 'assets/poster.webp';
+  },
+
+  // 切主题（设置面板调）：落 localStorage，清段重喂
+  setScene(id) {
+    try { localStorage.setItem('capy_scene', id); } catch (e) {}
+    this.swapToken++;
+    this.use(id);
+    this.seg = null; this.frozen = false; this.phase = 'idle';
+    for (const el of this.vids) { el.pause(); el.classList.remove('on'); el.removeAttribute('src'); el.load(); }
+    if (this.view) this.update(this.view);
+    this.draw();
   },
 
   mount(root, sceneId) {
@@ -41,7 +57,10 @@ const Scene = {
     this.fog = root.querySelector('#fog');
     this.cv = root.querySelector('#ovc');
     this.cx = this.cv.getContext('2d');
-    this.use(sceneId || 'onsen');
+    let saved = null;
+    try { saved = localStorage.getItem('capy_scene'); } catch (e) {}
+    const qsScene = new URLSearchParams(location.search).get('scene');   // 截图验收用
+    this.use(sceneId || qsScene || saved || 'onsen');
     // 🔴 canvas fillText 不会触发 @font-face 加载，必须显式预载；
     //    加载完立刻重画一次（8fps 循环也会自愈，这里只是别让首屏闪一帧衬线字）
     if (document.fonts && document.fonts.load) {
@@ -205,98 +224,8 @@ const Scene = {
       cx.fillRect(0, 0, this.W, this.H);
     }
 
-    // ── 8-31 定案「功能上牌 + 倒计时上天」（此设计=日系主题专属，中国风主题另起炉灶）──
-    const BRUSH = '"onsen-brush","STXingkai","KaiTi",serif';   // 5KB OFL 子集，dev/真机同字
-
-    // 木牌：空闲=功能菜单；运行=当班牌（第几泡/小憩/休止 + 完成刻痕计数）。
-    // 🔴 当班牌是纯展示不是按钮——零 UI 原则没破，只是别让牌在过程中空着（8-31 反馈）。
-    if (S.board) {
-      const B = this.rect(S.board);
-      cx.save();
-      cx.translate(B.x + B.w / 2, B.y + B.h / 2);
-      cx.rotate((S.board.tiltDeg || 0) * Math.PI / 180);   // 牌画在视频里，左低右高 ~3.2°
-      cx.textAlign = 'center'; cx.textBaseline = 'middle';
-      if (this.phase === 'idle') {
-        const rows = S.board.menu, rh = B.h / rows.length;
-        cx.font = Math.round(rh * 0.60) + 'px ' + BRUSH;
-        cx.fillStyle = S.board.ink;
-        for (let i = 0; i < rows.length; i++) {
-          cx.fillText(rows[i].label, 0, (i - (rows.length - 1) / 2) * rh);
-        }
-      } else if (this.phase === 'work' || this.phase === 'break' || this.phase === 'paused') {
-        const st = (v && v.stages) || [], idx = (v && v.idx) || 0;
-        let label;
-        if (this.phase === 'paused') label = '休 止';
-        else if (this.phase === 'break') label = '小 憩';
-        else {
-          const CN = ['一','二','三','四','五','六','七','八','九','十'];
-          const n = st.slice(0, idx + 1).filter((s) => s.kind !== 'break').length;
-          const cn = n <= 10 ? CN[n - 1] : (n < 20 ? '十' + CN[n - 11] : String(n));
-          label = '第' + cn + '泡';
-        }
-        cx.font = Math.round(B.h * 0.34) + 'px ' + BRUSH;
-        cx.fillStyle = S.board.ink;
-        cx.fillText(label, 0, -B.h * 0.12);
-        // 完成刻痕：每过一段添一道笔触（确定性微抖，像刻上去的计数）
-        const jj = (s) => { const x = Math.sin(s) * 43758.5453; return x - Math.floor(x); };
-        const dn = Math.min(idx, 24), tw = B.h * 0.052, gap = B.w * 0.052;
-        const x0 = -((dn - 1) * gap) / 2;
-        cx.strokeStyle = 'rgba(58,33,18,0.78)';
-        cx.lineCap = 'round';
-        for (let i = 0; i < dn; i++) {
-          cx.lineWidth = tw * (0.30 + jj(i * 7.3) * 0.14);
-          cx.beginPath();
-          cx.moveTo(x0 + i * gap + (jj(i * 3.1) - 0.5) * gap * 0.2, B.h * 0.20 - tw * (1 + jj(i * 5.7) * 0.3));
-          cx.lineTo(x0 + i * gap + (jj(i * 9.7) - 0.5) * gap * 0.2, B.h * 0.20 + tw * (1 + jj(i * 2.9) * 0.3));
-          cx.stroke();
-        }
-      }
-      cx.restore();
-    }
-
-    // 倒计时题字框：右上天空，纸色+朱红双边+竖排 MM/SS+「汤」印。
-    // 浮世绘的天空本来就是题字盖印的地方——文字压在画面上是这种画的母语。
-    const secs = Math.max(0, Math.round(((v && v.remaining_ms) || 0) / 1000));
-    const hasTime = (this.phase === 'work' || this.phase === 'break' || this.phase === 'paused');
-    if (hasTime && S.cart) {
-      const C = this.rect(S.cart);
-      const pre = (this.phase !== 'paused' && secs <= PRE_ALERT_SEC)
-        ? (1 - secs / PRE_ALERT_SEC) : 0;                  // 末 30 秒纸色渐醒目
-      cx.save();
-      // 和纸底（半透让天色透一点，压住"贴片感"）+ 朱红双边
-      cx.fillStyle = 'rgba(' + S.cart.paper + ',' + (0.80 + pre * 0.12).toFixed(2) + ')';
-      cx.fillRect(C.x, C.y, C.w, C.h);
-      cx.strokeStyle = 'rgba(' + S.cart.border + ',0.95)';
-      cx.lineWidth = Math.max(2, C.w * 0.018);
-      cx.strokeRect(C.x, C.y, C.w, C.h);
-      cx.lineWidth = Math.max(1, C.w * 0.006);
-      cx.strokeStyle = 'rgba(' + S.cart.border + ',0.55)';
-      const p = C.w * 0.055;
-      cx.strokeRect(C.x + p, C.y + p, C.w - 2 * p, C.h - 2 * p);
-      // 竖排两段：分 / 秒
-      cx.textAlign = 'center'; cx.textBaseline = 'middle';
-      cx.font = Math.round(C.w * 0.52) + 'px ' + BRUSH;
-      cx.fillStyle = S.cart.ink;
-      const mm = String(Math.floor(secs / 60)).padStart(2, '0');
-      const ss = String(secs % 60).padStart(2, '0');
-      cx.fillText(mm, C.x + C.w / 2, C.y + C.h * 0.225);
-      cx.fillText(ss, C.x + C.w / 2, C.y + C.h * 0.545);
-      // 中间一道笔断意连的分隔（略斜，呼应手写）
-      cx.strokeStyle = 'rgba(90,58,30,0.7)';
-      cx.lineWidth = Math.max(2, C.w * 0.014);
-      cx.beginPath();
-      cx.moveTo(C.x + C.w * 0.28, C.y + C.h * 0.392);
-      cx.lineTo(C.x + C.w * 0.72, C.y + C.h * 0.378);
-      cx.stroke();
-      // 落款印
-      const sw = C.w * 0.30, sx = C.x + (C.w - sw) / 2, sy = C.y + C.h * 0.72;
-      cx.fillStyle = S.cart.sealBg;
-      cx.fillRect(sx, sy, sw, sw);
-      cx.font = Math.round(sw * 0.72) + 'px ' + BRUSH;
-      cx.fillStyle = 'rgba(245,235,215,0.95)';
-      cx.fillText(S.cart.seal, sx + sw / 2, sy + sw * 0.54);
-      cx.restore();
-    }
+    // 叠加层其余内容（菜单/当班牌/计时……）全归场景包画——引擎不认识具体场景（9-1 归位）
+    if (S.drawUI) S.drawUI(this, cx, v);
 
     // 验收用：?boxes=1 画命中区
     if (window.__SHOWBOXES) {

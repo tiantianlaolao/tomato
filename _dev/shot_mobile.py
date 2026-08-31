@@ -7,9 +7,13 @@
 
 🔴 rAF 动画必须 playwright 真等：--virtual-time-budget 推不动 rAF（老坑，复撞过）。
 
-用法：python _dev/shot_mobile.py       产物落在 _dev/（*.png 已被 .gitignore 挡掉）
+用法：python _dev/shot_mobile.py [scene]   scene 默认 onsen，可传 ink（双主题起）
+     产物落在 _dev/（*.png 已被 .gitignore 挡掉）
 """
 import asyncio, http.server, socketserver, threading, functools, os, sys
+
+SCENE = sys.argv[1] if len(sys.argv) > 1 else 'onsen'
+TAG = '' if SCENE == 'onsen' else '_' + SCENE
 from playwright.async_api import async_playwright
 from PIL import Image
 
@@ -34,9 +38,9 @@ async def main():
         pg.on("pageerror", lambda e: errs.append(str(e)))
         pg.on("console", lambda m: errs.append(m.type + ": " + m.text) if m.type == "error" else None)
         for s in STATES:
-            await pg.goto(f"http://127.0.0.1:{PORT}/index.html?demo={s}")
+            await pg.goto(f"http://127.0.0.1:{PORT}/index.html?demo={s}&scene={SCENE}")
             await pg.wait_for_timeout(3000)          # 真等，让 rAF 跑起来
-            await pg.screenshot(path=os.path.join(HERE, f"_m_{s}.png"))
+            await pg.screenshot(path=os.path.join(HERE, f"_m{TAG}_{s}.png"))
         # 三块面板（编排/设置/记录）——桌面端核心功能的手机实现，各截一张
         for k in ('edit', 'set', 'hist'):
             await pg.goto(f"http://127.0.0.1:{PORT}/index.html?demo=idle&sheet={k}")
@@ -58,10 +62,10 @@ async def main():
 rc = asyncio.run(main())
 srv.shutdown()
 
-ims = [Image.open(os.path.join(HERE, f"_m_{s}.png")).resize((330, 715), Image.LANCZOS) for s in STATES]
+ims = [Image.open(os.path.join(HERE, f"_m{TAG}_{s}.png")).resize((330, 715), Image.LANCZOS) for s in STATES]
 c = Image.new("RGB", (330 * len(ims) + 12 * (len(ims) - 1), 715), (18, 15, 12))
 for i, im in enumerate(ims):
     c.paste(im, (i * (330 + 12), 0))
-c.save(os.path.join(HERE, "_m_states.png"))
-print("拼图 _dev/_m_states.png", c.size, "顺序:", STATES)
+c.save(os.path.join(HERE, f"_m{TAG}_states.png"))
+print(f"拼图 _dev/_m{TAG}_states.png", c.size, "顺序:", STATES)
 sys.exit(1 if rc else 0)

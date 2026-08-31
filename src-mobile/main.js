@@ -27,6 +27,11 @@ let view = null, plans = [], opsTimer = 0, settings = null;
 if (qs.get('boxes')) window.__SHOWBOXES = true;   // 验收用：画出入口命中区
 Scene.mount($('stage'));
 Scene.start();
+// 底部提示跟主题走（每个场景包自带 hint 文案）
+function applyHint() {
+  if (Scene.scene && Scene.scene.hint) $('hintTxt').textContent = Scene.scene.hint;
+}
+applyHint();
 
 // ═══════════════ 声音 ═══════════════
 // 🔴 Rust 每次切段都 emit('sfx')，桌面端 app.js 接了去 beep，移动端第一版**根本没接** ——
@@ -412,6 +417,19 @@ function renderSettings() {
     r.appendChild(i);
     if (unit) { const u = document.createElement('span'); u.className = 'sub'; u.textContent = unit; r.appendChild(u); }
   };
+
+  sec('场景');
+  const th = rowEl('主题', '换一个院子陪你（切换即生效）');
+  const tseg = document.createElement('div'); tseg.className = 'seg';
+  let curScene = 'onsen';
+  try { curScene = localStorage.getItem('capy_scene') || 'onsen'; } catch (e) {}
+  [['onsen','野天风吕'],['ink','水墨庭院']].forEach(([v, t]) => {
+    const b = document.createElement('button');
+    b.textContent = t; b.className = curScene === v ? 'on' : '';
+    b.onclick = () => { Scene.setScene(v); applyHint(); renderSettings(); };
+    tseg.appendChild(b);
+  });
+  th.appendChild(tseg);
 
   sec('衔接');
   sw(rowEl('工作结束自动进休息'), 'auto_work_to_break');
