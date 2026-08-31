@@ -75,14 +75,29 @@ for f in FILES:
             i += 1
     assembles.append((name, i))
 
-procs = []
-for local, remote in uploads:
-    while len([p for p in procs if p.poll() is None]) >= MAXP:
-        time.sleep(0.3)
-    procs.append(subprocess.Popen(SCP + [local, f"{USER}@{HOST}:{STAGE}/{remote}"]))
-fails = sum(1 for p in procs if p.wait() != 0)
-if fails:
-    sys.exit(f"{fails} 条并行 scp 失败")
+# 🔴 并发认证会被 sshd 打掉个别连接（8-30 实测：10 条齐撞，1 条
+#    Permission denied——密码是对的，paramiko 同密码已连上）。
+#    所以：起步错开 0.6s + 失败的块单独重试，绝不因一条判死整批。
+def upload_batch(batch):
+    procs = []
+    for local, remote in batch:
+        while len([p for p in procs if p[0].poll() is None]) >= MAXP:
+            time.sleep(0.3)
+        procs.append((subprocess.Popen(SCP + [local, f"{USER}@{HOST}:{STAGE}/{remote}"]),
+                      local, remote))
+        time.sleep(0.6)
+    return [(l, r) for p, l, r in procs if p.wait() != 0]
+
+pending = uploads
+for attempt in range(4):
+    if not pending:
+        break
+    if attempt:
+        print(f"  第{attempt}次重试 {len(pending)} 块")
+        time.sleep(5)
+    pending = upload_batch(pending)
+if pending:
+    sys.exit(f"重试后仍有 {len(pending)} 块传不上去：{[r for _, r in pending]}")
 for name, n in assembles:
     run(ssh, f"cat {STAGE}/{name}.part* > {STAGE}/{name} && rm {STAGE}/{name}.part*")
     print(f"  远端拼回 {name}（{n} 块）")
