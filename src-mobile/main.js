@@ -539,29 +539,6 @@ $('opSkip').onclick  = (e) => { e.stopPropagation(); cmd('skip'); opsTimer = 3; 
 $('nextbtn').onclick = () => cmd('start_next');
 $('doneOk').onclick  = () => cmd('stop');
 
-// ═══════════════ 诊断条（内测专用，上架前连同 Rust 的 diag/test_notify 一起删）═══════════════
-// 🔴 存在的理由：真机上"没听到声音"至少有四种可能 —— 没授权 / 没排上 / 排上了但静音 /
-//    手机侧边静音开关。看不见就只能一轮一轮猜，而每猜一轮都要用户 25 分钟。
-async function refreshDiag() {
-  if (!HAS_BRIDGE) { $('diagTxt').textContent = '浏览器模式'; return; }
-  try {
-    const d = await T.core.invoke('diag');
-    $('diagTxt').textContent = '通知' + d.perm + ' · 已排 ' + d.armed + ' 条'
-      + (d.err ? ' · 错:' + d.err : '') + ' · 时区+' + d.tz_min + '分 · ' + Scene.lastFps.toFixed(1) + 'fps';
-  } catch (e) { $('diagTxt').textContent = 'diag 调不到：' + e; }
-}
-$('diagRing').onclick = async () => {
-  beep('switch');                       // 先证明前台声音这条通了
-  $('diagTxt').textContent = '排期中…';
-  if (!HAS_BRIDGE) return;
-  try {
-    const r = await T.core.invoke('test_notify');
-    $('diagTxt').textContent = r.join(' | ');
-  } catch (e) { $('diagTxt').textContent = 'test_notify 失败：' + e; }
-};
-$('diagTxt').onclick = refreshDiag;
-setInterval(refreshDiag, 5000);
-
 // ═══════════════ Hold to cancel（§3.3）═══════════════
 // 🔴 长按 1.5 秒才算数，防误触；而且**规则常驻印在屏幕上**，
 //    不提前说代价就没有威慑力。

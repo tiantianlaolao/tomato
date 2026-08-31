@@ -432,12 +432,6 @@ pub fn builtin_plans() -> Vec<Plan> {
     // 冲刺预设只进 debug 构建：正式包用户不该看到测试用序列
     #[cfg(debug_assertions)]
     v.push(Plan { id: "sprint5".into(), name: "5 秒冲刺（测试）".into(), stages: seq(&[("work", 5), ("break", 5), ("work", 5)]), builtin: true });
-    // 🔴 移动端调试预设：真机包是 release 构建，上面那条 debug_assertions 的进不来，
-    //    而"验一次切段/通知/完成卡片"不该让人真坐 25 分钟（2026-08-29 用户明确提过）。
-    //    50 秒走完 工作→休息→工作→完成，跟 25 分钟走的是同一条代码路径。
-    //    ⚠️ 上架前删掉这三行（移动端还在内测，没有正式版用户会看到）。
-    #[cfg(mobile)]
-    v.push(Plan { id: "dbg20".into(), name: "调试 · 20 秒 ×2".into(), stages: seq(&[("work", 20), ("break", 10), ("work", 20)]), builtin: true });
     v
 }
 

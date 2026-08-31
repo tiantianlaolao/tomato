@@ -1091,83 +1091,6 @@ async fn get_stats(app: AppHandle) -> Stats {
     a.stats.clone()
 }
 
-// ———————————————————————— 诊断（移动端内测用，上架前连同前端诊断条一起删） ————————————————————————
-// 存在的理由：真机上"没听到声音"至少有四种可能 —— 没授权 / 没排上 / 排上了但静音 /
-// 手机侧边静音开关。看不见就只能一轮一轮猜，而每猜一轮都要用户的时间。
-#[derive(Serialize, Default)]
-struct Diag {
-    perm: String,      // 通知权限
-    armed: usize,      // 上次真排上几条
-    err: String,       // 排期报的错（空＝没错）
-    tz_min: i32,       // 本地时区偏移（分钟），东八区应当是 480
-}
-
-#[tauri::command]
-async fn diag(app: AppHandle) -> Diag {
-    #[cfg(mobile)]
-    {
-        use tauri_plugin_notification::{NotificationExt, PermissionState};
-        let perm = match app.notification().permission_state() {
-            Ok(PermissionState::Granted) => "已授权",
-            Ok(PermissionState::Denied) => "被拒绝",
-            Ok(_) => "未询问",
-            Err(_) => "查不到",
-        };
-        let state: State<Mutex<App>> = app.state();
-        let a = state.lock().unwrap();
-        return Diag {
-            perm: perm.into(),
-            armed: a.arm_count,
-            err: a.arm_err.clone(),
-            tz_min: chrono::Local::now().offset().local_minus_utc() / 60,
-        };
-    }
-    #[cfg(desktop)]
-    {
-        let _ = &app;
-        Diag { perm: "桌面端".into(), ..Default::default() }
-    }
-}
-
-/// A/B/C 三连试响：一次把"通知到底卡在哪"问清楚，用户等 12 秒就有全部结论。
-///   A = 不做时区修正 + 带声音   → 若 A 报 pastScheduledTime，时区那条推断就坐实了
-///   B = 做时区修正   + 不带声音 → 若 B 弹出来但没声，"没声＝没设 sound" 坐实
-///   C = 做时区修正   + 带声音   → 这就是段末提醒现在用的配置，它响了就等于全对
-#[tauri::command]
-async fn test_notify(app: AppHandle) -> Vec<String> {
-    #[cfg(mobile)]
-    {
-        use tauri_plugin_notification::{NotificationExt, Schedule};
-        let n = app.notification();
-        let now = now_ms();
-        let cases: [(&str, u64, bool, bool); 3] = [
-            ("A 未修正+有声", 6_000, false, true),
-            ("B 已修正+无声", 9_000, true, false),
-            ("C 已修正+有声", 12_000, true, true),
-        ];
-        let mut out = vec![];
-        for (i, (name, delay, shift, sound)) in cases.iter().enumerate() {
-            let date = match sched_date(now + delay, *shift) {
-                Some(d) => d,
-                None => { out.push(format!("{}：日期算不出来", name)); continue; }
-            };
-            let mut b = n.builder().id(9500 + i as i32).title(*name).body("试响");
-            if *sound { b = b.sound(SOUND); }
-            let r = b.schedule(Schedule::At { date, repeating: false, allow_while_idle: true }).show();
-            out.push(match r {
-                Ok(_) => format!("{}：已排", name),
-                Err(e) => format!("{}：{}", name, e),
-            });
-        }
-        return out;
-    }
-    #[cfg(desktop)]
-    {
-        let _ = &app;
-        vec!["桌面端不需要排期".into()]
-    }
-}
-
 /// 回主窗口（编排/跳过/结束都在那边）。桌宠右键菜单的「打开主窗口」走这条。
 #[tauri::command]
 async fn open_main(app: AppHandle) {
@@ -1424,7 +1347,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             boot, get_state, session_start, session_cmd,
             save_settings, save_plans, save_schedules, get_history, rest_focus, set_activity,
-            open_main, pet_menu, diag, test_notify, get_stats
+            open_main, pet_menu, get_stats
         ])
         .run(tauri::generate_context!())
         .expect("番茄时钟启动失败")

@@ -23,15 +23,6 @@ html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
 #ui > *{pointer-events:auto}
 .hide{display:none!important}
 
-/* ── 诊断条（内测专用，上架前整段删）──────────────── */
-/* 贴在安全区下面、够小够暗，不参与美术；它只为了省用户的时间 */
-#diag{position:absolute;left:0;right:0;top:0;display:flex;gap:8px;align-items:center;
-  padding:calc(env(safe-area-inset-top) + 6px) 10px 6px;
-  background:rgba(8,6,4,.55);font-size:10px;line-height:1.35;color:rgba(203,184,154,.62)}
-#diagTxt{flex:1;min-width:0;word-break:break-all}
-#diagRing{flex:none;font:inherit;font-size:11px;padding:5px 10px;border-radius:8px;
-  border:1px solid rgba(120,96,68,.5);background:rgba(30,24,17,.9);color:#cbb89a}
-
 /* ── 空闲：预设 ───────────────────────────────── */
 /* 预设列表压在池子上，加一层压暗让卡片读得清 —— 别指望毛玻璃在深色上够用 */
 /* 空闲态只剩一行提示（入口在场景物件上），别再压一大块渐变盖住画 */
