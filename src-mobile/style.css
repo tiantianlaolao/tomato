@@ -1,4 +1,6 @@
 /* capyroom 移动端外壳样式。画面全在 canvas 里，这里只管 UI 层。 */
+/* 毛笔字（木牌菜单+题字框数字）：马善政楷 OFL 子集 5KB，授权文本在 assets/OFL-MaShanZheng.txt */
+@font-face{font-family:'onsen-brush';src:url('assets/onsen-brush.woff2') format('woff2');font-display:swap}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
   font-family:-apple-system,"PingFang SC",sans-serif;

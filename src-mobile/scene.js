@@ -42,6 +42,11 @@ const Scene = {
     this.cv = root.querySelector('#ovc');
     this.cx = this.cv.getContext('2d');
     this.use(sceneId || 'onsen');
+    // 🔴 canvas fillText 不会触发 @font-face 加载，必须显式预载；
+    //    加载完立刻重画一次（8fps 循环也会自愈，这里只是别让首屏闪一帧衬线字）
+    if (document.fonts && document.fonts.load) {
+      document.fonts.load('12px onsen-brush').then(() => this.draw()).catch(() => {});
+    }
     new ResizeObserver(() => this.resize()).observe(root);
     window.addEventListener('resize', () => this.resize());
     this.resize();
@@ -185,23 +190,68 @@ const Scene = {
       cx.fillRect(0, 0, this.W, this.H);
     }
 
-    // 数字：本段剩余 MM:SS，只有 running/paused 有；idle/awaiting/done 显示 · ·
-    const B = this.rect(S.time);
+    // ── 8-31 定案「功能上牌 + 倒计时上天」（此设计=日系主题专属，中国风主题另起炉灶）──
+    const BRUSH = '"onsen-brush","STXingkai","KaiTi",serif';   // 5KB OFL 子集，dev/真机同字
+
+    // 木牌功能菜单：只在空闲画（运行=零 UI；等待/完成走 HTML 层的按钮和卡片）
+    if (this.phase === 'idle' && S.board) {
+      const B = this.rect(S.board);
+      cx.save();
+      cx.translate(B.x + B.w / 2, B.y + B.h / 2);
+      cx.rotate((S.board.tiltDeg || 0) * Math.PI / 180);   // 牌画在视频里，左低右高 ~3.2°
+      cx.textAlign = 'center'; cx.textBaseline = 'middle';
+      const rows = S.board.menu, rh = B.h / rows.length;
+      cx.font = Math.round(rh * 0.60) + 'px ' + BRUSH;
+      cx.fillStyle = S.board.ink;
+      for (let i = 0; i < rows.length; i++) {
+        cx.fillText(rows[i].label, 0, (i - (rows.length - 1) / 2) * rh);
+      }
+      cx.restore();
+    }
+
+    // 倒计时题字框：右上天空，纸色+朱红双边+竖排 MM/SS+「汤」印。
+    // 浮世绘的天空本来就是题字盖印的地方——文字压在画面上是这种画的母语。
     const secs = Math.max(0, Math.round(((v && v.remaining_ms) || 0) / 1000));
     const hasTime = (this.phase === 'work' || this.phase === 'break' || this.phase === 'paused');
-    const txt = hasTime
-      ? String(Math.floor(secs/60)).padStart(2,'0') + ':' + String(secs%60).padStart(2,'0')
-      : '· ·';
-    const pre = (this.phase === 'work' || this.phase === 'break') && secs <= PRE_ALERT_SEC
-      ? (1 - secs / PRE_ALERT_SEC) * 0.35 : 0;
-    const alpha = hasTime ? Math.min(1, 0.88 + pre * 0.3) : 0.34;
-    // 🔴 字号宽高双约束（画进背景的木牌不吃程序字号，"03:01"横向别撑出牌面）
-    cx.font = '700 ' + Math.round(Math.min(B.h * 0.56, B.w * 0.30)) + 'px ui-monospace,Menlo,monospace';
-    cx.textAlign = 'center'; cx.textBaseline = 'middle';
-    cx.fillStyle = 'rgba(247,211,164,' + Math.min(1, alpha + 0.10).toFixed(2) + ')';
-    cx.fillText(txt, B.x + B.w/2 + 1.5*this.DPR, B.y + B.h/2 + 1.5*this.DPR);
-    cx.fillStyle = 'rgba(74,43,22,' + alpha.toFixed(2) + ')';
-    cx.fillText(txt, B.x + B.w/2, B.y + B.h/2);
+    if (hasTime && S.cart) {
+      const C = this.rect(S.cart);
+      const pre = (this.phase !== 'paused' && secs <= PRE_ALERT_SEC)
+        ? (1 - secs / PRE_ALERT_SEC) : 0;                  // 末 30 秒纸色渐醒目
+      cx.save();
+      // 和纸底（半透让天色透一点，压住"贴片感"）+ 朱红双边
+      cx.fillStyle = 'rgba(' + S.cart.paper + ',' + (0.80 + pre * 0.12).toFixed(2) + ')';
+      cx.fillRect(C.x, C.y, C.w, C.h);
+      cx.strokeStyle = 'rgba(' + S.cart.border + ',0.95)';
+      cx.lineWidth = Math.max(2, C.w * 0.018);
+      cx.strokeRect(C.x, C.y, C.w, C.h);
+      cx.lineWidth = Math.max(1, C.w * 0.006);
+      cx.strokeStyle = 'rgba(' + S.cart.border + ',0.55)';
+      const p = C.w * 0.055;
+      cx.strokeRect(C.x + p, C.y + p, C.w - 2 * p, C.h - 2 * p);
+      // 竖排两段：分 / 秒
+      cx.textAlign = 'center'; cx.textBaseline = 'middle';
+      cx.font = Math.round(C.w * 0.52) + 'px ' + BRUSH;
+      cx.fillStyle = S.cart.ink;
+      const mm = String(Math.floor(secs / 60)).padStart(2, '0');
+      const ss = String(secs % 60).padStart(2, '0');
+      cx.fillText(mm, C.x + C.w / 2, C.y + C.h * 0.225);
+      cx.fillText(ss, C.x + C.w / 2, C.y + C.h * 0.545);
+      // 中间一道笔断意连的分隔（略斜，呼应手写）
+      cx.strokeStyle = 'rgba(90,58,30,0.7)';
+      cx.lineWidth = Math.max(2, C.w * 0.014);
+      cx.beginPath();
+      cx.moveTo(C.x + C.w * 0.28, C.y + C.h * 0.392);
+      cx.lineTo(C.x + C.w * 0.72, C.y + C.h * 0.378);
+      cx.stroke();
+      // 落款印
+      const sw = C.w * 0.30, sx = C.x + (C.w - sw) / 2, sy = C.y + C.h * 0.72;
+      cx.fillStyle = S.cart.sealBg;
+      cx.fillRect(sx, sy, sw, sw);
+      cx.font = Math.round(sw * 0.72) + 'px ' + BRUSH;
+      cx.fillStyle = 'rgba(245,235,215,0.95)';
+      cx.fillText(S.cart.seal, sx + sw / 2, sy + sw * 0.54);
+      cx.restore();
+    }
 
     // 验收用：?boxes=1 画命中区
     if (window.__SHOWBOXES) {
