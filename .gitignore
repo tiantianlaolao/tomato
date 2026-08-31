@@ -2,3 +2,6 @@ node_modules/
 src-tauri/target/
 src-tauri/gen/
 _dev/*.png
+
+# 场景视频不进仓/不进包：CI 出瘦包，App 首启从 1.13 下载（本地留着给 dev/截图用）
+src-mobile/assets/video/

@@ -67,7 +67,8 @@ const Scene = {
     return { x:a[0], y:a[1], w:b[0]-a[0], h:b[1]-a[1] };
   },
 
-  src(name) { return 'assets/video/' + name + '.mp4'; },
+  // 视频地址统一问资产通道（assets.js：缓存给 blob、没缓存流播服务器、dev 走本地文件）
+  src(name) { return (window.AS ? AS.url(name) : 'assets/video/' + name + '.mp4'); },
 
   // 🔴 内核 status 只有 idle/running/paused/awaiting/done，没有 work/break——
   //    工作还是休息看 stages[idx].kind（老引擎的显式映射，原样保留）
