@@ -168,6 +168,21 @@ const Scene = {
               if (token !== this.swapToken) return;
               this.fogSwap(seg, true);
             };
+          } else if (wasPh === 'break' && ph === 'work' && S.swimIn) {
+            // 回程：雾散时水豚已在池边 → 游回池心 → 交叉淡化接工作循环
+            //（swimIn 尾帧钉的 K1b；只有 break→work 走这条，其余仍纯雾转场）
+            const token = ++this.swapToken;
+            this.fog.classList.add('on');
+            setTimeout(() => {
+              if (token !== this.swapToken) return;
+              const sp = this.spare();
+              this.playOn(sp, S.swimIn, false);
+              this.fog.classList.remove('on');
+              sp.onended = () => {
+                if (token !== this.swapToken) return;
+                this.playOn(this.spare(), seg, true);
+              };
+            }, FOG_MS);
           } else {
             this.fogSwap(seg, true);
           }

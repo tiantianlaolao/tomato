@@ -18,7 +18,8 @@
 const VER = 1;                 // 美术批次号：换资产 → 服务器传 v{N+1}/ + 这里 +1
 const CDN = 'https://www.tybbtech.com/capyroom/assets/v' + VER + '/';
 const NAMES = ['loop_soak', 'loop_work', 'loop_sunbathe', 'loop_eat',
-               'loop_urge', 'loop_empty', 't_a_swim'];
+               'loop_urge', 'loop_empty', 't_a_swim', 't_b_swim'];
+// ⚠️ 加段不用升 VER：缓存按段名逐个查，缺哪段补哪段；VER 只留给"换美术批次"。
 const DEV = location.protocol === 'http:' || location.protocol === 'https:';
 
 const map = {};                // name -> blob objectURL（永不 revoke，整场复用）

@@ -42,6 +42,9 @@ window.SCENES.onsen = {
   // 池内状态（从这些状态去休息时，先播"游到池边"再雾转场）
   poolStates: ['idle', 'work', 'awaiting'],
   swimOut: 't_a_swim',
+  // 回程（8-31）：休息→工作时，雾散见水豚已在池边→游回池心→交叉淡化接工作循环。
+  // 🔴 只接 work（尾帧钉的 K1b 睁眼泡）；休息→等待/空闲仍走纯雾转场（姿态对不上）。
+  swimIn: 't_b_swim',
 
   // 木牌功能菜单（空闲时画；毛笔字=马善政楷 OFL 子集，倾角跟牌走，量自 kf_k1）
   board: { ...P.board, tiltDeg:-3.2, ink:'#3a2112',
