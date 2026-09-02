@@ -23,7 +23,7 @@ window.SCENES.ink = {
   frame: [1152, 2048],
   poster: 'assets/poster_cn.webp',
   hint: '水上三个词都能点：入池＝开始 · 调汤＝设置 · 池录＝记录',
-  assets: { base: 'cn-v2', dir: 'assets/video-cn',   // 9-2：睡觉/吃桃重出 + 四段过渡换 Seedance 2.0（上岸/下水拍回来了）
+  assets: { base: 'cn-v3', dir: 'assets/video-cn',   // 9-2：睡觉/吃桃重出 + 四段过渡换 Seedance 2.0；v3=去程首帧改钉工作帧（与 loop_work 同源）
             names: ['loop_soak','loop_work','loop_nap','loop_eat',
                     'loop_urge','loop_empty','t_a_swim','t_b_swim'] },
 
