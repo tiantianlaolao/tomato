@@ -4,11 +4,11 @@
   "slots": [
    {
     "id": "lamp_side",
-    "name": "灯旁地面"
+    "name": "石灯旁"
    },
    {
     "id": "pool_edge",
-    "name": "池沿右侧"
+    "name": "石台左侧"
    },
    {
     "id": "wall",
@@ -20,7 +20,7 @@
    },
    {
     "id": "willow",
-    "name": "柳树下"
+    "name": "檐下"
    }
   ],
   "towels": [

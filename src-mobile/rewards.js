@@ -78,8 +78,12 @@ async function demoView(theme) {
   const ledger = empty
     ? { total_min: 0, spent_min: 0, avail_min: 0, sessions_done: 0, visit_days: 0, month: '2026-09', month_days: [] }
     : { total_min: 400, spent_min: 120, avail_min: 280, sessions_done: 17, visit_days: 9, month: '2026-09', month_days: [1, 2, 3, 5, 8, 9, 12, 15, 16] };
+  const full = q.get('rw') === 'full';   // 五个槽位全摆满，看位置用
   const state = empty
     ? { towels: [], hung: '', props: [], placed: {}, visitors: [], purchases: [] }
+    : full
+    ? { towels: ['t01', 't02', 't03'], hung: 't03', props: ['windbell', 'orchid', 'stonelamp', 'lotus', 'tibi'],
+        placed: { willow: 'windbell', lamp_side: 'orchid', pool_edge: 'stonelamp', water_near: 'lotus', wall: 'tibi' }, visitors: ['v01'], purchases: [] }
     : { towels: ['t01', 't02'], hung: 't02', props: ['windbell', 'orchid'], placed: { willow: 'windbell' }, visitors: [], purchases: [] };
   return { ledger, state, catalog: cat };
 }

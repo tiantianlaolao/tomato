@@ -3,7 +3,9 @@
 // 🔴 美术定案（8-31 十二版母版换来的）：白墙即画布（题壁）、水面铺满下缘、
 //    上岸位=灯旁蒲团、世界观=院子按水豚尺寸造。母版 _design/anchor_cn/master_v12。
 // 🔴 显示层规矩（用户拍板）：**倒计时横排**（日系竖排/中国风横排=主题区分）+朱印，
-//    **功能菜单放下方**（水面上一行三项）。
+//    **功能菜单放白墙下方一行三项**（9-2 用户定：汤沐/调汤/沐录，从水面挪到墙上）。
+// 🔴 P3 槽位（9-2）：风铃檐下、题壁字墙心、手拭巾两根竿在题字下（第二根给访客手信）、
+//    石灯与兰花在太湖石脚下、荷花近水；岸上槽位一律避开水豚坐蒲团的 x 0.54~0.90。
 // 🔴 视频产线：8 段全带轮廓锁；空庭段守卫句"水面上没有任何动物"（水獭事件）。
 (function () {
 'use strict';
@@ -11,20 +13,25 @@
 // 坐标：归一化于母版画幅 1152×2048（手机 cover 裁两侧各 ~9%，横向安全区 0.10~0.90）
 const P = {
   wall: { x:0.10, y:0.125, x2:0.66, y2:0.315 },   // 题壁计时区（墙面留白）
-  menuRow: { x:0.27, y:0.485, x2:0.63, y2:0.56 }, // 菜单一行三项（9-2 用户定：白墙下方，太湖石与宫灯之间的留白；只在空闲态画，不与岸上段冲突）
+  menuRow: { x:0.29, y:0.535, x2:0.63, y2:0.605 }, // 菜单一行三项（9-2 用户定：白墙下方，太湖石与宫灯之间的留白；下挪 5% 给手拭巾杆腾位；右缘 0.63 避开宫灯杆 0.64；只在空闲态画）
 };
 const third = (i) => ({ x:P.menuRow.x + (P.menuRow.x2-P.menuRow.x)/3*i, y:P.menuRow.y,
                         x2:P.menuRow.x + (P.menuRow.x2-P.menuRow.x)/3*(i+1), y2:P.menuRow.y2 });
 // P3 庭院槽位（id 与 rewards_catalog.json 的 ink.slots 一致）+ 手拭巾晾杆位。
 // 🔴 现在全是占位（纸色小牌写名字），真图到了换成 drawImage，坐标不动。
 const SLOTS = {
-  lamp_side:  { x:0.57, y:0.575, x2:0.66, y2:0.62 },   // 宫灯左侧地面
-  pool_edge:  { x:0.86, y:0.565, x2:0.96, y2:0.615 },  // 池沿右侧
-  wall:       { x:0.30, y:0.36,  x2:0.52, y2:0.44 },   // 白墙留白（菜单上方）
+  // 🔴 岸上段水豚占 x 0.50~0.89，槽位必须避开，否则叠加层会画在它身上
+  lamp_side:  { x:0.235, y:0.57, x2:0.30, y2:0.62, scale:1.6 },   // 石灯旁（蒲团旁那块在空闲态压着菜单、休息态压着水豚，两头都不行）
+  pool_edge:  { x:0.10, y:0.545, x2:0.22, y2:0.615 },  // 石台左侧、太湖石脚下（右侧超出手机安全区会被裁）
+  wall:       { x:0.31, y:0.375, x2:0.53, y2:0.44, scale:1.0 },   // 白墙留白（菜单上方）——9-2 用户：太大 → 缩到槽位原尺寸
   water_near: { x:0.10, y:0.86,  x2:0.24, y2:0.92 },   // 近处水面
-  willow:     { x:0.12, y:0.08,  x2:0.22, y2:0.14 },   // 柳条下
+  // 🔴 挂点坐标是量母版像素得来的（檐底 x0.73~0.76 → y≈0.195~0.21；石顶脊 x0.13 → y≈0.367），别目测
+  willow:     { x:0.72, y:0.195, x2:0.77, y2:0.30, top:true, scale:1.0 },   // 檐下：绳头顶进飞檐底边（9-2 用户：挂柳条上挂不住）
 };
-const TOWEL = { x:0.28, y:0.585, x2:0.40, y2:0.625 };  // 池沿石台上的晾杆
+// 手拭巾（9-2 定案）：题壁字下方、菜单上方的墙面，两根短竹竿（竿画在图里）。
+// 第一根＝自己挂的那条，永远在；第二根＝访客来时挂它带来的手信，平时空着不画。
+const TOWELS = [ { x:0.28, y:0.445, x2:0.41, y2:0.535, top:true, scale:1.0 },
+                 { x:0.43, y:0.445, x2:0.56, y2:0.535, top:true, scale:1.0 } ];
 
 window.SCENES = window.SCENES || {};
 window.SCENES.ink = {
@@ -64,6 +71,27 @@ window.SCENES.ink = {
     // P3：摆好的小物 + 挂着的手拭巾（静态景物，所有状态都在——它们不是进度，不违红线一）
     const RW = window.RW, rv = RW && RW.view;
     if (rv && rv.state) {
+      // 真图：assets/p3/ink/<id>.png（RGBA，长边 512）。没图或没加载完就画纸牌占位。
+      // 图按槽位框"contain"放、底边对齐（东西都是立在地上/浮在水上的）。
+      const img = (id) => {
+        const c = S._imgs || (S._imgs = {});
+        if (!(id in c)) {
+          const im = new Image(); c[id] = im; im.ok = false;
+          im.onload = () => { im.ok = true; E.draw && E.draw(); };
+          im.onerror = () => { im.ok = false; im.failed = true; };
+          im.src = 'assets/p3/ink/' + id + '.png';
+        }
+        return c[id];
+      };
+      const pic = (r, id, name, scale) => {
+        const im = img(id);
+        if (!im.ok) { if (im.failed) tag(r, name); return; }
+        const sc = r.scale || scale;
+        const R = E.rect(r), s = Math.min((R.w * sc) / im.width, (R.h * sc) / im.height);
+        const w = im.width * s, h = im.height * s;
+        // 立在地上/浮在水上的底边对齐；挂着的（风铃/手拭巾）顶边对齐
+        cx.drawImage(im, R.x + (R.w - w) / 2, r.top ? R.y : R.y + R.h - h, w, h);
+      };
       const tag = (r, name) => {
         const R = E.rect(r), fpx = Math.round(Math.min(R.h * 0.55, R.w * 0.42));
         cx.fillStyle = 'rgba(244,238,224,0.82)';
@@ -78,11 +106,15 @@ window.SCENES.ink = {
       const placed = rv.state.placed || {};
       for (const slot in placed) {
         const p = RW.cat('props', placed[slot]);
-        if (p && SLOTS[slot]) tag(SLOTS[slot], p.name);
+        if (p && SLOTS[slot]) pic(SLOTS[slot], p.id, p.name, 2.2);
       }
       if (rv.state.hung) {
         const t = RW.cat('towels', rv.state.hung);
-        if (t) tag(TOWEL, t.name);
+        if (t) pic(TOWELS[0], t.id, t.name, 1.0);
+      }
+      if (rv.state.guest_towel) {          // 访客带来的手信（访客线接上后由内核写入）
+        const t = RW.cat('towels', rv.state.guest_towel);
+        if (t) pic(TOWELS[1], t.id, t.name, 1.0);
       }
     }
 

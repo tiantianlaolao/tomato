@@ -513,6 +513,8 @@ async function renderHistory() {
   if (recTab === 'towels') return renderTowels(body);
   return renderGarden(body);
 }
+// 缩略图：有真图（assets/p3/<主题>/<id>.png）就盖上去，没有就露出底下的两个字
+const rwArt = (id, txt) => '<div class="rw-art"><img src="assets/p3/' + RW.theme + '/' + id + '.png" onerror="this.remove()">' + txt + '</div>';
 const rwErr = (body, e) => { const t = document.createElement('div'); t.className = 'tip warn'; t.textContent = String(e && e.message || e); body.prepend(t); };
 
 // 汤札：本月牌（每天首次完成＝一个印）+ 流水
@@ -563,7 +565,7 @@ function renderTowels(body) {
     const own = RW.owned('towel', t.id), can = L.total_min >= t.min;
     const el = document.createElement('div');
     el.className = 'rwitem' + (own ? ' own' : '') + (hung === t.id ? ' hung' : '');
-    el.innerHTML = '<div class="rw-art">' + t.name.slice(0, 2) + '</div><b>' + t.name + '</b>'
+    el.innerHTML = rwArt(t.id, t.name.slice(0, 2)) + '<b>' + t.name + '</b>'   // 9-2 用户定：收藏里看到的就是挂出来的（搭竿版）
       + '<span>' + (own ? (hung === t.id ? '挂着' : '点一下挂上') : (can ? '可以领了' : '泡满 ' + Math.floor(t.min / 60) + ' 小时' + (t.min % 60 ? (t.min % 60) + ' 分' : ''))) + '</span>';
     el.onclick = async () => {
       try {
@@ -602,7 +604,7 @@ function renderGarden(body) {
       const own = RW.owned('prop', p.id), placed = cur === p.id, can = L.avail_min >= p.cost_min;
       const el = document.createElement('div');
       el.className = 'rwitem small' + (own ? ' own' : '') + (placed ? ' hung' : '');
-      el.innerHTML = '<div class="rw-art">' + p.name.slice(0, 2) + '</div><b>' + p.name + '</b>'
+      el.innerHTML = rwArt(p.id, p.name.slice(0, 2)) + '<b>' + p.name + '</b>'
         + '<span>' + (placed ? '摆着' : own ? '点一下摆上' : (p.cost_min + ' 分钟换')) + '</span>';
       el.onclick = async () => {
         try {
@@ -631,7 +633,7 @@ function renderGarden(body) {
     vs.forEach(p => {
       const own = RW.owned('visitor', p.id), can = L.visit_days >= p.days;
       const el = document.createElement('div'); el.className = 'rwitem small' + (own ? ' own' : '');
-      el.innerHTML = '<div class="rw-art">豚</div><b>' + p.name + '</b><span>' + (own ? '常来' : can ? '可以请了' : '再来 ' + (p.days - L.visit_days) + ' 天') + '</span>';
+      el.innerHTML = rwArt(p.id, '豚') + '<b>' + p.name + '</b><span>' + (own ? '常来' : can ? '可以请了' : '再来 ' + (p.days - L.visit_days) + ' 天') + '</span>';
       el.onclick = async () => { if (own || !can) return; try { await RW.unlock('visitor', p.id, 'earn'); renderHistory(); } catch (e) { rwErr(body, e); } };
       if (!own && RW.showBuy()) {
         const b = document.createElement('button'); b.className = 'buy'; b.textContent = '¥' + (p.price_cny || 12);
