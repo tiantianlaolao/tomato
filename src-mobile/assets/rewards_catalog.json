@@ -1,0 +1,141 @@
+{
+ "_doc": "P3 奖励载体目录（每主题一份）。min=累计专注分钟里程碑；cost_min=用可用分钟换；price_cny=直接买（P4 接 IAP 前隐藏）。改数不改代码。",
+ "ink": {
+  "slots": [
+   {
+    "id": "lamp_side",
+    "name": "灯旁地面"
+   },
+   {
+    "id": "pool_edge",
+    "name": "池沿右侧"
+   },
+   {
+    "id": "wall",
+    "name": "白墙"
+   },
+   {
+    "id": "water_near",
+    "name": "近处水面"
+   },
+   {
+    "id": "willow",
+    "name": "柳树下"
+   }
+  ],
+  "towels": [
+   {
+    "id": "t01",
+    "name": "素帕",
+    "min": 60
+   },
+   {
+    "id": "t02",
+    "name": "云纹",
+    "min": 180
+   },
+   {
+    "id": "t03",
+    "name": "缠枝莲",
+    "min": 360
+   },
+   {
+    "id": "t04",
+    "name": "鱼戏",
+    "min": 600
+   },
+   {
+    "id": "t05",
+    "name": "竹影",
+    "min": 900
+   },
+   {
+    "id": "t06",
+    "name": "梅枝",
+    "min": 1320
+   },
+   {
+    "id": "t07",
+    "name": "山水",
+    "min": 1800
+   },
+   {
+    "id": "t08",
+    "name": "金鳞",
+    "min": 2400
+   }
+  ],
+  "props": [
+   {
+    "id": "windbell",
+    "name": "风铃",
+    "slot": "willow",
+    "cost_min": 120,
+    "price_cny": 6
+   },
+   {
+    "id": "stonelamp",
+    "name": "石灯",
+    "slot": "pool_edge",
+    "cost_min": 180,
+    "price_cny": 6
+   },
+   {
+    "id": "orchid",
+    "name": "一盆兰",
+    "slot": "lamp_side",
+    "cost_min": 150,
+    "price_cny": 6
+   },
+   {
+    "id": "lotus",
+    "name": "荷花",
+    "slot": "water_near",
+    "cost_min": 240,
+    "price_cny": 6
+   },
+   {
+    "id": "koi",
+    "name": "锦鲤",
+    "slot": "water_near",
+    "cost_min": 300,
+    "price_cny": 8
+   },
+   {
+    "id": "tibi",
+    "name": "题壁字",
+    "slot": "wall",
+    "cost_min": 360,
+    "price_cny": 8
+   },
+   {
+    "id": "cushion2",
+    "name": "蒲团·青",
+    "slot": "lamp_side",
+    "cost_min": 200,
+    "price_cny": 6
+   },
+   {
+    "id": "teatray",
+    "name": "茶盘",
+    "slot": "pool_edge",
+    "cost_min": 260,
+    "price_cny": 6
+   }
+  ],
+  "visitors": [
+   {
+    "id": "v01",
+    "name": "常客·阿沐",
+    "days": 7,
+    "price_cny": 12
+   }
+  ]
+ },
+ "onsen": {
+  "slots": [],
+  "towels": [],
+  "props": [],
+  "visitors": []
+ }
+}

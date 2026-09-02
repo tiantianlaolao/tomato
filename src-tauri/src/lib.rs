@@ -27,6 +27,7 @@
 //   productName 在 iOS 侧特意用 ASCII：tauri ios init 拿它生成 Xcode 工程名和 scheme，中文是已知的雷。
 //   iOS 那份只留 main 一个窗口 —— rest 遮罩窗和 pet 桌宠窗在移动端不存在。
 mod core;
+mod rewards;
 
 use core::{Plan, Session, Settings};
 use serde::{Deserialize, Serialize};
@@ -1091,6 +1092,30 @@ async fn get_stats(app: AppHandle) -> Stats {
     a.stats.clone()
 }
 
+// ── P3 奖励载体（rewards.rs）：账本从 history.jsonl 重算，状态落 rewards.json ──
+// 🔴 只取 dir 后立刻放锁：规则计算不需要 App 状态，别让读文件顶着内核锁。
+fn data_dir(app: &AppHandle) -> PathBuf {
+    let state: State<Mutex<App>> = app.state();
+    let a = state.lock().unwrap();
+    a.dir.clone()
+}
+#[tauri::command]
+async fn get_rewards(app: AppHandle, theme: String) -> rewards::RewardsView {
+    rewards::view(&data_dir(&app), &theme, now_ms())
+}
+#[tauri::command]
+async fn reward_unlock(app: AppHandle, theme: String, kind: String, id: String, via: String) -> Result<rewards::RewardsView, String> {
+    rewards::unlock(&data_dir(&app), &theme, &kind, &id, &via, now_ms())
+}
+#[tauri::command]
+async fn reward_place(app: AppHandle, theme: String, slot: String, id: String) -> Result<rewards::RewardsView, String> {
+    rewards::place(&data_dir(&app), &theme, &slot, &id, now_ms())
+}
+#[tauri::command]
+async fn reward_hang(app: AppHandle, theme: String, id: String) -> Result<rewards::RewardsView, String> {
+    rewards::hang(&data_dir(&app), &theme, &id, now_ms())
+}
+
 /// 回主窗口（编排/跳过/结束都在那边）。桌宠右键菜单的「打开主窗口」走这条。
 #[tauri::command]
 async fn open_main(app: AppHandle) {
@@ -1347,7 +1372,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             boot, get_state, session_start, session_cmd,
             save_settings, save_plans, save_schedules, get_history, rest_focus, set_activity,
-            open_main, pet_menu, get_stats
+            open_main, pet_menu, get_stats,
+            get_rewards, reward_unlock, reward_place, reward_hang
         ])
         .run(tauri::generate_context!())
         .expect("番茄时钟启动失败")

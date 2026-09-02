@@ -18,6 +18,8 @@ const T = window.__TAURI__;
 const $ = (id) => document.getElementById(id);
 const qs = new URLSearchParams(location.search);
 const HAS_BRIDGE = !!(T && T.core);
+// P3：账本变了（换/摆/挂）场景要重画一次，摆好的小物才会出现
+RW.onChange(() => { try { Scene.draw(); } catch (e) {} });
 
 const GRACE_SEC = 30;      // §3.3 开始 30 秒内取消无代价
 const HOLD_MS = 1500;      // §3.3 长按 1.5 秒才算取消（防误触）
@@ -115,6 +117,9 @@ function syncUI() {
     // ⚠️ 原来这儿写"攒了 N 个橘子"——8-29 用户把"橘子＝进度/货币"整个否了，
     //    而"攒什么"要等他想好。没定的事就别在成果卡片上先许愿。
     $('doneSub').textContent = '专注 ' + done + ' 段 · 休息 ' + human(view.acc_rest_ms || 0);
+    // P3（9-2 定案）：完成卡片只加一句进度，不弹商店。账本刚入账，重读一次再说话。
+    const sub = $('doneSub');
+    RW.load().then(() => { const s = RW.progressLine(); if (s) sub.textContent += ' · ' + s; }).catch(() => {});
   }
   if (st === 'paused') $('opPause').textContent = '继续';
   else $('opPause').textContent = '暂停';
@@ -426,10 +431,15 @@ function renderSettings() {
   [['onsen','野天风吕'],['ink','水墨庭院']].forEach(([v, t]) => {
     const b = document.createElement('button');
     b.textContent = t; b.className = curScene === v ? 'on' : '';
-    b.onclick = () => { Scene.setScene(v); applyHint(); renderSettings(); };
+    b.onclick = () => { Scene.setScene(v); applyHint(); RW.load(v).catch(() => {}); renderSettings(); };
     tseg.appendChild(b);
   });
   th.appendChild(tseg);
+  // P3 真钱链路做完但默认藏着（P4 接 IAP 才打开）——这是开发开关，不是用户功能
+  const bd = rowEl('显示购买（开发）', '沐录里显示 ¥ 按钮；正式包接内购前保持关闭');
+  const bb = document.createElement('button'); bb.className = 'sw' + (RW.showBuy() ? ' on' : '');
+  bb.onclick = () => { RW.setShowBuy(!RW.showBuy()); bb.classList.toggle('on', RW.showBuy()); };
+  bd.appendChild(bb);
 
   sec('衔接');
   sw(rowEl('工作结束自动进休息'), 'auto_work_to_break');
@@ -481,19 +491,53 @@ async function pushSettings() {
   catch (e) { console.error('save_settings', e); }
 }
 
-// ── 记录：会话流水（按实际经过时间记，不是计划时长）──
+// ── 沐录：三页（汤札 / 收藏 / 庭院）+ 会话流水（P3，9-2 定案）──
+// 🔴 布置和购买都收在这里，场景里不新增入口；"买"默认隐藏（设置里的开发开关），P4 接 IAP 后打开。
+let recTab = 'stamps';
 async function renderHistory() {
   const box = $('sheetBody');
+  const q = new URLSearchParams(location.search);
+  if (q.get('tab') && !renderHistory._tabInit) { recTab = q.get('tab'); renderHistory._tabInit = true; }
   box.innerHTML = '<div class="tip">读取中…</div>';
+  try { if (!RW.view) await RW.load(); } catch (e) { box.innerHTML = '<div class="tip">读不到账本：' + e + '</div>'; return; }
+  box.innerHTML = '';
+  const tabs = document.createElement('div'); tabs.className = 'tabs';
+  [['stamps', '汤札'], ['towels', '收藏'], ['garden', '庭院']].forEach(([k, t]) => {
+    const b = document.createElement('button'); b.textContent = t; b.className = recTab === k ? 'on' : '';
+    b.onclick = () => { recTab = k; renderHistory(); };
+    tabs.appendChild(b);
+  });
+  box.appendChild(tabs);
+  const body = document.createElement('div'); box.appendChild(body);
+  if (recTab === 'stamps') return renderStamps(body);
+  if (recTab === 'towels') return renderTowels(body);
+  return renderGarden(body);
+}
+const rwErr = (body, e) => { const t = document.createElement('div'); t.className = 'tip warn'; t.textContent = String(e && e.message || e); body.prepend(t); };
+
+// 汤札：本月牌（每天首次完成＝一个印）+ 流水
+async function renderStamps(body) {
+  const L = RW.view.ledger;
+  const card = document.createElement('div'); card.className = 'stampcard';
+  const [y, m] = L.month.split('-').map(Number);
+  const days = new Date(y, m, 0).getDate();
+  const set = new Set(L.month_days || []);
+  let cells = '';
+  for (let d = 1; d <= days; d++) cells += '<i class="' + (set.has(d) ? 'on' : '') + '">' + (set.has(d) ? '印' : d) + '</i>';
+  card.innerHTML = '<div class="sc-head"><b>' + m + ' 月牌</b><span>来了 ' + set.size + ' 天 · 一共来过 ' + L.visit_days + ' 天</span></div>'
+    + '<div class="sc-grid">' + cells + '</div>'
+    + '<div class="sub">累计泡了 ' + Math.floor(L.total_min / 60) + ' 小时 ' + (L.total_min % 60) + ' 分 · 可用 ' + L.avail_min + ' 分钟</div>';
+  body.appendChild(card);
+
   let rows = [];
   if (HAS_BRIDGE) {
     try { rows = await T.core.invoke('get_history', { limit: 50 }); }
-    catch (e) { box.innerHTML = '<div class="tip">读不到记录：' + e + '</div>'; return; }
+    catch (e) { body.innerHTML += '<div class="tip">读不到记录：' + e + '</div>'; return; }
   }
   const note = '<div class="tip">跑完的每一场都会记。中途结束的：满 1 分钟才记（免得误触也留痕），'
              + '所以拿「调试 · 20 秒 ×2」测的时候，只要没跑完就一条都不会留。</div>';
-  if (!rows.length) { box.innerHTML = '<div class="tip">还没有记录。</div>' + note; return; }
-  box.innerHTML = '';
+  if (!rows.length) { body.innerHTML += '<div class="tip">还没有记录。</div>' + note; return; }
+  const box = body;
   rows.slice().reverse().forEach(r => {
     const d = new Date(r.started_ms || r.ended_ms || Date.now());
     const el = document.createElement('div');
@@ -511,6 +555,98 @@ async function renderHistory() {
   box.appendChild(n.firstElementChild);
 }
 
+// 收藏：手拭巾（固定顺序里程碑；到了就领；也可买）
+function renderTowels(body) {
+  const v = RW.view, L = v.ledger, hung = v.state.hung;
+  const grid = document.createElement('div'); grid.className = 'rwgrid';
+  (v.catalog.towels || []).forEach(t => {
+    const own = RW.owned('towel', t.id), can = L.total_min >= t.min;
+    const el = document.createElement('div');
+    el.className = 'rwitem' + (own ? ' own' : '') + (hung === t.id ? ' hung' : '');
+    el.innerHTML = '<div class="rw-art">' + t.name.slice(0, 2) + '</div><b>' + t.name + '</b>'
+      + '<span>' + (own ? (hung === t.id ? '挂着' : '点一下挂上') : (can ? '可以领了' : '泡满 ' + Math.floor(t.min / 60) + ' 小时' + (t.min % 60 ? (t.min % 60) + ' 分' : ''))) + '</span>';
+    el.onclick = async () => {
+      try {
+        if (own) await RW.hang(hung === t.id ? '' : t.id);
+        else if (can) await RW.unlock('towel', t.id, 'earn');
+        else if (RW.showBuy()) await RW.unlock('towel', t.id, 'buy');
+        else return;
+        renderHistory();
+      } catch (e) { rwErr(body, e); }
+    };
+    if (!own && !can && RW.showBuy()) {
+      const b = document.createElement('button'); b.className = 'buy'; b.textContent = '¥' + (t.price_cny || 6);
+      el.appendChild(b);
+    }
+    grid.appendChild(el);
+  });
+  body.appendChild(grid);
+  const tip = document.createElement('div'); tip.className = 'tip';
+  tip.textContent = '累计泡够就能领，顺序固定。已累计 ' + L.total_min + ' 分钟。';
+  body.appendChild(tip);
+}
+
+// 庭院：固定槽位，一槽一件；花可用分钟换，或买
+function renderGarden(body) {
+  const v = RW.view, L = v.ledger, cat = v.catalog;
+  const head = document.createElement('div'); head.className = 'sub';
+  head.textContent = '可用 ' + L.avail_min + ' 分钟（累计 ' + L.total_min + '，已用 ' + L.spent_min + '）';
+  body.appendChild(head);
+  (cat.slots || []).forEach(sl => {
+    const wrap = document.createElement('div'); wrap.className = 'slot';
+    const cur = RW.placedAt(sl.id);
+    const curName = cur ? (RW.cat('props', cur) || {}).name : '空着';
+    wrap.innerHTML = '<div class="slot-head"><b>' + sl.name + '</b><span>' + curName + '</span></div>';
+    const row = document.createElement('div'); row.className = 'rwrow';
+    (cat.props || []).filter(p => p.slot === sl.id).forEach(p => {
+      const own = RW.owned('prop', p.id), placed = cur === p.id, can = L.avail_min >= p.cost_min;
+      const el = document.createElement('div');
+      el.className = 'rwitem small' + (own ? ' own' : '') + (placed ? ' hung' : '');
+      el.innerHTML = '<div class="rw-art">' + p.name.slice(0, 2) + '</div><b>' + p.name + '</b>'
+        + '<span>' + (placed ? '摆着' : own ? '点一下摆上' : (p.cost_min + ' 分钟换')) + '</span>';
+      el.onclick = async () => {
+        try {
+          if (own) await RW.place(sl.id, placed ? '' : p.id);
+          else if (can) await RW.unlock('prop', p.id, 'earn');
+          else { rwErr(body, '可用分钟不够，还差 ' + (p.cost_min - L.avail_min) + ' 分钟'); return; }
+          renderHistory();
+        } catch (e) { rwErr(body, e); }
+      };
+      if (!own && RW.showBuy()) {
+        const b = document.createElement('button'); b.className = 'buy'; b.textContent = '¥' + (p.price_cny || 6);
+        b.onclick = async (ev) => { ev.stopPropagation(); try { await RW.unlock('prop', p.id, 'buy'); renderHistory(); } catch (e) { rwErr(body, e); } };
+        el.appendChild(b);
+      }
+      row.appendChild(el);
+    });
+    wrap.appendChild(row);
+    body.appendChild(wrap);
+  });
+  // 访客：按来访天数
+  const vs = cat.visitors || [];
+  if (vs.length) {
+    const wrap = document.createElement('div'); wrap.className = 'slot';
+    wrap.innerHTML = '<div class="slot-head"><b>访客</b><span>一共来过 ' + L.visit_days + ' 天</span></div>';
+    const row = document.createElement('div'); row.className = 'rwrow';
+    vs.forEach(p => {
+      const own = RW.owned('visitor', p.id), can = L.visit_days >= p.days;
+      const el = document.createElement('div'); el.className = 'rwitem small' + (own ? ' own' : '');
+      el.innerHTML = '<div class="rw-art">豚</div><b>' + p.name + '</b><span>' + (own ? '常来' : can ? '可以请了' : '再来 ' + (p.days - L.visit_days) + ' 天') + '</span>';
+      el.onclick = async () => { if (own || !can) return; try { await RW.unlock('visitor', p.id, 'earn'); renderHistory(); } catch (e) { rwErr(body, e); } };
+      if (!own && RW.showBuy()) {
+        const b = document.createElement('button'); b.className = 'buy'; b.textContent = '¥' + (p.price_cny || 12);
+        b.onclick = async (ev) => { ev.stopPropagation(); try { await RW.unlock('visitor', p.id, 'buy'); renderHistory(); } catch (e) { rwErr(body, e); } };
+        el.appendChild(b);
+      }
+      row.appendChild(el);
+    });
+    wrap.appendChild(row); body.appendChild(wrap);
+  }
+  const tip = document.createElement('div'); tip.className = 'tip';
+  tip.textContent = '换来的东西永远是你的；分钟只增不减，不来也不会掉。';
+  body.appendChild(tip);
+}
+
 // 🔴 入口在**场景物件**上（§9：画面里没有悬浮按钮）。点哪件东西开哪个面板，
 //    映射由场景包给（换个场景就是换一组物件），引擎只负责命中判定。
 const ENTRY_SHEET = { start:['start','今天泡多久'], settings:['set','设置'], stats:['hist','记录'] };
@@ -520,7 +656,9 @@ function tapScene(e) {
   const r = $('stage').getBoundingClientRect();
   const hit = Scene.hitEntry(e.clientX - r.left, e.clientY - r.top);
   if (!hit || !ENTRY_SHEET[hit]) return;
-  openSheet(ENTRY_SHEET[hit][0], ENTRY_SHEET[hit][1]);
+  // 面板标题跟场景词走（中国风=沐录/调汤/汤沐），场景包没给就用默认
+  const m = Scene.scene && (Scene.scene.menu || []).find(x => x.key === hit);
+  openSheet(ENTRY_SHEET[hit][0], (m && m.label) || ENTRY_SHEET[hit][1]);
 }
 
 // ═══════════════ 命令 ═══════════════
@@ -633,6 +771,7 @@ if (!HAS_BRIDGE) {
   ];
   renderPlans();
   feed(fixture(qs.get('demo') || 'running'));
+  RW.load(Scene.scene ? Scene.scene.id : 'onsen').catch(() => {});   // P3 DEMO 账本（?rw=empty 看空状态）
   setInterval(() => {
     if (!view || view.status !== 'running') return;
     view.remaining_ms = Math.max(0, view.remaining_ms - 1000);
@@ -655,6 +794,7 @@ if (!HAS_BRIDGE) {
       settings = b.settings || null;
       renderPlans();
       feed(b.view);
+      RW.load(Scene.scene ? Scene.scene.id : 'onsen').catch(() => {});   // P3 账本（失败不影响计时）
     } catch (e) {
       console.error('boot', e);
       try { feed(await T.core.invoke('get_state')); } catch (e2) {}

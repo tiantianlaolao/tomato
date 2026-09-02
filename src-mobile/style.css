@@ -152,3 +152,34 @@ input[type=range]{flex:1;accent-color:#e8915c}
 #holdring{position:absolute;left:0;bottom:0;top:0;width:0;
   background:linear-gradient(90deg,rgba(232,89,12,.16),rgba(232,89,12,.34));
   transition:width .05s linear}
+
+/* ── P3 沐录三页（9-2） ─────────────────────────── */
+.tabs{display:flex;gap:6px;margin-bottom:10px}
+.tabs button{flex:1;font:inherit;font-size:13px;padding:8px 0;border-radius:10px;
+  border:1px solid rgba(120,96,68,.4);background:rgba(28,22,16,.9);color:rgba(203,184,154,.7)}
+.tabs button.on{border-color:rgba(232,145,92,.6);color:#f0c9a0;background:rgba(58,38,22,.8)}
+.stampcard{padding:12px;border-radius:14px;border:1px solid rgba(120,96,68,.3);background:rgba(28,22,16,.7);margin-bottom:10px}
+.sc-head{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:rgba(203,184,154,.6)}
+.sc-head b{font-size:14px;color:#cbb89a}
+.sc-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin:10px 0 8px}
+.sc-grid i{font-style:normal;font-size:11px;text-align:center;line-height:26px;border-radius:7px;
+  color:rgba(203,184,154,.35);background:rgba(120,96,68,.12)}
+.sc-grid i.on{color:#fff4e6;background:#b2382a;font-family:"onsen-brush",serif;font-size:14px}
+.rwgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.rwrow{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+.rwitem{position:relative;text-align:center;padding:8px 4px;border-radius:12px;font-size:11px;
+  border:1px solid rgba(120,96,68,.3);background:rgba(28,22,16,.7);color:rgba(203,184,154,.55)}
+.rwitem.small{flex:none;width:76px}
+.rwitem b{display:block;font-weight:600;color:rgba(203,184,154,.7);margin-top:5px}
+.rwitem span{display:block;font-size:10px;margin-top:2px}
+.rwitem.own{border-color:rgba(232,145,92,.45)}
+.rwitem.own b{color:#f0c9a0}
+.rwitem.hung{background:rgba(58,38,22,.8)}
+.rw-art{height:44px;line-height:44px;border-radius:9px;font-family:"onsen-brush",serif;font-size:20px;
+  color:#3e3226;background:#f4eee0;opacity:.35}
+.rwitem.own .rw-art{opacity:1}
+.rwitem .buy{position:absolute;right:4px;top:4px;font:inherit;font-size:10px;padding:2px 6px;border-radius:7px;
+  border:1px solid rgba(232,145,92,.6);background:rgba(58,38,22,.9);color:#f0c9a0}
+.slot{margin-top:12px}
+.slot-head{display:flex;justify-content:space-between;font-size:12px;color:rgba(203,184,154,.6);margin-bottom:6px}
+.slot-head b{color:#cbb89a}
