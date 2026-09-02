@@ -80,18 +80,19 @@ window.SCENES.onsen = {
         cx.font = Math.round(rh * 0.60) + 'px ' + BRUSH;
         cx.fillStyle = S.board.ink;
         for (let i = 0; i < rows.length; i++) {
-          cx.fillText(rows[i].label, 0, (i - (rows.length - 1) / 2) * rh);
+          cx.fillText(window.I18N ? I18N.t(rows[i].label) : rows[i].label, 0, (i - (rows.length - 1) / 2) * rh);   // 英文：Soak / Tune / Log
         }
       } else if (ph === 'work' || ph === 'break' || ph === 'paused') {
         const st = (v && v.stages) || [], idx = (v && v.idx) || 0;
         let label;
-        if (ph === 'paused') label = '休 止';
-        else if (ph === 'break') label = '小 憩';
+        const EN = window.I18N && I18N.lang === 'en';   // 9-2 双语：画布上的字场景包自己选词
+        if (ph === 'paused') label = EN ? 'Paused' : '休 止';
+        else if (ph === 'break') label = EN ? 'Rest' : '小 憩';
         else {
           const CN = ['一','二','三','四','五','六','七','八','九','十'];
           const n = st.slice(0, idx + 1).filter((s) => s.kind !== 'break').length;
           const cn = n <= 10 ? CN[n - 1] : (n < 20 ? '十' + CN[n - 11] : String(n));
-          label = '第' + cn + '泡';
+          label = EN ? ('Soak ' + n) : ('第' + cn + '泡');
         }
         cx.font = Math.round(B.h * 0.34) + 'px ' + BRUSH;
         cx.fillStyle = S.board.ink;

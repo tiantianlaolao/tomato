@@ -360,23 +360,24 @@ fn arm_notifications(app: &AppHandle) {
 
     // 锁内只取快照，放锁后再碰插件 —— 插件调用会派发到主线程，
     // 持锁去碰就是 8-25 那个死锁的翻版。
-    let (awake_change, switches, sound_on) = {
+    let (awake_change, switches, sound_on, lang) = {
         let state: State<Mutex<App>> = app.state();
         let mut a = state.lock().unwrap();
         let sound_on = a.settings.sound_on;
+        let lang = a.settings.lang.clone();   // 通知文案按语言选（9-2 双语）；进指纹，切语言要重排
         // 常亮只在"在跑没跑"真的翻转时才去动。滴答每秒都会走到这儿，
         // 每秒往主线程派一条 ObjC 消息是白烧电 —— 而省电正是我们要量的东西。
         let want = a.session.status == "running";
         let awake_change = if a.keep_awake != want { a.keep_awake = want; Some(want) } else { None };
         // 🔴 指纹里必须带上 sound_on：排期是**提前**发出去的，改设置时那批通知已经躺在
         //    系统里了。不带的话"关掉提示音"要等下一次切段才生效，本次会话照响。
-        let fp = format!("{}|{}|{}|{}", a.session.status, a.session.idx, a.session.end_ms, sound_on);
+        let fp = format!("{}|{}|{}|{}|{}", a.session.status, a.session.idx, a.session.end_ms, sound_on, lang);
         if fp == a.last_arm {
-            (awake_change, None, sound_on) // 排期没变，不用往 Swift 桥上白敲一遍
+            (awake_change, None, sound_on, lang) // 排期没变，不用往 Swift 桥上白敲一遍
         } else {
             a.last_arm = fp;
             let cfg = a.settings.clone();
-            (awake_change, Some(core::future_switches(&a.session, &cfg)), sound_on)
+            (awake_change, Some(core::future_switches(&a.session, &cfg)), sound_on, lang)
         }
     };
 
@@ -409,11 +410,12 @@ fn arm_notifications(app: &AppHandle) {
                 Some(d) => d,
                 None => continue,
             };
+            let en = lang == "en";
             let (title, body) = match sw.to.as_str() {
-                "break"    => ("上岸歇会儿", "这一段专注走完了，去泡一泡。"),
-                "work"     => ("回水里吧", "休息结束，下一段开始了。"),
-                "awaiting" => ("这一段走完了", "回来点一下，接着下一段。"),
-                _          => ("这一场结束了", "整场都跑完了，看看攒了几个橘子。"),
+                "break"    => if en { ("Time to get out", "This focus block is done. Go soak a while.") } else { ("上岸歇会儿", "这一段专注走完了，去泡一泡。") },
+                "work"     => if en { ("Back in the water", "Break's over. Next block starts now.") } else { ("回水里吧", "休息结束，下一段开始了。") },
+                "awaiting" => if en { ("Block finished", "Come back and tap to start the next one.") } else { ("这一段走完了", "回来点一下，接着下一段。") },
+                _          => if en { ("Session complete", "The whole session is done. Come take a look.") } else { ("这一场结束了", "整场都跑完了，回来看看吧。") },
             };
             // 🔴「提示音」开关要管到这儿：段末那一声其实是系统排期通知发的，
             //    不看设置的话，用户把开关关了照样响 ＝ 开关在说假话

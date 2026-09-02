@@ -435,6 +435,16 @@ function renderSettings() {
     tseg.appendChild(b);
   });
   th.appendChild(tseg);
+  // 语言（9-2 全球发布：中英双语，默认跟系统；手动切换记 localStorage 并同步给内核选通知文案）
+  const lr = rowEl('语言 / Language');
+  const lseg = document.createElement('div'); lseg.className = 'seg';
+  [['zh', '中文'], ['en', 'English']].forEach(([v, t]) => {
+    const b = document.createElement('button');
+    b.textContent = t; b.className = I18N.lang === v ? 'on' : '';
+    b.onclick = () => { if (settings) { settings.lang = v; pushSettings(); } setTimeout(() => I18N.set(v), 150); };
+    lseg.appendChild(b);
+  });
+  lr.appendChild(lseg);
   // P3 真钱链路做完但默认藏着（P4 接 IAP 才打开）——这是开发开关，不是用户功能
   const bd = rowEl('显示购买（开发）', '沐录里显示 ¥ 按钮；正式包接内购前保持关闭');
   const bb = document.createElement('button'); bb.className = 'sw' + (RW.showBuy() ? ' on' : '');
@@ -797,6 +807,8 @@ if (!HAS_BRIDGE) {
       renderPlans();
       feed(b.view);
       RW.load(Scene.scene ? Scene.scene.id : 'onsen').catch(() => {});   // P3 账本（失败不影响计时）
+      // 语言同步：前端按系统语言定，内核只在发系统通知时用它选文案；不一致就推一次
+      if (settings && settings.lang !== I18N.lang) { settings.lang = I18N.lang; pushSettings(); }
     } catch (e) {
       console.error('boot', e);
       try { feed(await T.core.invoke('get_state')); } catch (e2) {}

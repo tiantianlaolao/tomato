@@ -51,6 +51,7 @@ pub struct Settings {
     pub sit_remind_min: u32,       // 久坐提醒间隔分钟，0=关（FE-41，仅非强制模式）
     pub strong_remind: bool,       // 休息结束未响应的强提醒（FE-23）
     pub pet_hidden: bool,          // 桌宠小窗是否收起（托盘/设置可切）
+    pub lang: String,              // "zh" | "en"（9-2 全球发布定案：内核只在发系统通知时用它选文案；界面翻译在前端）
 }
 
 impl Default for Settings {
@@ -73,6 +74,7 @@ impl Default for Settings {
             sit_remind_min: 60,
             strong_remind: true,
             pet_hidden: false,
+            lang: "zh".into(),
         }
     }
 }

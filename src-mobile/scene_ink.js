@@ -128,7 +128,7 @@ window.SCENES.ink = {
       for (let i = 0; i < n; i++) {
         const cxm = R.x + cw * i + cw / 2, cym = R.y + R.h / 2;
         cx.fillStyle = S.ink;
-        cx.fillText(S.menu[i].label, cxm, cym);
+        cx.fillText(window.I18N ? I18N.t(S.menu[i].label) : S.menu[i].label, cxm, cym);   // 英文：Soak / Tune / Log
         cx.fillStyle = 'rgba(62,50,38,0.28)';
         cx.fillRect(cxm - fpx * 0.9, cym + fpx * 0.62, fpx * 1.8, Math.max(2, fpx * 0.05));
       }
@@ -160,13 +160,14 @@ window.SCENES.ink = {
     cx.fillText(S.seal, sx + sw / 2, sy + sw * 0.54);
     // 当班小字：第X泡 / 小憩 / 休止
     let label;
-    if (ph === 'paused') label = '休止';
-    else if (ph === 'break') label = '小憩';
+    const EN = window.I18N && I18N.lang === 'en';   // 9-2 双语：画布上的字不在 DOM 里，场景包自己选词
+    if (ph === 'paused') label = EN ? 'Paused' : '休止';
+    else if (ph === 'break') label = EN ? 'Rest' : '小憩';
     else {
       const CN = ['一','二','三','四','五','六','七','八','九','十'];
       const st = (v && v.stages) || [], idx = (v && v.idx) || 0;
       const n = st.slice(0, idx + 1).filter((s) => s.kind !== 'break').length;
-      label = '第' + (n <= 10 ? CN[n - 1] : (n < 20 ? '十' + CN[n - 11] : String(n))) + '泡';
+      label = EN ? ('Soak ' + n) : ('第' + (n <= 10 ? CN[n - 1] : (n < 20 ? '十' + CN[n - 11] : String(n))) + '泡');
     }
     cx.font = Math.round(fpx * 0.34) + 'px ' + BRUSH;
     cx.fillStyle = 'rgba(62,50,38,0.68)';
