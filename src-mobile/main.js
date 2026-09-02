@@ -428,10 +428,15 @@ function renderSettings() {
   const tseg = document.createElement('div'); tseg.className = 'seg';
   let curScene = 'onsen';
   try { curScene = localStorage.getItem('capy_scene') || 'onsen'; } catch (e) {}
-  [['onsen','野天风吕'],['ink','水墨庭院']].forEach(([v, t]) => {
+  // P4 主题锁：付费主题没买时按钮带锁和价格，点了走购买；只在 Store.enforce()（真商店或开发开关）时生效
+  [['ink','水墨庭院'],['onsen','野天风吕']].forEach(([v, t]) => {
     const b = document.createElement('button');
-    b.textContent = t; b.className = curScene === v ? 'on' : '';
-    b.onclick = () => { Scene.setScene(v); applyHint(); RW.load(v).catch(() => {}); renderSettings(); };
+    const info = RW.themeInfo(v), locked = Store.enforce() && info && info.paid && !RW.ownsTheme(v);
+    b.textContent = locked ? (t + ' 🔒 ' + Store.price(info)) : t; b.className = curScene === v ? 'on' : '';
+    b.onclick = () => {
+      if (locked) { rwBuy($('sheetBody'), 'theme', info, v, () => { Scene.setScene(v); applyHint(); RW.load(v).catch(() => {}); renderSettings(); }); return; }
+      Scene.setScene(v); applyHint(); RW.load(v).catch(() => {}); renderSettings();
+    };
     tseg.appendChild(b);
   });
   th.appendChild(tseg);
@@ -450,6 +455,26 @@ function renderSettings() {
   const bb = document.createElement('button'); bb.className = 'sw' + (RW.showBuy() ? ' on' : '');
   bb.onclick = () => { RW.setShowBuy(!RW.showBuy()); bb.classList.toggle('on', RW.showBuy()); };
   bd.appendChild(bb);
+  // 恢复购买（苹果 5.1.1：必须独立于登录，且随时可用）
+  const rr = rowEl('恢复购买', '在这台设备换了 Apple ID 或重装后，把买过的找回来');
+  const rb = document.createElement('button'); rb.className = 'btn'; rb.textContent = '恢复购买';
+  rb.onclick = async () => {
+    try { const n = await Store.restore(); rb.textContent = '已恢复 ' + n + ' 项'; RW.load().catch(() => {}); }
+    catch (e) { rb.textContent = String(e.message || e); }
+  };
+  rr.appendChild(rb);
+  // 内测包专属（CAPY_INTERNAL 编进来才有）：一键拥有全部付费内容 / 撤回，交易号 internal，不碰攒来的和真买的
+  if (RW.internal) {
+    sec('内测');
+    const gr = rowEl('内测：全部解锁', '主题包和本主题全部单件一键拥有，只为看效果；商店包没有这个按钮');
+    const gb = document.createElement('button'); gb.className = 'btn'; gb.textContent = '全部解锁';
+    gb.onclick = async () => { try { await RW.grantAll(); gb.textContent = '已解锁'; renderSettings(); } catch (e) { gb.textContent = String(e.message || e); } };
+    gr.appendChild(gb);
+    const vr = rowEl('清除内测解锁', '只撤回内测解锁的，攒来的和真买的原样保留');
+    const vb = document.createElement('button'); vb.className = 'btn ghost'; vb.textContent = '清除';
+    vb.onclick = async () => { try { await RW.revokeInternal(); vb.textContent = '已清除'; renderSettings(); } catch (e) { vb.textContent = String(e.message || e); } };
+    vr.appendChild(vb);
+  }
 
   sec('衔接');
   sw(rowEl('工作结束自动进休息'), 'auto_work_to_break');
@@ -525,6 +550,18 @@ async function renderHistory() {
 }
 // 缩略图：有真图（assets/p3/<主题>/<id>.png）就盖上去，没有就露出底下的两个字
 const rwArt = (id, txt) => '<div class="rw-art"><img src="assets/p3/' + RW.theme + '/' + id + '.png" onerror="this.remove()">' + txt + '</div>';
+// 买之前问一句（自绘，不用 confirm）：真商店会再弹苹果的付款面板，这里只挡误触
+function rwBuy(body, kind, item, theme, after) {
+  const old = body.querySelector('.rwask'); if (old) old.remove();
+  const bar = document.createElement('div'); bar.className = 'rwask';
+  const price = Store.price(item);
+  bar.innerHTML = '<span>' + '买下「' + (item.name || item.id) + '」，' + price + '？' + '</span>';
+  const ok = document.createElement('button'); ok.className = 'btn'; ok.textContent = '买下';
+  const no = document.createElement('button'); no.className = 'btn ghost'; no.textContent = '算了';
+  ok.onclick = async () => { try { await Store.buy(kind, item, theme); bar.remove(); after && after(); } catch (e) { rwErr(body, e); } };
+  no.onclick = () => bar.remove();
+  bar.appendChild(ok); bar.appendChild(no); body.prepend(bar);
+}
 const rwErr = (body, e) => { const t = document.createElement('div'); t.className = 'tip warn'; t.textContent = String(e && e.message || e); body.prepend(t); };
 
 // 汤札：本月牌（每天首次完成＝一个印）+ 流水
@@ -581,13 +618,13 @@ function renderTowels(body) {
       try {
         if (own) await RW.hang(hung === t.id ? '' : t.id);
         else if (can) await RW.unlock('towel', t.id, 'earn');
-        else if (RW.showBuy()) await RW.unlock('towel', t.id, 'buy');
+        else if (Store.canBuy()) { rwBuy(body, 'towel', t, RW.theme, renderHistory); return; }
         else return;
         renderHistory();
       } catch (e) { rwErr(body, e); }
     };
-    if (!own && !can && RW.showBuy()) {
-      const b = document.createElement('button'); b.className = 'buy'; b.textContent = '¥' + (t.price_cny || 6);
+    if (!own && !can && Store.canBuy()) {
+      const b = document.createElement('button'); b.className = 'buy'; b.textContent = Store.price(t);
       el.appendChild(b);
     }
     grid.appendChild(el);
@@ -624,9 +661,9 @@ function renderGarden(body) {
           renderHistory();
         } catch (e) { rwErr(body, e); }
       };
-      if (!own && RW.showBuy()) {
-        const b = document.createElement('button'); b.className = 'buy'; b.textContent = '¥' + (p.price_cny || 6);
-        b.onclick = async (ev) => { ev.stopPropagation(); try { await RW.unlock('prop', p.id, 'buy'); renderHistory(); } catch (e) { rwErr(body, e); } };
+      if (!own && Store.canBuy()) {
+        const b = document.createElement('button'); b.className = 'buy'; b.textContent = Store.price(p);
+        b.onclick = (ev) => { ev.stopPropagation(); rwBuy(body, 'prop', p, RW.theme, renderHistory); };
         el.appendChild(b);
       }
       row.appendChild(el);
@@ -645,9 +682,9 @@ function renderGarden(body) {
       const el = document.createElement('div'); el.className = 'rwitem small' + (own ? ' own' : '');
       el.innerHTML = rwArt(p.id, '豚') + '<b>' + p.name + '</b><span>' + (own ? '常来' : can ? '可以请了' : '再来 ' + (p.days - L.visit_days) + ' 天') + '</span>';
       el.onclick = async () => { if (own || !can) return; try { await RW.unlock('visitor', p.id, 'earn'); renderHistory(); } catch (e) { rwErr(body, e); } };
-      if (!own && RW.showBuy()) {
-        const b = document.createElement('button'); b.className = 'buy'; b.textContent = '¥' + (p.price_cny || 12);
-        b.onclick = async (ev) => { ev.stopPropagation(); try { await RW.unlock('visitor', p.id, 'buy'); renderHistory(); } catch (e) { rwErr(body, e); } };
+      if (!own && Store.canBuy()) {
+        const b = document.createElement('button'); b.className = 'buy'; b.textContent = Store.price(p);
+        b.onclick = (ev) => { ev.stopPropagation(); rwBuy(body, 'visitor', p, RW.theme, renderHistory); };
         el.appendChild(b);
       }
       row.appendChild(el);
@@ -783,7 +820,10 @@ if (!HAS_BRIDGE) {
   ];
   renderPlans();
   feed(fixture(qs.get('demo') || 'running'));
-  RW.load(Scene.scene ? Scene.scene.id : 'onsen').catch(() => {});   // P3 DEMO 账本（?rw=empty 看空状态）
+  RW.load(Scene.scene ? Scene.scene.id : 'onsen').then(() => {   // P3 DEMO 账本（?rw=empty 空 / ?rw=full 摆满 / ?rw=owned 已买日系；?buy=1 露出购买）
+    const cur = Scene.scene && Scene.scene.id;
+    if (cur && Store.enforce() && !RW.ownsTheme(cur)) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
+  }).catch(() => {});
   setInterval(() => {
     if (!view || view.status !== 'running') return;
     view.remaining_ms = Math.max(0, view.remaining_ms - 1000);
@@ -805,8 +845,13 @@ if (!HAS_BRIDGE) {
       plans = b.plans || [];
       settings = b.settings || null;
       renderPlans();
+      RW.internal = !!b.internal;   // 内测包才露「全部解锁」
       feed(b.view);
-      RW.load(Scene.scene ? Scene.scene.id : 'onsen').catch(() => {});   // P3 账本（失败不影响计时）
+      // P3 账本 → P4 商店探测 → 主题锁：存的是付费主题又没买（且有真商店/开发开关）就退回中国风
+      RW.load(Scene.scene ? Scene.scene.id : 'onsen').then(() => Store.init()).then(() => {
+        const cur = Scene.scene && Scene.scene.id;
+        if (cur && Store.enforce() && !RW.ownsTheme(cur)) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
+      }).catch(() => {});
       // 语言同步：前端按系统语言定，内核只在发系统通知时用它选文案；不一致就推一次
       if (settings && settings.lang !== I18N.lang) { settings.lang = I18N.lang; pushSettings(); }
     } catch (e) {

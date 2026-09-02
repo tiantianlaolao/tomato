@@ -27,42 +27,50 @@
    {
     "id": "t01",
     "name": "素帕",
-    "min": 60
+    "min": 60,
+    "sku": "com.tybbtech.capyroom.ink.towel.t01"
    },
    {
     "id": "t02",
     "name": "云纹",
-    "min": 180
+    "min": 180,
+    "sku": "com.tybbtech.capyroom.ink.towel.t02"
    },
    {
     "id": "t03",
     "name": "缠枝莲",
-    "min": 360
+    "min": 360,
+    "sku": "com.tybbtech.capyroom.ink.towel.t03"
    },
    {
     "id": "t04",
     "name": "鱼戏",
-    "min": 600
+    "min": 600,
+    "sku": "com.tybbtech.capyroom.ink.towel.t04"
    },
    {
     "id": "t05",
     "name": "竹影",
-    "min": 900
+    "min": 900,
+    "sku": "com.tybbtech.capyroom.ink.towel.t05"
    },
    {
     "id": "t06",
     "name": "梅枝",
-    "min": 1320
+    "min": 1320,
+    "sku": "com.tybbtech.capyroom.ink.towel.t06"
    },
    {
     "id": "t07",
     "name": "山水",
-    "min": 1800
+    "min": 1800,
+    "sku": "com.tybbtech.capyroom.ink.towel.t07"
    },
    {
     "id": "t08",
     "name": "金鳞",
-    "min": 2400
+    "min": 2400,
+    "sku": "com.tybbtech.capyroom.ink.towel.t08"
    }
   ],
   "props": [
@@ -71,56 +79,64 @@
     "name": "风铃",
     "slot": "willow",
     "cost_min": 120,
-    "price_cny": 6
+    "price_cny": 6,
+    "sku": "com.tybbtech.capyroom.ink.prop.windbell"
    },
    {
     "id": "stonelamp",
     "name": "石灯",
     "slot": "pool_edge",
     "cost_min": 180,
-    "price_cny": 6
+    "price_cny": 6,
+    "sku": "com.tybbtech.capyroom.ink.prop.stonelamp"
    },
    {
     "id": "orchid",
     "name": "一盆兰",
     "slot": "lamp_side",
     "cost_min": 150,
-    "price_cny": 6
+    "price_cny": 6,
+    "sku": "com.tybbtech.capyroom.ink.prop.orchid"
    },
    {
     "id": "lotus",
     "name": "荷花",
     "slot": "water_near",
     "cost_min": 240,
-    "price_cny": 6
+    "price_cny": 6,
+    "sku": "com.tybbtech.capyroom.ink.prop.lotus"
    },
    {
     "id": "koi",
     "name": "锦鲤",
     "slot": "water_near",
     "cost_min": 300,
-    "price_cny": 8
+    "price_cny": 8,
+    "sku": "com.tybbtech.capyroom.ink.prop.koi"
    },
    {
     "id": "tibi",
     "name": "题壁字",
     "slot": "wall",
     "cost_min": 360,
-    "price_cny": 8
+    "price_cny": 8,
+    "sku": "com.tybbtech.capyroom.ink.prop.tibi"
    },
    {
     "id": "cushion2",
     "name": "蒲团·青",
     "slot": "lamp_side",
     "cost_min": 200,
-    "price_cny": 6
+    "price_cny": 6,
+    "sku": "com.tybbtech.capyroom.ink.prop.cushion2"
    },
    {
     "id": "teatray",
     "name": "茶盘",
     "slot": "pool_edge",
     "cost_min": 260,
-    "price_cny": 6
+    "price_cny": 6,
+    "sku": "com.tybbtech.capyroom.ink.prop.teatray"
    }
   ],
   "visitors": [
@@ -128,14 +144,35 @@
     "id": "v01",
     "name": "常客·阿沐",
     "days": 7,
-    "price_cny": 12
+    "price_cny": 12,
+    "sku": "com.tybbtech.capyroom.ink.visitor.v01"
    }
-  ]
+  ],
+  "towel_set": {
+   "sku": "com.tybbtech.capyroom.ink.towelset",
+   "price_cny": 18,
+   "price_usd": 2.99
+  }
  },
  "onsen": {
   "slots": [],
   "towels": [],
   "props": [],
   "visitors": []
- }
+ },
+ "themes": [
+  {
+   "id": "ink",
+   "name": "水墨庭院",
+   "paid": false
+  },
+  {
+   "id": "onsen",
+   "name": "野天风吕",
+   "paid": true,
+   "price_cny": 18,
+   "price_usd": 2.99,
+   "sku": "com.tybbtech.capyroom.theme.onsen"
+  }
+ ]
 }

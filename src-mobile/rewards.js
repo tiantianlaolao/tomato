@@ -16,7 +16,7 @@ const RW = window.RW = {
   theme: 'ink',
   view: null,            // {ledger, state, catalog}
   listeners: [],
-  showBuy() { try { return localStorage.getItem('capy_dev_buy') === '1'; } catch (e) { return false; } },
+  showBuy() { try { return localStorage.getItem('capy_dev_buy') === '1' || new URLSearchParams(location.search).get('buy') === '1'; } catch (e) { return false; } },
   setShowBuy(on) { try { localStorage.setItem('capy_dev_buy', on ? '1' : '0'); } catch (e) {} },
 
   onChange(fn) { this.listeners.push(fn); },
@@ -39,6 +39,28 @@ const RW = window.RW = {
     if (HAS_BRIDGE) return this._set(await inv('reward_hang', { theme: this.theme, id }));
     this.view.state.hung = id; return this._set(this.view);
   },
+  // P4 真钱落账（幂等）：kind = theme | towel | prop | visitor；tx = 商店交易号
+  async purchase(kind, id, tx, theme) {
+    theme = theme || this.theme;
+    if (HAS_BRIDGE) return this._set(await inv('reward_purchase', { theme, kind, id, tx: tx || '' }));
+    if (kind === 'theme') { if (!this.view.owned_themes.includes(id)) this.view.owned_themes.push(id); return this._set(this.view); }
+    try { return this._set(demoUnlock(this.view, kind, id, 'buy')); } catch (e) { return this.view; }
+  },
+  // 内测包专属：全部解锁 / 撤回（交易号 internal，不碰攒来的和真买的）。浏览器 DEMO 里也能演。
+  internal: (function () { try { return new URLSearchParams(location.search).get('internal') === '1'; } catch (e) { return false; } })(),   // boot 时由内核告知（CAPY_INTERNAL 编进包），浏览器可用 ?internal=1
+  async grantAll() {
+    if (HAS_BRIDGE) return this._set(await inv('reward_grant_all', { theme: this.theme }));
+    const v = this.view, cat = v.catalog;
+    (v.themes || []).forEach(t => { if (t.paid && !v.owned_themes.includes(t.id)) v.owned_themes.push(t.id); });
+    [['towel', 'towels'], ['prop', 'props'], ['visitor', 'visitors']].forEach(([k, l]) => (cat[l] || []).forEach(x => { try { demoUnlock(v, k, x.id, 'buy'); } catch (e) {} }));
+    return this._set(v);
+  },
+  async revokeInternal() {
+    if (HAS_BRIDGE) return this._set(await inv('reward_revoke_internal', { theme: this.theme }));
+    return this.load();
+  },
+  ownsTheme(id) { const t = this.themeInfo(id); return !t || !t.paid || (this.view && (this.view.owned_themes || []).includes(id)); },
+  themeInfo(id) { return ((this.view && this.view.themes) || []).find(t => t.id === id) || null; },
 
   // 目录小工具
   cat(list, id) { const c = this.view && this.view.catalog; return ((c && c[list]) || []).find(x => x.id === id) || null; },
@@ -85,7 +107,7 @@ async function demoView(theme) {
     ? { towels: ['t01', 't02', 't03'], hung: 't03', props: ['windbell', 'orchid', 'stonelamp', 'lotus', 'tibi'],
         placed: { willow: 'windbell', lamp_side: 'orchid', pool_edge: 'stonelamp', water_near: 'lotus', wall: 'tibi' }, visitors: ['v01'], purchases: [] }
     : { towels: ['t01', 't02'], hung: 't02', props: ['windbell', 'orchid'], placed: { willow: 'windbell' }, visitors: [], purchases: [] };
-  return { ledger, state, catalog: cat };
+  return { ledger, state, catalog: cat, owned_themes: q.get('rw') === 'owned' ? ['onsen'] : [], themes: all.themes || [] };
 }
 function demoUnlock(v, kind, id, via) {
   const s = v.state, L = v.ledger;

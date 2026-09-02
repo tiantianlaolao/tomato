@@ -85,6 +85,12 @@ const D = {
   '素帕': 'Plain', '云纹': 'Clouds', '缠枝莲': 'Lotus Vine', '鱼戏': 'Two Fish', '竹影': 'Bamboo', '梅枝': 'Plum', '山水': 'Landscape', '金鳞': 'Gold Scales',
   '风铃': 'Wind Bell', '石灯': 'Stone Lantern', '一盆兰': 'Orchid', '荷花': 'Lotus', '锦鲤': 'Koi', '题壁字': 'Wall Script', '蒲团·青': 'Green Cushion', '茶盘': 'Tea Tray',
   '檐下': 'Under the eaves', '白墙': 'White wall', '石灯旁': 'By the lantern', '石台左侧': 'Left ledge', '近处水面': 'Near water', '常客·阿沐': 'Regular · Mu',
+  // 商店（P4）
+  '恢复购买': 'Restore purchases', '在这台设备换了 Apple ID 或重装后，把买过的找回来': 'Bring back what you bought after reinstalling or switching Apple ID',
+  '已恢复 {n} 项': 'Restored {n} item(s)', '没有可恢复的购买': 'Nothing to restore', '已取消': 'Cancelled', '购买没有完成': 'Purchase didn\'t complete',
+  '买下「{s}」，{p}？': 'Buy "{s}" for {p}?', '买下': 'Buy', '买下整套': 'Buy the set', '已拥有': 'Owned', '主题包': 'Theme pack',
+  '内测': 'Internal build', '内测：全部解锁': 'Internal: unlock everything', '主题包和本主题全部单件一键拥有，只为看效果；商店包没有这个按钮': 'Own every theme pack and item of this theme at once, for testing only; store builds don\'t have this',
+  '全部解锁': 'Unlock all', '已解锁': 'Unlocked', '清除内测解锁': 'Clear internal unlocks', '只撤回内测解锁的，攒来的和真买的原样保留': 'Removes only internal unlocks; earned and purchased items stay', '清除': 'Clear', '已清除': 'Cleared', '不是内测包': 'Not an internal build',
   // 内核拒绝理由
   '现在没有在计时': 'Nothing is running', '现在不是暂停状态': 'Not paused', '现在没有会话': 'No session', '强制休息中，好好歇一会儿': 'Forced rest — take a real break',
   '现在不在段间等待': 'Not between blocks', '序列是空的，先加一段': 'Sequence is empty — add a block', '阶段时长要在 5 秒到 4 小时之间': 'Block length must be 5 s to 4 h',

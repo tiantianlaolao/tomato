@@ -185,3 +185,10 @@ input[type=range]{flex:1;accent-color:#e8915c}
 .slot-head b{color:#cbb89a}
 .rw-art{position:relative;overflow:hidden}
 .rw-art img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#f4eee0}
+
+/* ── P4 买前确认条 ── */
+.rwask{display:flex;align-items:center;gap:8px;padding:10px 12px;margin-bottom:10px;border-radius:12px;
+  border:1px solid rgba(232,145,92,.5);background:rgba(58,38,22,.85);font-size:13px;color:#f0c9a0}
+.rwask span{flex:1}
+.rwask .btn{font:inherit;font-size:12px;padding:6px 12px;border-radius:9px;border:1px solid rgba(232,145,92,.6);background:rgba(232,145,92,.25);color:#f0c9a0}
+.rwask .btn.ghost{background:transparent;border-color:rgba(120,96,68,.4);color:rgba(203,184,154,.7)}

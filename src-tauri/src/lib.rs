@@ -881,6 +881,7 @@ struct MissedPlan {
 
 #[derive(Serialize)]
 struct Boot {
+    internal: bool,          // 内测包（CI 设 CAPY_INTERNAL 编进来）：前端据此露出「全部解锁」等内测按钮
     settings: Settings,
     plans: Vec<Plan>,
     view: core::View,
@@ -913,6 +914,7 @@ async fn boot(app: AppHandle) -> Boot {
     }
     if !missed.is_empty() { a.save_schedules(); }
     Boot {
+        internal: option_env!("CAPY_INTERNAL").is_some(),
         settings: a.settings.clone(), plans: a.plans.clone(),
         view: core::view(&a.session, &a.settings, now),
         schedules: a.schedules.clone(), missed,
@@ -1108,6 +1110,21 @@ async fn get_rewards(app: AppHandle, theme: String) -> rewards::RewardsView {
 #[tauri::command]
 async fn reward_unlock(app: AppHandle, theme: String, kind: String, id: String, via: String) -> Result<rewards::RewardsView, String> {
     rewards::unlock(&data_dir(&app), &theme, &kind, &id, &via, now_ms())
+}
+/// P4 真钱购买落账：前端拿到商店交易号后调；模拟后端 tx 传空。恢复购买也走这条（幂等）。
+#[tauri::command]
+async fn reward_purchase(app: AppHandle, theme: String, kind: String, id: String, tx: Option<String>) -> Result<rewards::RewardsView, String> {
+    rewards::purchase(&data_dir(&app), &theme, &kind, &id, tx.as_deref().unwrap_or(""), now_ms())
+}
+/// 内测：一键全部解锁 / 撤回（只在 CAPY_INTERNAL 包里生效；商店包直接拒绝，前端也不会露按钮）
+#[tauri::command]
+async fn reward_grant_all(app: AppHandle, theme: String) -> Result<rewards::RewardsView, String> {
+    if option_env!("CAPY_INTERNAL").is_none() { return Err("不是内测包".into()); }
+    rewards::grant_all(&data_dir(&app), &theme, now_ms())
+}
+#[tauri::command]
+async fn reward_revoke_internal(app: AppHandle, theme: String) -> Result<rewards::RewardsView, String> {
+    rewards::revoke_internal(&data_dir(&app), &theme, now_ms())
 }
 #[tauri::command]
 async fn reward_place(app: AppHandle, theme: String, slot: String, id: String) -> Result<rewards::RewardsView, String> {
@@ -1375,7 +1392,8 @@ pub fn run() {
             boot, get_state, session_start, session_cmd,
             save_settings, save_plans, save_schedules, get_history, rest_focus, set_activity,
             open_main, pet_menu, get_stats,
-            get_rewards, reward_unlock, reward_place, reward_hang
+            get_rewards, reward_unlock, reward_place, reward_hang, reward_purchase,
+            reward_grant_all, reward_revoke_internal
         ])
         .run(tauri::generate_context!())
         .expect("番茄时钟启动失败")

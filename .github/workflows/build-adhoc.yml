@@ -28,6 +28,8 @@ on:
         default: false
 
 env:
+  # 内测包标记（9-2）：Rust 用 option_env! 编进二进制 → 调汤里露出「内测：全部解锁」。商店包的 workflow 不设这个。
+  CAPY_INTERNAL: "1"
   XCPROJ: src-tauri/gen/apple/tomato.xcodeproj
   SCHEME: tomato_iOS
   BUNDLE_ID: com.tybbtech.capyroom
