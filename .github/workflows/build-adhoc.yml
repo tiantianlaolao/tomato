@@ -57,6 +57,15 @@ jobs:
       - name: 'tauri ios init'
         run: npx tauri ios init --ci
 
+      # 🔴 tauri ios init 生成的 Assets.xcassets 用的是模板默认图标，**不读 src-tauri/icons/ios**
+      #    （9-2 实证：拆 IPA 解 CgBI 看到的还是 Tauri 蓝黄图标）→ 这里显式覆盖，文件名与模板一致。
+      - name: '装图标（覆盖模板默认图标）'
+        run: |
+          DEST=src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset
+          ls "$DEST" | head -3
+          cp src-tauri/icons/ios/*.png "$DEST"/
+          ls -la "$DEST"/AppIcon-60x60@2x.png
+
       # 探测跑只看了目录结构没看内容，所以"tauri.ios.conf.json 有没有被合并"
       # 是靠这一步实证的（PRODUCT_BUNDLE_IDENTIFIER / DEVELOPMENT_TEAM 三项）。
       - name: '确认 iOS 专属配置合并进去了'
