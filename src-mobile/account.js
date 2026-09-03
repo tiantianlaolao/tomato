@@ -77,13 +77,20 @@ const net = {
     if (!data || !Number.isFinite(data.cursor)) return null;
     return { status, cursor: data.cursor, more: !!data.more, changes: data.changes || [] };
   },
-  // 原生登录：拉系统面板，回 idToken；没桥/取消/失败一律 null（界面不区分原因，安静收场）
+  // 原生登录：拉系统面板，回 {token} 或 {err, canceled}。
+  // 🔴 9-3 真机：Apple 键"闪一下"＝插件 reject 被我当成用户取消静音了——错误原文必须交给界面显示，
+  //    只有插件明说的 *_CANCELED 两种码才算取消。
   async nativeLogin(provider) {
-    if (!HAS_BRIDGE) return null;
+    if (!HAS_BRIDGE) return { err: 'no bridge' };
     try {
       const r = await T.core.invoke('plugin:social-auth|' + (provider === 'apple' ? 'apple_sign_in' : 'google_sign_in'));
-      return (r && (r.idToken || r.identityToken)) || null;
-    } catch (_) { return null; }
+      const tok = r && (r.idToken || r.identityToken);
+      if (tok) return { token: tok };
+      return { err: 'no idToken in ' + JSON.stringify(r || null).slice(0, 160) };
+    } catch (e) {
+      const msg = typeof e === 'string' ? e : (e && (e.message || e.code)) ? String(e.message || e.code) : JSON.stringify(e);
+      return { err: msg.slice(0, 200), canceled: /CANCELED/i.test(msg) };
+    }
   },
 };
 
@@ -112,9 +119,9 @@ window.Account = {
 
   // ---- 登录 / 登出 / 删号 ----
   async login(provider) {
-    const idToken = await net.nativeLogin(provider);
-    if (!idToken) return { error: 'native' };
-    return this._adopt(await net.login(provider, idToken));
+    const n = await net.nativeLogin(provider);
+    if (!n.token) return { error: 'native', canceled: !!n.canceled, detail: n.err || '' };
+    return this._adopt(await net.login(provider, n.token));
   },
   async loginPhone(phone, code) { return this._adopt(await net.loginPhone(phone, code)); },
   _adopt(r) {

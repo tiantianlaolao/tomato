@@ -30,7 +30,7 @@ const D = {
   '流水、序列、定时计划、奖励和偏好会跟着账号走；不登录一切照用': 'Sessions, sequences, schedules, rewards and preferences follow your account. Everything works without signing in.',
   '用 Apple 登录': 'Sign in with Apple', '用 Google 登录': 'Sign in with Google', '手机号登录': 'Sign in with phone',
   '手机号': 'Phone', '验证码': 'Code', '发送验证码': 'Send code', '{n} 秒后重发': 'Resend in {n}s', '11 位手机号': '11-digit phone', '6 位': '6 digits',
-  '登录中…': 'Signing in…', '已登录，正在同步': 'Signed in, syncing', '浏览器里没有原生登录': 'No native sign-in in the browser',
+  '登录中…': 'Signing in…', '登录没拉起来：{s}': 'Sign-in did not start: {s}', '已登录，正在同步': 'Signed in, syncing', '浏览器里没有原生登录': 'No native sign-in in the browser',
   '网络不通，稍后再试': 'No network, try later', '登录没成功': 'Sign-in failed', '手机号不像': 'That doesn\'t look like a phone number',
   '验证码已发送': 'Code sent', '今天发太多了，明天再试': 'Daily limit reached, try tomorrow', '验证码没发出去': 'Could not send the code',
   '验证码是 6 位数字': 'The code is 6 digits', '验证码过期了，重发一条': 'Code expired, send a new one', '验证码不对': 'Wrong code',

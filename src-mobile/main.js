@@ -548,11 +548,14 @@ function renderAccount(box, rowEl) {
       say('登录中…');
       const r = await A.login(prov);
       if (r.ok) { say('已登录，正在同步'); renderSettings(); return; }
-      if (r.error === 'native') { say(A.HAS_BRIDGE ? '' : '浏览器里没有原生登录'); return; }   // 用户自己取消的不用被告知"失败"
+      if (r.error === 'native') {   // 用户自己取消的不用被告知"失败"；其余把插件原话摆出来（9-3 真机"闪一下"就是错误被吞了）
+        say(r.canceled ? '' : (A.HAS_BRIDGE ? '登录没拉起来：' + r.detail : '浏览器里没有原生登录'));
+        return;
+      }
       say(r.error === 'net' ? '网络不通，稍后再试' : '登录没成功');
     };
     row.appendChild(btn('用 Apple 登录', 'pri', () => doLogin('apple')));
-    if (A.IS_OVERSEAS) row.appendChild(btn('用 Google 登录', '', () => doLogin('google')));
+    row.appendChild(btn('用 Google 登录', '', () => doLogin('google')));   // 9-3 用户："没看到 Google"→一直显示；区分只管手机号那两行
     box.appendChild(row);
     // 手机号（中国区）：所连服务端配了短信才露；探测异步回来后补渲染一次
     if (!A.IS_OVERSEAS) {
