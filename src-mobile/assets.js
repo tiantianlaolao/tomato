@@ -36,6 +36,13 @@ window.AS = {
     if (DEV) return cur.dir + '/' + name + '.mp4';
     return map[cur.base + '/' + name] || HOST + cur.base + '/' + name + '.mp4';
   },
+  // 角色通道（9-3）：<base>/matte/<seg>.json + <seg>_<k>.webp，与视频同版本同目录（_design/video/_cmp/_matte.py 产）。
+  // 有缓存给 blob，没缓存直接走服务器；ensure() 在视频之后顺手缓进 IDB。
+  matteUrl(file) {
+    if (!cur) return null;
+    if (DEV) return cur.dir + '/matte/' + file;
+    return map[cur.base + '/matte/' + file] || HOST + cur.base + '/matte/' + file;
+  },
 };
 
 if (DEV) return;
@@ -102,5 +109,25 @@ async function ensure(a) {
     } catch (e) { /* 这段留网播，下次再补 */ }
   }
   note(null);
+  // 角色通道：json + 精灵图逐个缓（小文件，静默；缓不上就一直走网）
+  for (const n of a.names) {
+    if (cur !== a) return;
+    try {
+      const jk = a.base + '/matte/' + n + '.json';
+      let meta = await get(db, jk);
+      if (!meta) {
+        const r = await fetch(HOST + jk); if (!r.ok) continue;
+        meta = await r.json(); await put(db, jk, meta);
+      }
+      for (const sh of (meta.sheets || [])) {
+        const k = a.base + '/matte/' + sh;
+        if (map[k]) continue;
+        const rec = await get(db, k);
+        if (rec && rec.blob) { map[k] = URL.createObjectURL(rec.blob); continue; }
+        const r = await fetch(HOST + k); if (!r.ok) continue;
+        const blob = await r.blob(); await put(db, k, { blob }); map[k] = URL.createObjectURL(blob);
+      }
+    } catch (e) { /* 下次再补 */ }
+  }
 }
 })();

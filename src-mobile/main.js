@@ -27,6 +27,7 @@ const HOLD_MS = 1500;      // §3.3 长按 1.5 秒才算取消（防误触）
 let view = null, plans = [], opsTimer = 0, settings = null;
 
 if (qs.get('boxes')) window.__SHOWBOXES = true;   // 验收用：画出入口命中区
+if (qs.get('matte')) window.__SHOWMATTE = true;   // 验收用：角色通道当前帧红色叠上来看对不对位
 Scene.mount($('stage'));
 Scene.start();
 // 底部提示跟主题走（每个场景包自带 hint 文案）

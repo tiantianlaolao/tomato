@@ -33,6 +33,7 @@ const Scene = {
     this.scene = s;
     // 主题资产与首屏海报都归场景包管（9-1 双主题起）
     if (window.AS && s.assets) AS.configure(s.assets);
+    if (s.assets) this.matteLoad(s.assets.names); else this.matte = {};
     const poster = s.poster || 'assets/poster.webp';
     if (this.vids) for (const el of this.vids) el.poster = poster;
     // 海报层：视频还没喂/还没出帧时舞台就是它（不然是 #stage 的深色底）；换了海报就重新等它 load
@@ -103,6 +104,48 @@ const Scene = {
   // 视频地址统一问资产通道（assets.js：缓存给 blob、没缓存流播服务器、dev 走本地文件）
   src(name) { return (window.AS ? AS.url(name) : 'assets/video/' + name + '.mp4'); },
 
+  // ── 角色通道（9-3）：每段视频配逐帧水豚 alpha（_design/video/_cmp/_matte.py 产，与视频同版本同目录），
+  //    小物层先画到离屏、按当前视频帧把水豚那块挖掉再贴上——小物永远在角色后面，像素零牺牲。
+  //    🔴 这是"小物压在水豚上"的根治：不认槽位不认场景，新加一段视频跑一遍脚本即生效。
+  //    帧同步用 requestVideoFrameCallback 的 mediaTime（iOS 15.4+），没有就退回 currentTime。
+  matte: {}, vt: -1,
+  matteLoad(names) {
+    this.matte = {};
+    if (!window.AS) return;
+    for (const n of names) {
+      const url = AS.matteUrl(n + '.json'); if (!url) continue;
+      fetch(url).then((r) => (r.ok ? r.json() : null)).then((meta) => {
+        if (!meta || !meta.frames) { this.matte[n] = null; return; }
+        const sheets = (meta.sheets || []).map((f) => { const im = new Image(); im.src = AS.matteUrl(f); return im; });
+        this.matte[n] = { meta, sheets };
+      }).catch(() => { this.matte[n] = null; });
+    }
+  },
+  hasMatte() { return !!(this.seg && this.matte[this.seg]); },
+  // 当前段当前帧的遮罩块：精灵图坐标 + 画布像素坐标；这一帧没角色（空庭）返回 null
+  matteFrame() {
+    const m = this.seg && this.matte[this.seg]; if (!m) return null;
+    const el = this.cur(); if (!el) return null;
+    const t = this.vt >= 0 ? this.vt : el.currentTime;
+    const fr = m.meta.frames, idx = Math.max(0, Math.min(fr.length - 1, Math.round(t * m.meta.fps)));
+    const f = fr[idx]; if (!f) return null;
+    const img = m.sheets[f[0]]; if (!img || !img.complete || !img.naturalWidth) return null;
+    const [cw, ch] = m.meta.cell, cols = m.meta.cols, sc = m.meta.scale;
+    // 🔴 遮罩坐标是**视频**像素系（1088×1920），不是母版画幅（1152×2048）——按视频自己的 cover 变换映射，
+    //    否则整块往左上偏 3%（9-3 红色叠层一眼看出来）
+    const vw = m.meta.w || 1088, vh = m.meta.h || 1920, s = Math.max(this.W / vw, this.H / vh);
+    const ox = (this.W - vw * s) / 2, oy = (this.H - vh * s) / 2;
+    return { img, sx: (f[1] % cols) * cw, sy: Math.floor(f[1] / cols) * ch, sw: f[4], sh: f[5],
+             x: ox + f[2] * sc * s, y: oy + f[3] * sc * s, w: f[4] * sc * s, h: f[5] * sc * s };
+  },
+  // 在离屏小物层上挖掉水豚（destination-out）。没得挖返回 false
+  matteCut(pcx) {
+    const f = this.matteFrame(); if (!f) return false;
+    pcx.save(); pcx.globalCompositeOperation = 'destination-out';
+    pcx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, f.x, f.y, f.w, f.h); pcx.restore();
+    return true;
+  },
+
   // 🔴 内核 status 只有 idle/running/paused/awaiting/done，没有 work/break——
   //    工作还是休息看 stages[idx].kind（老引擎的显式映射，原样保留）
   phaseOf(v) {
@@ -146,6 +189,19 @@ const Scene = {
     el.currentTime = 0;
     el.play().catch(() => {});
     el.onloadeddata = () => { if (!this.ready) { this.ready = true; this.draw(); } };
+    // 角色通道跟帧：视频每呈现一帧就拿 mediaTime 重画叠加层（过渡段每帧、循环段隔帧——循环里水豚只是呼吸）
+    this.vt = -1;
+    if (el.requestVideoFrameCallback) {
+      const tok = (el._vfc = (el._vfc || 0) + 1);
+      const trans = seg === this.scene.swimOut || seg === this.scene.swimIn;
+      const tick = (now, md) => {
+        if (el._vfc !== tok || this.cur() !== el) return;
+        this.vt = md.mediaTime;
+        if (this.hasMatte() && (trans || (md.presentedFrames & 1) === 0)) this.draw();
+        el.requestVideoFrameCallback(tick);
+      };
+      el.requestVideoFrameCallback(tick);
+    }
     el.classList.add('on');
     // 🔴 首次喂数据时新旧是同一个元素——摘 .on/卸 src 只对"真的旧元素"做，
     //    否则刚点亮就被自己摘掉＝黑屏（idle/paused 首屏黑就是这个）
@@ -238,6 +294,16 @@ const Scene = {
     // 叠加层其余内容（菜单/当班牌/计时……）全归场景包画——引擎不认识具体场景（9-1 归位）
     if (S.drawUI) S.drawUI(this, cx, v);
 
+    // 验收用：?matte=1 把角色通道当前帧红色半透明叠上来，看它跟视频里的水豚贴不贴
+    if (window.__SHOWMATTE) {
+      const f = this.matteFrame();
+      if (f) {
+        const k = this._mdbg || (this._mdbg = document.createElement('canvas')); k.width = f.sw; k.height = f.sh;
+        const g = k.getContext('2d'); g.clearRect(0, 0, f.sw, f.sh); g.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, 0, 0, f.sw, f.sh);
+        g.globalCompositeOperation = 'source-in'; g.fillStyle = 'rgba(255,0,0,0.45)'; g.fillRect(0, 0, f.sw, f.sh);
+        cx.drawImage(k, f.x, f.y, f.w, f.h);
+      }
+    }
     // 验收用：?boxes=1 画命中区
     if (window.__SHOWBOXES) {
       cx.lineWidth = 2 * this.DPR; cx.strokeStyle = 'rgba(120,255,180,.85)';

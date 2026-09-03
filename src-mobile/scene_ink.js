@@ -132,26 +132,26 @@ window.SCENES.ink = {
         const im = img(id);
         jobs.push({ r, id, name, im, y: r.top ? r.y : r.y2 });
       };
-      const paint = (j) => {
+      const paint = (j, c) => {          // c＝画到哪块画布（有角色通道时是离屏）
         const im = j.im, r = j.r, R = E.rect(r);
         let w, h;
         if (PROP_W[j.id]) { w = PROP_W[j.id] * FW; h = w * im.height / im.width; }
         else { const s = Math.min((R.w * (r.scale || 1)) / im.width, (R.h * (r.scale || 1)) / im.height); w = im.width * s; h = im.height * s; }
         const x = R.x + (R.w - w) / 2, y = r.top ? R.y : R.y + R.h - h;
         if (WATER[j.id]) {
-          cx.globalAlpha = 0.93; cx.drawImage(sprite(im, 'water'), x, y, w, h); cx.globalAlpha = 1;
+          c.globalAlpha = 0.93; c.drawImage(sprite(im, 'water'), x, y, w, h); c.globalAlpha = 1;
         } else if (FLAT[j.id]) {
-          cx.drawImage(im, x, y, w, h);
+          c.drawImage(im, x, y, w, h);
         } else if (r.top) {
-          cx.globalAlpha = 0.26; cx.drawImage(sprite(im, 'shadow'), x + w * 0.05, y + h * 0.035, w, h); cx.globalAlpha = 1;
-          cx.drawImage(sprite(im, 'warm'), x, y, w, h);
+          c.globalAlpha = 0.26; c.drawImage(sprite(im, 'shadow'), x + w * 0.05, y + h * 0.035, w, h); c.globalAlpha = 1;
+          c.drawImage(sprite(im, 'warm'), x, y, w, h);
         } else {
           const cxm = x + w / 2, cym = y + h - h * 0.02, rx = w * 0.52, ry = Math.max(3, w * 0.11);
-          const g = cx.createRadialGradient(cxm, cym, 0, cxm, cym, rx);
+          const g = c.createRadialGradient(cxm, cym, 0, cxm, cym, rx);
           g.addColorStop(0, 'rgba(60,40,22,0.34)'); g.addColorStop(0.55, 'rgba(60,40,22,0.16)'); g.addColorStop(1, 'rgba(60,40,22,0)');
-          cx.save(); cx.translate(cxm, cym); cx.scale(1, ry / rx); cx.translate(-cxm, -cym);
-          cx.fillStyle = g; cx.beginPath(); cx.arc(cxm, cym, rx, 0, Math.PI * 2); cx.fill(); cx.restore();
-          cx.drawImage(sprite(im, 'warm'), x, y, w, h);
+          c.save(); c.translate(cxm, cym); c.scale(1, ry / rx); c.translate(-cxm, -cym);
+          c.fillStyle = g; c.beginPath(); c.arc(cxm, cym, rx, 0, Math.PI * 2); c.fill(); c.restore();
+          c.drawImage(sprite(im, 'warm'), x, y, w, h);
         }
       };
       const tag = (r, name) => {
@@ -180,7 +180,17 @@ window.SCENES.ink = {
       }
       if (!jobs.some((j) => !j.im.ok && !j.im.failed)) {   // 全到齐才画（失败的画纸牌）
         jobs.sort((a, b) => a.y - b.y);
-        for (const j of jobs) { if (j.im.failed) tag(j.r, j.name); else paint(j); }
+        if (E.hasMatte()) {
+          // 角色通道（9-3 根治）：小物先画离屏，按当前视频帧挖掉水豚，再贴上——小物永远在水豚后面
+          const pc = S._pc || (S._pc = document.createElement('canvas'));
+          if (pc.width !== E.W || pc.height !== E.H) { pc.width = E.W; pc.height = E.H; }
+          const pcx = pc.getContext('2d'); pcx.clearRect(0, 0, E.W, E.H);
+          for (const j of jobs) { if (j.im.failed) tag(j.r, j.name); else paint(j, pcx); }
+          E.matteCut(pcx);
+          cx.drawImage(pc, 0, 0);
+        } else {
+          for (const j of jobs) { if (j.im.failed) tag(j.r, j.name); else paint(j, cx); }
+        }
       }
     }
 
