@@ -122,6 +122,27 @@ const Scene = {
     }
   },
   hasMatte() { return !!(this.seg && this.matte[this.seg]); },
+  // 同帧合成（9-3 用户："视觉不能有一点含糊"）：过渡段把当前视频帧画进叠加画布，洞和画面取自同一帧——
+  // 之前视频由系统解码器上屏、洞由画布画，两条管线差一帧（42ms），水豚走路一帧挪十来像素就露一条茶盘边。
+  // 循环段水豚只是呼吸，差一帧不到 1px，仍走"只挖洞"的省电路。
+  sameFrame() {
+    const S = this.scene;
+    return this.hasMatte() && (this.seg === S.swimOut || this.seg === S.swimIn);
+  },
+  coverRect(el) {
+    const vw = el.videoWidth || 1088, vh = el.videoHeight || 1920, s = Math.max(this.W / vw, this.H / vh);
+    return [(this.W - vw * s) / 2, (this.H - vh * s) / 2, vw * s, vh * s];
+  },
+  drawVideo(cx) {
+    const el = this.cur(); if (!el || el.readyState < 2) return false;
+    // 换段后 500ms 内复刻 CSS 的交叉淡化（旧段打底、新段按进度叠），不然画布一盖淡化就没了
+    const old = this.vids[1 - this.vi], t = (performance.now() - (this.swapAt || 0)) / 500;
+    if (old && old !== el && old.getAttribute('src') && old.readyState >= 2 && t < 1) {
+      cx.drawImage(old, ...this.coverRect(old)); cx.globalAlpha = Math.max(0, Math.min(1, t));
+    }
+    cx.drawImage(el, ...this.coverRect(el)); cx.globalAlpha = 1;
+    return true;
+  },
   // 当前段当前帧的遮罩块：精灵图坐标 + 画布像素坐标；这一帧没角色（空庭）返回 null
   matteFrame() {
     const m = this.seg && this.matte[this.seg]; if (!m) return null;
@@ -193,11 +214,10 @@ const Scene = {
     this.vt = -1;
     if (el.requestVideoFrameCallback) {
       const tok = (el._vfc = (el._vfc || 0) + 1);
-      const trans = seg === this.scene.swimOut || seg === this.scene.swimIn;
       const tick = (now, md) => {
         if (el._vfc !== tok || this.cur() !== el) return;
         this.vt = md.mediaTime;
-        if (this.hasMatte() && (trans || (md.presentedFrames & 1) === 0)) this.draw();
+        if (this.hasMatte()) this.draw();      // 有角色通道的段每帧重画（过渡段连视频帧一起画，同帧）
         el.requestVideoFrameCallback(tick);
       };
       el.requestVideoFrameCallback(tick);
@@ -206,6 +226,7 @@ const Scene = {
     // 🔴 首次喂数据时新旧是同一个元素——摘 .on/卸 src 只对"真的旧元素"做，
     //    否则刚点亮就被自己摘掉＝黑屏（idle/paused 首屏黑就是这个）
     if (old !== el) {
+      this.swapAt = performance.now();
       old.classList.remove('on');
       setTimeout(() => { if (this.cur() !== old) { old.pause(); old.removeAttribute('src'); old.load(); } }, 700);
     }
@@ -283,6 +304,7 @@ const Scene = {
     if (!cx || !S) return;
     cx.clearRect(0, 0, this.W, this.H);
     if (!this.ready) return;   // 底图没到，什么都不画（见 ready 注释）
+    if (this.sameFrame()) this.drawVideo(cx);   // 过渡段：视频帧先画进来，下面的洞和它同一帧
 
     // 调光（视频自带黄昏光，这里只轻叠）
     const dim = (S.dim && S.dim[this.phase]) || 0;
