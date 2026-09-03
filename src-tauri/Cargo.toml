@@ -29,6 +29,9 @@ serde_json = "1"
 # 桌面端用不到，别让它进桌面依赖树。
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 time = "0.3"
+# 原生登录（9-3 账号线）：Apple（iOS 原生面板）+ Google（iOS/Android 原生 SDK），拿 idToken 交服务端验签。
+# 桌面端不拉：桌面版没有账号线，且它内部依赖 GoogleSignIn/AppAuth 的 Swift 包。
+tauri-plugin-social-auth = "1.1"
 
 # iOS 专属：屏幕常亮要调 UIApplication.isIdleTimerDisabled，Tauri 没有这个 API，
 # 只能自己发一条 objc 消息。objc2 本来就在 tauri 的 iOS 依赖树里（Cargo.lock 已有 0.6.4），

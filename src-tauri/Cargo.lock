@@ -3691,6 +3691,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-plugin-social-auth"
+version = "1.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2270da11362487adbce38b6734df976b4bf2c4adacbda7b3f6fc9420d08c9532"
+dependencies = [
+ "plist",
+ "serde",
+ "serde_json",
+ "swift-rs",
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
 name = "tauri-runtime"
 version = "2.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3958,6 +3972,7 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-notification",
+ "tauri-plugin-social-auth",
  "time",
 ]
 

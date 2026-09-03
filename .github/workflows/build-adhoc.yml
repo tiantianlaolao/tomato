@@ -66,6 +66,34 @@ jobs:
           cp src-tauri/icons/ios/*.png "$DEST"/
           ls -la "$DEST"/AppIcon-60x60@2x.png
 
+      # 原生登录（9-3 账号线，tauri-plugin-social-auth）：Google SDK 要在 Info.plist 里读两个 client id，
+      # 且要把 iOS client id 反转成 URL scheme 注册（登录完从浏览器跳回 App 靠它）。
+      # 🔴 值全部来自 Secrets，没配就跳过（Apple 登录不依赖这两项；Google 键点了会失败但不崩）。
+      # 🔴 Sign in with Apple 的 entitlement 不在这里加：签名步骤的 entitlements 从 Profile 里取，
+      #    开发者后台给 App ID 开了 Sign in with Apple 能力后，asc_profile.py 建出来的 Profile 自带。
+      - name: '注入 Google 登录配置（Info.plist）'
+        env:
+          GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
+          GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
+        run: |
+          PL=src-tauri/gen/apple/Info.plist
+          [ -f "$PL" ] || PL=$(find src-tauri/gen/apple -maxdepth 2 -name Info.plist | head -1)
+          echo "Info.plist = $PL"
+          if [ -z "$GOOGLE_IOS_CLIENT_ID" ]; then echo "没配 GOOGLE_IOS_CLIENT_ID，跳过"; exit 0; fi
+          PB=/usr/libexec/PlistBuddy
+          $PB -c "Add :GOOGLE_IOS_CLIENT_ID string $GOOGLE_IOS_CLIENT_ID" "$PL" 2>/dev/null || $PB -c "Set :GOOGLE_IOS_CLIENT_ID $GOOGLE_IOS_CLIENT_ID" "$PL"
+          if [ -n "$GOOGLE_SERVER_CLIENT_ID" ]; then
+            $PB -c "Add :GOOGLE_SERVER_CLIENT_ID string $GOOGLE_SERVER_CLIENT_ID" "$PL" 2>/dev/null || $PB -c "Set :GOOGLE_SERVER_CLIENT_ID $GOOGLE_SERVER_CLIENT_ID" "$PL"
+          fi
+          # 反转 client id：xxx.apps.googleusercontent.com → com.googleusercontent.apps.xxx
+          REV=$(echo "$GOOGLE_IOS_CLIENT_ID" | awk -F. '{for(i=NF;i>0;i--){printf "%s%s",$i,(i>1?".":"")}}')
+          $PB -c "Add :CFBundleURLTypes array" "$PL" 2>/dev/null || true
+          $PB -c "Add :CFBundleURLTypes:0 dict" "$PL"
+          $PB -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$PL"
+          $PB -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string $REV" "$PL"
+          echo "URL scheme 已注册（反转 client id，值不打印）"
+          $PB -c "Print :CFBundleURLTypes" "$PL" | grep -c googleusercontent || true
+
       # 探测跑只看了目录结构没看内容，所以"tauri.ios.conf.json 有没有被合并"
       # 是靠这一步实证的（PRODUCT_BUNDLE_IDENTIFIER / DEVELOPMENT_TEAM 三项）。
       - name: '确认 iOS 专属配置合并进去了'

@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "移动端专属：原生登录（Apple / Google，tauri-plugin-social-auth）",
+  "platforms": ["iOS", "android"],
+  "windows": ["main"],
+  "permissions": [
+    "social-auth:default"
+  ]
+}

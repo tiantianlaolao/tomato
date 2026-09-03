@@ -1,0 +1,13 @@
+{
+  "name": "capyroom-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Capyroom · 账号 + 跨设备同步。零依赖：只用 node:http + node:sqlite",
+  "type": "commonjs",
+  "main": "server.js",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js"
+  }
+}

@@ -30,6 +30,7 @@ pub struct Plan {
     pub name: String,
     pub stages: Vec<Stage>,
     pub builtin: bool,
+    #[serde(default)] pub updated_ms: u64,   // 同步用：内容最后一次改动（save_plans 判内容变了才盖；导入时=远端 mtime）
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -52,6 +53,7 @@ pub struct Settings {
     pub strong_remind: bool,       // 休息结束未响应的强提醒（FE-23）
     pub pet_hidden: bool,          // 桌宠小窗是否收起（托盘/设置可切）
     pub lang: String,              // "zh" | "en"（9-2 全球发布定案：内核只在发系统通知时用它选文案；界面翻译在前端）
+    pub updated_ms: u64,           // 同步用：偏好子集（sync::SYNC_KEYS）最后一次改动
 }
 
 impl Default for Settings {
@@ -75,6 +77,7 @@ impl Default for Settings {
             strong_remind: true,
             pet_hidden: false,
             lang: "zh".into(),
+            updated_ms: 0,
         }
     }
 }
@@ -427,13 +430,13 @@ pub fn builtin_plans() -> Vec<Plan> {
     };
     #[allow(unused_mut)]
     let mut v = vec![
-        Plan { id: "classic".into(), name: "经典番茄".into(), stages: classic, builtin: true },
-        Plan { id: "p5217".into(), name: "52 / 17".into(), stages: seq(&[("work", 52 * 60), ("break", 17 * 60)]), builtin: true },
-        Plan { id: "p9020".into(), name: "90 / 20 深工作".into(), stages: seq(&[("work", 90 * 60), ("break", 20 * 60)]), builtin: true },
+        Plan { id: "classic".into(), name: "经典番茄".into(), stages: classic, builtin: true, updated_ms: 0 },
+        Plan { id: "p5217".into(), name: "52 / 17".into(), stages: seq(&[("work", 52 * 60), ("break", 17 * 60)]), builtin: true, updated_ms: 0 },
+        Plan { id: "p9020".into(), name: "90 / 20 深工作".into(), stages: seq(&[("work", 90 * 60), ("break", 20 * 60)]), builtin: true, updated_ms: 0 },
     ];
     // 冲刺预设只进 debug 构建：正式包用户不该看到测试用序列
     #[cfg(debug_assertions)]
-    v.push(Plan { id: "sprint5".into(), name: "5 秒冲刺（测试）".into(), stages: seq(&[("work", 5), ("break", 5), ("work", 5)]), builtin: true });
+    v.push(Plan { id: "sprint5".into(), name: "5 秒冲刺（测试）".into(), stages: seq(&[("work", 5), ("break", 5), ("work", 5)]), builtin: true, updated_ms: 0 });
     v
 }
 
@@ -506,6 +509,7 @@ mod tests {
             name: "测试".into(),
             stages: pairs.iter().map(|(k, s)| Stage { kind: (*k).into(), secs: *s, activity: String::new() }).collect(),
             builtin: false,
+            updated_ms: 0,
         }
     }
 

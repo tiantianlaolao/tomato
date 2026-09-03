@@ -38,6 +38,7 @@ pub struct RewardsFile {
     #[serde(default)] pub themes: BTreeMap<String, ThemeState>,
     #[serde(default)] pub owned_themes: Vec<String>,   // 买断的主题包（P4；免费主题不在这里）
     #[serde(default)] pub purchases: Vec<Purchase>,    // 主题包购买流水（单件流水在各主题 state 里）
+    #[serde(default)] pub updated_ms: u64,             // 同步用（9-3）：本机最后一次改动；merge_remote 里另有一套 mtime 纪律
 }
 
 #[derive(Serialize, Clone, Default, Debug)]
@@ -113,7 +114,58 @@ fn load(dir: &Path) -> RewardsFile {
     fs::read_to_string(dir.join("rewards.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
 fn save(dir: &Path, f: &RewardsFile) {
+    // 每次本机改动都盖时间戳（同步用）。merge_remote 走 save_raw，不盖——那边有自己的 mtime 纪律
+    let mut f = f.clone();
+    f.updated_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0).max(f.updated_ms + 1);
+    save_raw(dir, &f);
+}
+fn save_raw(dir: &Path, f: &RewardsFile) {
     if let Ok(s) = serde_json::to_string_pretty(f) { fs::write(dir.join("rewards.json"), s).ok(); }
+}
+
+// ── 跨设备同步（9-3，sync.rs 调）────────────────────────────────────────────
+pub fn snapshot_json(dir: &Path) -> (String, u64) {
+    let f = load(dir);
+    (serde_json::to_string(&f).unwrap_or_else(|_| "{}".into()), f.updated_ms)
+}
+fn union<T: PartialEq + Clone>(dst: &mut Vec<T>, src: &[T]) -> bool {
+    let mut grew = false;
+    for x in src { if !dst.contains(x) { dst.push(x.clone()); grew = true; } }
+    grew
+}
+impl PartialEq for Purchase { fn eq(&self, o: &Self) -> bool { self.sku == o.sku && self.tx == o.tx && self.at == o.at } }
+/// 合并远端的 rewards：**攒来的/买来的取并集永不减少**，挂着/摆着/花掉的按 LWW。
+/// 返回本地是否有变化。🔴 mtime 纪律：
+///   · 合完和远端一模一样（本地没多东西）→ updated_ms = 远端 mtime，本机不会再推（无回声）
+///   · 本地有远端没有的东西 → updated_ms = now，下次推上去让并集到服务端（对端再合一次就收敛）
+pub fn merge_remote(dir: &Path, json: &str, mtime: u64, now_ms: u64) -> bool {
+    let Ok(r) = serde_json::from_str::<RewardsFile>(json) else { return false };
+    let mut l = load(dir);
+    let before = serde_json::to_string(&l).unwrap_or_default();
+    let remote_newer = mtime > l.updated_ms;
+    let mut extra = false;   // 本地有、远端没有的
+    // spent_min：花掉的分钟只增不减（两台各花各的取大者：宁可少给不重复给）
+    if l.spent_min < r.spent_min { l.spent_min = r.spent_min; } else if l.spent_min > r.spent_min { extra = true; }
+    if l.owned_themes.iter().any(|x| !r.owned_themes.contains(x)) { extra = true; }
+    union(&mut l.owned_themes, &r.owned_themes);
+    if l.purchases.iter().any(|x| !r.purchases.contains(x)) { extra = true; }
+    union(&mut l.purchases, &r.purchases);
+    for (theme, rs) in &r.themes {
+        let ls = l.themes.entry(theme.clone()).or_default();
+        for (dst, src) in [(&mut ls.towels, &rs.towels), (&mut ls.props, &rs.props), (&mut ls.visitors, &rs.visitors)] {
+            if dst.iter().any(|x| !src.contains(x)) { extra = true; }
+            union(dst, src);
+        }
+        if ls.purchases.iter().any(|x| !rs.purchases.contains(x)) { extra = true; }
+        union(&mut ls.purchases, &rs.purchases);
+        if remote_newer { ls.hung = rs.hung.clone(); ls.placed = rs.placed.clone(); }
+        else if ls.hung != rs.hung || ls.placed != rs.placed { extra = true; }
+    }
+    for theme in l.themes.keys() { if !r.themes.contains_key(theme) { extra = true; } }
+    l.updated_ms = if extra { now_ms.max(mtime + 1) } else { mtime.max(l.updated_ms) };
+    let changed = serde_json::to_string(&l).unwrap_or_default() != before;
+    if changed { save_raw(dir, &l); }
+    changed
 }
 fn catalog_theme(theme: &str) -> serde_json::Value {
     let all: serde_json::Value = serde_json::from_str(CATALOG).unwrap_or(serde_json::Value::Null);
@@ -395,4 +447,33 @@ mod tests {
         assert_eq!(v.state.purchases.len(), 1); assert_eq!(v.state.purchases[0].tx, "tx-real");
         let _ = fs::remove_dir_all(&d);
     }
+    #[test]
+    fn merge_remote_union_and_mtime_rule() {
+        let d = tmp("merge");
+        // 本地：t01 + 摆了 windbell；远端（更新）：t02 + 摆了 orchid、买了日系
+        let mut l = RewardsFile::default();
+        l.themes.entry("ink".into()).or_default().towels = vec!["t01".into()];
+        l.themes.get_mut("ink").unwrap().placed.insert("willow".into(), "windbell".into());
+        l.updated_ms = 100; save_raw(&d, &l);
+        let mut r = RewardsFile::default();
+        r.themes.entry("ink".into()).or_default().towels = vec!["t02".into()];
+        r.themes.get_mut("ink").unwrap().placed.insert("lamp_side".into(), "orchid".into());
+        r.owned_themes = vec!["onsen".into()]; r.updated_ms = 500;
+        assert!(merge_remote(&d, &serde_json::to_string(&r).unwrap(), 500, 9000));
+        let m = load(&d);
+        let st = &m.themes["ink"];
+        assert!(st.towels.contains(&"t01".to_string()) && st.towels.contains(&"t02".to_string()), "手巾取并集");
+        assert_eq!(st.placed.get("lamp_side").map(String::as_str), Some("orchid"), "摆放按 LWW 用远端的");
+        assert!(st.placed.get("willow").is_none());
+        assert_eq!(m.owned_themes, vec!["onsen".to_string()]);
+        assert_eq!(m.updated_ms, 9000, "本地有远端没有的 t01 → 以 now 推上去");
+        // 对端再合一次：本地 == 远端 → updated_ms = 远端 mtime，不再回声
+        let now_remote = serde_json::to_string(&m).unwrap();
+        save_raw(&d, &r);
+        assert!(merge_remote(&d, &now_remote, 9000, 9999));
+        assert_eq!(load(&d).updated_ms, 9000);
+        // 第三次：完全一样 → 不算变化
+        assert!(!merge_remote(&d, &now_remote, 9000, 10000));
+    }
+
 }

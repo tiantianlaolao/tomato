@@ -28,6 +28,7 @@
 //   iOS 那份只留 main 一个窗口 —— rest 遮罩窗和 pet 桌宠窗在移动端不存在。
 mod core;
 mod rewards;
+mod sync;
 
 use core::{Plan, Session, Settings};
 use serde::{Deserialize, Serialize};
@@ -62,10 +63,11 @@ pub struct Schedule {
     pub pre_alerted: bool,  // 触发前 30s 预告只发一次
     pub name: String,           // 序列快照名（delay 存的是"当时编辑器里那个序列"）
     pub stages: Vec<core::Stage>, // 序列快照；非空时不查 plan_id，直接跑它 —— 没存成预设的临时编排也能如约开跑
+    pub updated_ms: u64,        // 同步用（9-3）：内容最后一次改动；last_fired/pre_alerted 这类运行痕迹不算
 }
 impl Default for Schedule {
     fn default() -> Self {
-        Schedule { id: String::new(), plan_id: String::new(), mode: "once".into(), trigger_at: 0, time: String::new(), weekdays: vec![], enabled: true, last_fired: String::new(), pre_alerted: false, name: String::new(), stages: vec![] }
+        Schedule { id: String::new(), plan_id: String::new(), mode: "once".into(), trigger_at: 0, time: String::new(), weekdays: vec![], enabled: true, last_fired: String::new(), pre_alerted: false, name: String::new(), stages: vec![], updated_ms: 0 }
     }
 }
 
@@ -651,7 +653,7 @@ fn collect_tick(a: &mut App) -> UiWork {
     let fire: Vec<(Option<Plan>, String)> = fire.into_iter().map(|sc| {
         let name = sched_name(&sc);
         let plan = if !sc.stages.is_empty() {
-            Some(Plan { id: if sc.plan_id.is_empty() { "adhoc".into() } else { sc.plan_id.clone() }, name: name.clone(), stages: sc.stages.clone(), builtin: false })
+            Some(Plan { id: if sc.plan_id.is_empty() { "adhoc".into() } else { sc.plan_id.clone() }, name: name.clone(), stages: sc.stages.clone(), builtin: false, updated_ms: 0 })
         } else {
             a.plans.iter().find(|p| p.id == sc.plan_id).cloned()
         };
@@ -1019,6 +1021,9 @@ async fn save_settings(app: AppHandle, settings: Settings) -> Settings {
         let mut a = state.lock().unwrap();
         let autostart_changed = a.settings.autostart != settings.autostart;
         let pet_changed = a.settings.pet_hidden != settings.pet_hidden;
+        // 同步用时间戳：偏好子集变了才盖 now（前端传来的 updated_ms 不认，以内核为准）
+        let mut settings = settings;
+        settings.updated_ms = if sync::settings_body(&a.settings) != sync::settings_body(&settings) { now_ms() } else { a.settings.updated_ms };
         a.settings = settings;
         a.save_settings();
         // 开机自启是桌面概念（移动端由系统统一管，App 无权自启）
@@ -1060,8 +1065,17 @@ fn apply_pet_visibility(app: &AppHandle, hidden: bool) {
 async fn save_plans(app: AppHandle, plans: Vec<Plan>) -> Vec<Plan> {
     let state: State<Mutex<App>> = app.state();
     let mut a = state.lock().unwrap();
+    // 同步用时间戳：只有内容真变了（名字/序列）才盖 now；没变的沿用旧值，否则每次保存都会推一遍
+    let now = now_ms();
+    let old: std::collections::HashMap<String, Plan> = a.plans.iter().filter(|p| !p.builtin).map(|p| (p.id.clone(), p.clone())).collect();
     let mut merged = core::builtin_plans();
-    merged.extend(plans.into_iter().filter(|p| !p.builtin));
+    for mut p in plans.into_iter().filter(|p| !p.builtin) {
+        p.updated_ms = match old.get(&p.id) {
+            Some(o) if sync::plan_body(o) == sync::plan_body(&p) => o.updated_ms,
+            _ => now,
+        };
+        merged.push(p);
+    }
     a.plans = merged;
     a.save_plans();
     a.plans.clone()
@@ -1071,9 +1085,58 @@ async fn save_plans(app: AppHandle, plans: Vec<Plan>) -> Vec<Plan> {
 async fn save_schedules(app: AppHandle, schedules: Vec<Schedule>) -> Vec<Schedule> {
     let state: State<Mutex<App>> = app.state();
     let mut a = state.lock().unwrap();
-    a.schedules = schedules;
+    let now = now_ms();
+    let old: std::collections::HashMap<String, Schedule> = a.schedules.iter().map(|s| (s.id.clone(), s.clone())).collect();
+    a.schedules = schedules.into_iter().map(|mut s| {
+        s.updated_ms = match old.get(&s.id) {
+            Some(o) if sync::schedule_body(o) == sync::schedule_body(&s) => o.updated_ms,
+            _ => now,
+        };
+        s
+    }).collect();
     a.save_schedules();
     a.schedules.clone()
+}
+
+// ── 跨设备同步（9-3）：前端 account.js 推拉，这里只出快照、进合并 ──
+#[tauri::command]
+async fn sync_snapshot(app: AppHandle) -> sync::Snapshot {
+    let state: State<Mutex<App>> = app.state();
+    let a = state.lock().unwrap();
+    sync::snapshot(&a.dir, &a.settings, &a.plans, &a.schedules)
+}
+#[derive(Serialize)]
+struct SyncImported { report: sync::Report, settings: Settings, plans: Vec<Plan>, schedules: Vec<Schedule> }
+#[tauri::command]
+async fn sync_import(app: AppHandle, changes: Vec<sync::Change>) -> SyncImported {
+    let (out, settings_changed) = {
+        let state: State<Mutex<App>> = app.state();
+        let mut a = state.lock().unwrap();
+        let dir = a.dir.clone();
+        let App { settings, plans, schedules, .. } = &mut *a;
+        let report = sync::import(&dir, settings, plans, schedules, &changes, now_ms());
+        if report.plans_changed { a.save_plans(); }
+        if report.schedules_changed { a.save_schedules(); }
+        if report.settings_changed { a.save_settings(); }
+        if report.sessions_added > 0 {
+            // 流水多了几行：stats 的四个累计数按流水重算，别让两处口径分家
+            let txt = fs::read_to_string(dir.join("history.jsonl")).unwrap_or_default();
+            let (mut done, mut aband, mut w, mut r) = (0u64, 0u64, 0u64, 0u64);
+            for l in txt.lines() {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(l) {
+                    if v.get("completed").and_then(|x| x.as_bool()).unwrap_or(false) { done += 1 } else { aband += 1 }
+                    w += v.get("work_secs").and_then(|x| x.as_u64()).unwrap_or(0) * 1000;
+                    r += v.get("rest_secs").and_then(|x| x.as_u64()).unwrap_or(0) * 1000;
+                }
+            }
+            a.stats.sessions_done = done; a.stats.sessions_abandoned = aband; a.stats.work_ms = w; a.stats.rest_ms = r;
+            a.save_stats();
+        }
+        let sc = report.settings_changed;
+        (SyncImported { report, settings: a.settings.clone(), plans: a.plans.clone(), schedules: a.schedules.clone() }, sc)
+    };
+    if settings_changed { let _ = app.emit("settings", out.settings.clone()); }
+    out
 }
 
 #[tauri::command]
@@ -1252,6 +1315,9 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--hidden"])))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    // 原生登录（9-3 账号线，capabilities/mobile.json 放行 social-auth:default）
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_social_auth::init());
 
     let builder = builder
         .setup(|app| {
@@ -1393,7 +1459,8 @@ pub fn run() {
             save_settings, save_plans, save_schedules, get_history, rest_focus, set_activity,
             open_main, pet_menu, get_stats,
             get_rewards, reward_unlock, reward_place, reward_hang, reward_purchase,
-            reward_grant_all, reward_revoke_internal
+            reward_grant_all, reward_revoke_internal,
+            sync_snapshot, sync_import
         ])
         .run(tauri::generate_context!())
         .expect("番茄时钟启动失败")

@@ -18,8 +18,8 @@ const T = window.__TAURI__;
 const $ = (id) => document.getElementById(id);
 const qs = new URLSearchParams(location.search);
 const HAS_BRIDGE = !!(T && T.core);
-// P3：账本变了（换/摆/挂）场景要重画一次，摆好的小物才会出现
-RW.onChange(() => { try { Scene.draw(); } catch (e) {} });
+// P3：账本变了（换/摆/挂）场景要重画一次，摆好的小物才会出现；顺手告诉同步引擎有改动
+RW.onChange(() => { try { Scene.draw(); } catch (e) {} try { Account.touch(); } catch (e) {} });
 
 const GRACE_SEC = 30;      // §3.3 开始 30 秒内取消无代价
 const HOLD_MS = 1500;      // §3.3 长按 1.5 秒才算取消（防误触）
@@ -74,6 +74,8 @@ function beep(kind) {
 // ═══════════════ 数据入口 ═══════════════
 function feed(v) {
   if (!v) return;
+  // 会话完成/结束＝流水多一行 → 同步引擎该推了（状态从跑着变成 done/idle 才算，别每秒都碰）
+  if (view && view.status !== v.status && (v.status === 'done' || v.status === 'idle')) { try { Account.touch(); } catch (e) {} }
   view = v;
   Scene.update(v);
   syncUI();
@@ -390,6 +392,7 @@ async function pushPlans(customs) {
   try {
     plans = await T.core.invoke('save_plans', { plans: customs });   // Rust 会把内置的并回来
     renderPlans();
+    Account.touch();
   } catch (e) { console.error('save_plans', e); }
 }
 
@@ -477,6 +480,9 @@ function renderSettings() {
     vr.appendChild(vb);
   }
 
+  sec('账号');
+  renderAccount(box, rowEl);
+
   sec('衔接');
   sw(rowEl('工作结束自动进休息'), 'auto_work_to_break');
   sw(rowEl('休息结束自动开工', '默认关着：防止一段接一段停不下来'), 'auto_break_to_work');
@@ -523,8 +529,83 @@ function renderSettings() {
 }
 async function pushSettings() {
   if (!HAS_BRIDGE) return;
-  try { settings = await T.core.invoke('save_settings', { settings }); }
+  try { settings = await T.core.invoke('save_settings', { settings }); Account.touch(); }
   catch (e) { console.error('save_settings', e); }
+}
+
+// ── 账号与同步（9-3，参考戳了么）：可选绑定，不登录一切照用；登录后流水/序列/计划/奖励/偏好静默跟账号走 ──
+// 登录方式按区分流：中国区 = 手机号（服务端配了短信才露）+ Apple；非中国区 = Apple + Google。
+function fmtSync(ms) { const d = new Date(ms); return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+function renderAccount(box, rowEl) {
+  const A = window.Account;
+  const msg = document.createElement('div'); msg.className = 'tip';
+  const say = (t) => { msg.textContent = t || ''; };
+  const btn = (label, cls, fn) => { const b = document.createElement('button'); b.className = 'btn' + (cls ? ' ' + cls : ''); b.textContent = label; b.onclick = fn; return b; };
+  if (!A.isLoggedIn()) {
+    rowEl('登录后跨设备同步', '流水、序列、定时计划、奖励和偏好会跟着账号走；不登录一切照用');
+    const row = document.createElement('div'); row.className = 'btns';
+    const doLogin = async (prov) => {
+      say('登录中…');
+      const r = await A.login(prov);
+      if (r.ok) { say('已登录，正在同步'); renderSettings(); return; }
+      if (r.error === 'native') { say(A.HAS_BRIDGE ? '' : '浏览器里没有原生登录'); return; }   // 用户自己取消的不用被告知"失败"
+      say(r.error === 'net' ? '网络不通，稍后再试' : '登录没成功');
+    };
+    row.appendChild(btn('用 Apple 登录', 'pri', () => doLogin('apple')));
+    if (A.IS_OVERSEAS) row.appendChild(btn('用 Google 登录', '', () => doLogin('google')));
+    box.appendChild(row);
+    // 手机号（中国区）：所连服务端配了短信才露；探测异步回来后补渲染一次
+    if (!A.IS_OVERSEAS) {
+      if (A.phoneOK === undefined) { A.phoneOK = null; A.net.smsSupported().then((ok) => { A.phoneOK = ok; if (ok && sheetKind === 'set') renderSettings(); }); }
+      if (A.phoneOK) {
+        const r1 = rowEl('手机号'); r1.classList.add('acc');
+        const ph = document.createElement('input'); ph.className = 'txt acc'; ph.type = 'tel'; ph.maxLength = 11; ph.inputMode = 'numeric'; ph.autocomplete = 'tel'; ph.placeholder = '11 位手机号';
+        const send = btn('发送验证码', '', async () => {
+          const phone = ph.value.trim();
+          if (!/^1[3-9]\d{9}$/.test(phone)) { say('手机号不像'); return; }
+          say('');
+          const r = await A.net.smsSend(phone);
+          if (!r) { say('网络不通，稍后再试'); return; }
+          const cool = (sec) => { let left = sec; send.disabled = true; const t = setInterval(() => { if (!send.isConnected) { clearInterval(t); return; } if (left <= 0) { clearInterval(t); send.disabled = false; send.textContent = '发送验证码'; return; } send.textContent = left-- + ' 秒后重发'; }, 1000); };
+          if (r.ok) { say('验证码已发送'); cool(60); return; }
+          if (r.error === 'cooldown') { cool(r.wait || 60); return; }
+          say(r.error === 'daily' ? '今天发太多了，明天再试' : '验证码没发出去');
+        });
+        r1.appendChild(ph); r1.appendChild(send);
+        const r2 = rowEl('验证码'); r2.classList.add('acc');
+        const code = document.createElement('input'); code.className = 'txt acc'; code.type = 'text'; code.maxLength = 6; code.inputMode = 'numeric'; code.autocomplete = 'one-time-code'; code.placeholder = '6 位';
+        r2.appendChild(code);
+        r2.appendChild(btn('手机号登录', 'pri', async () => {
+          const phone = ph.value.trim(), c = code.value.trim();
+          if (!/^1[3-9]\d{9}$/.test(phone)) { say('手机号不像'); return; }
+          if (!/^\d{6}$/.test(c)) { say('验证码是 6 位数字'); return; }
+          say('登录中…');
+          const r = await A.loginPhone(phone, c);
+          if (r.ok) { say('已登录，正在同步'); renderSettings(); return; }
+          say(r.error === 'net' ? '网络不通，稍后再试' : r.why === 'expired' ? '验证码过期了，重发一条' : '验证码不对');
+        }));
+      }
+    }
+  } else {
+    const a = A.account;
+    const who = a.email || ({ apple: 'Apple 账号', google: 'Google 账号', phone: '手机号' }[a.provider] || '');
+    rowEl('已登录 · ' + who, A.lastSyncAt ? '上次同步 ' + fmtSync(A.lastSyncAt) : '还没同步过');
+    const row = document.createElement('div'); row.className = 'btns';
+    row.appendChild(btn('立即同步', '', async () => { say('同步中…'); await A.flush(); say(''); renderSettings(); }));
+    row.appendChild(btn('退出登录', 'ghost', async () => { await A.logout(); renderSettings(); }));
+    box.appendChild(row);
+    // 删除账号（商店合规：能建就必须能在 App 里删）：两下确认。删的是账号 + 云上数据，本机记录不动
+    const del = btn('删除账号', 'ghost', async () => {
+      if (!del.dataset.arm) { del.dataset.arm = '1'; del.textContent = '再点一次确认删除'; return; }
+      del.disabled = true; say('删除中…');
+      const r = await A.deleteAccount();
+      if (r.ok) { say('账号已删除，本机记录还在'); renderSettings(); return; }
+      del.disabled = false; delete del.dataset.arm; del.textContent = '删除账号';
+      say(r.error === 'net' ? '网络不通，稍后再试' : '没删成，稍后再试');
+    });
+    const dr = rowEl('删除账号', '删的是账号和云端数据；这台设备上的记录不动'); dr.appendChild(del);
+  }
+  box.appendChild(msg);
 }
 
 // ── 沐录：三页（汤札 / 收藏 / 庭院）+ 会话流水（P3，9-2 定案）──
@@ -902,6 +983,15 @@ if (!HAS_BRIDGE) {
       settings = b.settings || null;
       renderPlans();
       RW.internal = !!b.internal;   // 内测包才露「全部解锁」
+      // 同步引擎：远端合并进来后刷本地副本；账号态变了刷设置页
+      Account.onImported = (res) => {
+        if (res.plans) { plans = res.plans; renderPlans(); }
+        if (res.settings) settings = res.settings;
+        if (res.report && (res.report.rewards_changed || res.report.sessions_added)) RW.load().catch(() => {});
+        if (sheetKind === 'hist') renderHistory();
+      };
+      Account.onChange = () => { if (sheetKind === 'set') renderSettings(); };
+      Account.init();
       feed(b.view);
       // P3 账本 → P4 商店探测 → 主题锁：存的是付费主题又没买（且有真商店/开发开关）就退回中国风
       RW.load(Scene.scene ? Scene.scene.id : 'onsen').then(() => Store.init()).then(() => {

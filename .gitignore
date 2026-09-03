@@ -6,3 +6,8 @@ _dev/*.png
 # 场景视频不进仓/不进包：CI 出瘦包，App 首启从 1.13 下载（本地留着给 dev/截图用）
 src-mobile/assets/video/
 src-mobile/assets/video-cn/
+
+# 部署脚本含服务器明文密码，绝不进仓
+_deploy_*.py
+# 账号服务本地测试库
+server/data/
