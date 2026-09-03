@@ -19,6 +19,8 @@ const Scene = {
   W:0, H:0, DPR:1,
   scene:null, view:null,
   phase:'idle', seg:null, frozen:false,
+  ready:false,              // 🔴 9-3：底图（海报或视频首帧）没出来之前叠加层一笔不画——冷启曾是"贴图和菜单先蹦出来，画面后到"
+  poster:null,
   raf:0, running:false, lastFps:12, lastTs:0, nextFrameAt:0,
   frameGap:1000/8 - 8,      // 数字层 8fps 足够（视频自己 24fps 硬解）
   swapToken:0,
@@ -31,7 +33,10 @@ const Scene = {
     this.scene = s;
     // 主题资产与首屏海报都归场景包管（9-1 双主题起）
     if (window.AS && s.assets) AS.configure(s.assets);
-    if (this.vids) for (const el of this.vids) el.poster = s.poster || 'assets/poster.webp';
+    const poster = s.poster || 'assets/poster.webp';
+    if (this.vids) for (const el of this.vids) el.poster = poster;
+    // 海报层：视频还没喂/还没出帧时舞台就是它（不然是 #stage 的深色底）；换了海报就重新等它 load
+    if (this.poster && this.poster.getAttribute('src') !== poster) { this.ready = false; this.poster.src = poster; }
   },
 
   // 切主题（设置面板调）：落 localStorage，清段重喂
@@ -48,6 +53,7 @@ const Scene = {
   mount(root, sceneId) {
     this.root = root;
     root.innerHTML =
+      '<img class="layer" id="sposter" alt="">' +
       '<video class="layer" id="sv0" muted playsinline></video>' +
       '<video class="layer" id="sv1" muted playsinline></video>' +
       '<div id="fog"></div>' +
@@ -57,6 +63,9 @@ const Scene = {
     this.fog = root.querySelector('#fog');
     this.cv = root.querySelector('#ovc');
     this.cx = this.cv.getContext('2d');
+    this.poster = root.querySelector('#sposter');
+    this.poster.onload = () => { this.ready = true; this.draw(); };
+    this.poster.onerror = () => { this.ready = true; this.draw(); };   // 海报缺了也别把叠加层永远锁死
     let saved = null;
     try { saved = localStorage.getItem('capy_scene'); } catch (e) {}
     const qsScene = new URLSearchParams(location.search).get('scene');   // 截图验收用
@@ -136,6 +145,7 @@ const Scene = {
     el.src = this.src(seg);
     el.currentTime = 0;
     el.play().catch(() => {});
+    el.onloadeddata = () => { if (!this.ready) { this.ready = true; this.draw(); } };
     el.classList.add('on');
     // 🔴 首次喂数据时新旧是同一个元素——摘 .on/卸 src 只对"真的旧元素"做，
     //    否则刚点亮就被自己摘掉＝黑屏（idle/paused 首屏黑就是这个）
@@ -216,6 +226,7 @@ const Scene = {
     const cx = this.cx, v = this.view, S = this.scene;
     if (!cx || !S) return;
     cx.clearRect(0, 0, this.W, this.H);
+    if (!this.ready) return;   // 底图没到，什么都不画（见 ready 注释）
 
     // 调光（视频自带黄昏光，这里只轻叠）
     const dim = (S.dim && S.dim[this.phase]) || 0;

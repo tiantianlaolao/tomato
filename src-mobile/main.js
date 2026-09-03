@@ -563,30 +563,85 @@ function rwBuy(body, kind, item, theme, after) {
   bar.appendChild(ok); bar.appendChild(no); body.prepend(bar);
 }
 const rwErr = (body, e) => { const t = document.createElement('div'); t.className = 'tip warn'; t.textContent = String(e && e.message || e); body.prepend(t); };
-
-// 汤札：本月牌（每天首次完成＝一个印）+ 流水
+// 汤札（9-3 用户三次把关后的定案）：**一天一块牌**——
+//   ① 本周 7 个挂钩（一～日）：来过的那天挂一块牌（tag.png 当底：日期 / 朱印「汤」/ 当天分钟），没来的只剩空钩；
+//      今天没泡＝空钩+一句"泡一场，挂上今天的牌"；点一块牌→下面流水只看那天；只看本周不翻页
+//   ② 一句话：这周来了 N 天 · 泡了 X 小时
+//   ③ 全貌不画牌（方案 A）：本月＝一串珠子（来过染朱红、深浅按分钟）；今年＝12 根水位柱（水位＝当月分钟，柱下＝来的天数）
+//   ④ 连续天数不做（用户定）。数据＝内核 ledger.days（"YYYY-MM-DD"→分钟，近 400 天）
+let stampView = 'month', stampDay = '';
 async function renderStamps(body) {
-  const L = RW.view.ledger;
+  const L = RW.view.ledger, DAYS = L.days || {};
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const key = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const addD = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const minsOf = (d) => DAYS[key(d)] || 0;
+  const lvl = (n) => n <= 0 ? '' : n < 30 ? 'l1' : n < 60 ? 'l2' : 'l3';
+  const hm = (m) => Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分';
+  const WD = (window.I18N && I18N.lang === 'en') ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['一', '二', '三', '四', '五', '六', '日'];
+
+  // ① 本周挂钩
+  const mon = addD(today, -((today.getDay() + 6) % 7));
+  const hooks = document.createElement('div'); hooks.className = 'hooks';
+  let wkDays = 0, wkMin = 0;
+  for (let k = 0; k < 7; k++) {
+    const d = addD(mon, k), m = minsOf(d), isToday = d.getTime() === today.getTime();
+    if (m > 0) { wkDays++; wkMin += m; }
+    const col = document.createElement('div'); col.className = 'hook' + (isToday ? ' today' : '') + (d > today ? ' fut' : '');
+    let h = '<em>' + WD[k] + '</em><s></s>';
+    if (m > 0) h += '<div class="dtag' + (stampDay === key(d) ? ' sel' : '') + '"><b>' + d.getDate() + '</b><i>汤</i><small>' + m + '′</small></div>';
+    col.innerHTML = h;
+    if (m > 0) col.querySelector('.dtag').onclick = () => { stampDay = stampDay === key(d) ? '' : key(d); renderHistory(); };
+    hooks.appendChild(col);
+  }
+  body.appendChild(hooks);
+  const line = document.createElement('div'); line.className = 'sub center';
+  line.textContent = minsOf(today) > 0 ? '这周来了 ' + wkDays + ' 天 · 泡了 ' + hm(wkMin) : '泡一场，挂上今天的牌';
+  body.appendChild(line);
+
+  // ③ 全貌：本月珠串 / 今年水位柱
   const card = document.createElement('div'); card.className = 'stampcard';
-  const [y, m] = L.month.split('-').map(Number);
-  const days = new Date(y, m, 0).getDate();
-  const set = new Set(L.month_days || []);
-  let cells = '';
-  for (let d = 1; d <= days; d++) cells += '<i class="' + (set.has(d) ? 'on' : '') + '">' + (set.has(d) ? '印' : d) + '</i>';
-  card.innerHTML = '<div class="sc-head"><b>' + m + ' 月牌</b><span>来了 ' + set.size + ' 天 · 一共来过 ' + L.visit_days + ' 天</span></div>'
-    + '<div class="sc-grid">' + cells + '</div>'
-    + '<div class="sub">累计泡了 ' + Math.floor(L.total_min / 60) + ' 小时 ' + (L.total_min % 60) + ' 分 · 可用 ' + L.avail_min + ' 分钟</div>';
+  const tg = document.createElement('div'); tg.className = 'tabs sm';
+  [['month', '本月'], ['year', '今年']].forEach(([k, t]) => {
+    const b = document.createElement('button'); b.textContent = t; b.className = stampView === k ? 'on' : '';
+    b.onclick = () => { stampView = k; renderHistory(); };
+    tg.appendChild(b);
+  });
+  card.appendChild(tg);
+  if (stampView === 'month') {
+    const n = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    let h = '', days = 0, mins = 0;
+    for (let i = 1; i <= n; i++) {
+      const d = new Date(today.getFullYear(), today.getMonth(), i), m = minsOf(d);
+      if (m > 0) { days++; mins += m; }
+      h += '<i class="' + lvl(m) + (d.getTime() === today.getTime() ? ' today' : '') + (d > today ? ' fut' : '') + '"></i>';
+    }
+    card.insertAdjacentHTML('beforeend', '<div class="beads">' + h + '</div><div class="sub center">来了 ' + days + ' 天 · 泡了 ' + hm(mins) + '</div>');
+  } else {
+    const per = Array.from({ length: 12 }, () => ({ min: 0, days: 0 }));
+    for (const k in DAYS) { if (k.slice(0, 4) === String(today.getFullYear()) && DAYS[k] > 0) { const mi = Number(k.slice(5, 7)) - 1; per[mi].min += DAYS[k]; per[mi].days++; } }
+    const top = Math.max(60, ...per.map((x) => x.min));
+    let h = '', days = 0, mins = 0;
+    per.forEach((x, i) => {
+      days += x.days; mins += x.min;
+      const cls = (i === today.getMonth() ? ' cur' : '') + (i > today.getMonth() ? ' fut' : '');
+      h += '<div class="pool' + cls + '"><div class="cup"><div class="water" style="height:' + Math.round(x.min / top * 100) + '%"></div></div><em>' + (i + 1) + '</em><small>' + (x.days || '') + '</small></div>';
+    });
+    card.insertAdjacentHTML('beforeend', '<div class="pools">' + h + '</div><div class="sub center">今年来了 ' + days + ' 天 · 泡了 ' + hm(mins) + '</div>');
+  }
   body.appendChild(card);
 
   let rows = [];
   if (HAS_BRIDGE) {
     try { rows = await T.core.invoke('get_history', { limit: 50 }); }
-    catch (e) { body.innerHTML += '<div class="tip">读不到记录：' + e + '</div>'; return; }
+    // 🔴 不能 body.innerHTML +=：整段重新序列化会把上面周牌/本月全年按钮的 onclick 全丢掉（9-3 撞过：点"全年"没反应）
+    catch (e) { body.insertAdjacentHTML('beforeend', '<div class="tip">读不到记录：' + e + '</div>'); return; }
   }
   const note = '<div class="tip">跑完的每一场都会记。中途结束的：满 1 分钟才记（免得误触也留痕），'
              + '所以拿「调试 · 20 秒 ×2」测的时候，只要没跑完就一条都不会留。</div>';
-  if (!rows.length) { body.innerHTML += '<div class="tip">还没有记录。</div>' + note; return; }
+  if (!rows.length) { body.insertAdjacentHTML('beforeend', '<div class="tip">还没有记录。</div>' + note); return; }
   const box = body;
+  if (stampDay) rows = rows.filter(r => { const d = new Date(r.started_ms || r.ended_ms || 0); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') === stampDay; });   // 点了某块牌只看那天
   rows.slice().reverse().forEach(r => {
     const d = new Date(r.started_ms || r.ended_ms || Date.now());
     const el = document.createElement('div');

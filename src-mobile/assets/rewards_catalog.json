@@ -4,11 +4,15 @@
   "slots": [
    {
     "id": "lamp_side",
-    "name": "石灯旁"
+    "name": "太湖石旁"
    },
    {
     "id": "pool_edge",
     "name": "石台左侧"
+   },
+   {
+    "id": "floor_mid",
+    "name": "地砖中央"
    },
    {
     "id": "wall",
@@ -83,12 +87,12 @@
     "sku": "com.tybbtech.capyroom.ink.prop.windbell"
    },
    {
-    "id": "stonelamp",
-    "name": "石灯",
+    "id": "censer",
+    "name": "香炉",
     "slot": "pool_edge",
     "cost_min": 180,
     "price_cny": 6,
-    "sku": "com.tybbtech.capyroom.ink.prop.stonelamp"
+    "sku": "com.tybbtech.capyroom.ink.prop.censer"
    },
    {
     "id": "orchid",
@@ -123,17 +127,17 @@
     "sku": "com.tybbtech.capyroom.ink.prop.tibi"
    },
    {
-    "id": "cushion2",
-    "name": "蒲团·青",
+    "id": "stool",
+    "name": "石凳",
     "slot": "lamp_side",
     "cost_min": 200,
     "price_cny": 6,
-    "sku": "com.tybbtech.capyroom.ink.prop.cushion2"
+    "sku": "com.tybbtech.capyroom.ink.prop.stool"
    },
    {
     "id": "teatray",
     "name": "茶盘",
-    "slot": "pool_edge",
+    "slot": "floor_mid",
     "cost_min": 260,
     "price_cny": 6,
     "sku": "com.tybbtech.capyroom.ink.prop.teatray"

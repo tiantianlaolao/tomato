@@ -165,6 +165,40 @@ input[type=range]{flex:1;accent-color:#e8915c}
 .sc-grid i{font-style:normal;font-size:11px;text-align:center;line-height:26px;border-radius:7px;
   color:rgba(203,184,154,.35);background:rgba(120,96,68,.12)}
 .sc-grid i.on{color:#fff4e6;background:#b2382a;font-family:"onsen-brush",serif;font-size:14px}
+/* 汤札周牌（9-3）：tag.png 当底，字全画在牌面上 */
+/* 汤札（9-3 定案）：一天一块牌，本周 7 个挂钩；全貌=珠串/水位柱，不画牌 */
+.hooks{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:4px 2px 2px}
+.hook{display:flex;flex-direction:column;align-items:center;min-height:150px}
+.hook em{font-style:normal;font-size:11px;color:rgba(203,184,154,.55);font-family:"onsen-brush",serif}
+.hook s{display:block;width:9px;height:9px;border-radius:50%;margin:3px 0 2px;background:#8a6a48;box-shadow:0 1px 0 rgba(0,0,0,.5),inset 0 1px 0 rgba(255,235,200,.35)}   /* 木钉 */
+.hook.today em{color:#f0c9a0}
+.hook.fut em,.hook.fut s{opacity:.45}
+.dtag{width:42px;height:112px;margin-top:-6px;position:relative;background:url(assets/p3/ink/tag.png) center/contain no-repeat;
+  color:#5a4230;text-align:center;font-family:"onsen-brush",serif;opacity:.85;transition:transform .15s}
+.hook.today .dtag{opacity:1;transform:scale(1.08);filter:drop-shadow(0 4px 6px rgba(0,0,0,.45))}
+.dtag.sel{transform:scale(1.12);filter:drop-shadow(0 0 6px rgba(240,201,160,.7))}
+.dtag b{position:absolute;left:0;right:0;top:24%;font-weight:400;font-size:15px;line-height:1}
+.dtag i{position:absolute;left:50%;top:47%;width:22px;height:22px;margin-left:-11px;border-radius:5px;background:#b2382a;color:#fff4e6;
+  font-style:normal;font-size:14px;line-height:22px;box-shadow:0 1px 1px rgba(0,0,0,.3)}
+.dtag small{position:absolute;left:0;right:0;bottom:9%;font-size:10px;opacity:.75}
+.sub.center{text-align:center}
+.tabs.sm{margin-bottom:12px}   /* 别叫 .mini：那是编辑器里 34px 小方钮的类，撞过（本月/全年被压成两根竖条） */
+.tabs.sm button{font-size:12px;padding:5px 0}
+/* 本月珠串：一天一颗，两行 */
+.beads{display:grid;grid-template-columns:repeat(16,1fr);gap:7px 0;justify-items:center;padding:4px 0 8px}
+.beads i{width:11px;height:11px;border-radius:50%;background:rgba(120,96,68,.22);box-shadow:inset 0 1px 1px rgba(0,0,0,.3)}
+.beads i.l1{background:rgba(178,56,42,.45)} .beads i.l2{background:rgba(178,56,42,.75)} .beads i.l3{background:#b2382a;box-shadow:0 0 4px rgba(178,56,42,.5)}
+.beads i.today{outline:1.5px solid #f0c9a0;outline-offset:1.5px}
+.beads i.fut{opacity:.35}
+/* 今年水位柱：一月一个小池子 */
+.pools{display:grid;grid-template-columns:repeat(12,1fr);gap:3px;align-items:end;padding:6px 0 4px}
+.pool{display:flex;flex-direction:column;align-items:center}
+.pool .cup{width:100%;height:78px;border:1px solid rgba(120,96,68,.45);border-radius:3px 3px 6px 6px;background:rgba(28,22,16,.6);position:relative;overflow:hidden}
+.pool .water{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(rgba(122,176,168,.55),rgba(90,150,145,.9));transition:height .3s}
+.pool.cur .cup{border-color:rgba(240,201,160,.8)}
+.pool.fut{opacity:.4}
+.pool em{font-style:normal;font-size:10px;color:rgba(203,184,154,.6);margin-top:3px}
+.pool small{font-size:9px;color:rgba(203,184,154,.45);line-height:1;min-height:9px}
 .rwgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .rwrow{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
 .rwitem{position:relative;text-align:center;padding:8px 4px;border-radius:12px;font-size:11px;

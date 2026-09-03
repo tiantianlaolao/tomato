@@ -19,6 +19,14 @@ try {
 
 // ── 字典：中文原句 → 英文。{n} 为数字占位；键里的 {n} 会编译成 (\d+) ──
 const D = {
+  // 🔴 字典按插入顺序匹配、占位宽匹配：带前缀的整句必须排在 '{n} 分钟' 这类泛句**前面**，
+  //    否则 '本周 100 分钟' 会被 '{n} 分钟' 先吃掉（n='本周 100'）翻成"本周 100 min"半中半英（9-3 撞过）
+  '这周来了 {n} 天 · 泡了 {m} 小时 {k} 分': '{n} days this week · soaked {m} h {k} min',
+  '今年来了 {n} 天 · 泡了 {m} 小时 {k} 分': '{n} days this year · soaked {m} h {k} min',
+  '来了 {n} 天 · 泡了 {m} 小时 {k} 分': '{n} days this month · soaked {m} h {k} min',
+  '泡一场，挂上今天的牌': 'Soak once to hang today\'s tag', '今年': 'Year',
+  '累计泡了 {n} 小时 {m} 分 · 可用 {k} 分钟': 'Soaked {n} h {m} min in all · {k} min available',
+  '来了 {n} 天 · 一共来过 {m} 天': '{n} days this month · {m} days in all',
   // 场景包
   '野天风吕': 'Mountain Onsen', '水墨庭院': 'Ink Courtyard', '山中野天风吕': 'Mountain Onsen',
   '牌上三行都能点：入浴＝开始 · 汤加减＝设置 · 汤帐＝记录': 'Tap the sign: Soak = start · Tune = settings · Log = records',
@@ -69,7 +77,7 @@ const D = {
   '读取中…': 'Loading…', '读不到账本：': 'Couldn\'t load ledger: ', '读不到记录：': 'Couldn\'t load records: ',
   '汤札': 'Stamps', '收藏': 'Collection', '庭院': 'Garden', '印': '✓',
   '1 月牌': 'January', '2 月牌': 'February', '3 月牌': 'March', '4 月牌': 'April', '5 月牌': 'May', '6 月牌': 'June', '7 月牌': 'July', '8 月牌': 'August', '9 月牌': 'September', '10 月牌': 'October', '11 月牌': 'November', '12 月牌': 'December', '来了 {n} 天 · 一共来过 {m} 天': '{n} days this month · {m} days in all',
-  '累计泡了 {n} 小时 {m} 分 · 可用 {k} 分钟': 'Soaked {n} h {m} min in all · {k} min available',
+  '本月': 'Month', '全年': 'Year',
   '跑完的每一场都会记。中途结束的：满 1 分钟才记（免得误触也留痕），所以拿「调试 · 20 秒 ×2」测的时候，只要没跑完就一条都不会留。': 'Every finished session is logged. Ended early: logged only past 1 minute (so a stray tap leaves no trace).',
   '还没有记录。': 'No records yet.', '{n}月{m}日 ': '{n}/{m} ', '· 专注 {n} 分 · 休息 {m} 分': '· focus {n} min · rest {m} min',
   ' · 中途结束': ' · ended early', ' · 完成': ' · done',
@@ -83,8 +91,8 @@ const D = {
   '已经有了': 'Already owned', '目录里没有这件': 'Not in catalog', '还没有这件': 'Not owned yet', '这件放不到这个位置': 'Doesn\'t fit this spot', '还没有这条': 'Not owned yet', '没有这个位置': 'No such spot',
   // 目录里的名字
   '素帕': 'Plain', '云纹': 'Clouds', '缠枝莲': 'Lotus Vine', '鱼戏': 'Two Fish', '竹影': 'Bamboo', '梅枝': 'Plum', '山水': 'Landscape', '金鳞': 'Gold Scales',
-  '风铃': 'Wind Bell', '石灯': 'Stone Lantern', '一盆兰': 'Orchid', '荷花': 'Lotus', '锦鲤': 'Koi', '题壁字': 'Wall Script', '蒲团·青': 'Green Cushion', '茶盘': 'Tea Tray',
-  '檐下': 'Under the eaves', '白墙': 'White wall', '石灯旁': 'By the lantern', '石台左侧': 'Left ledge', '近处水面': 'Near water', '常客·阿沐': 'Regular · Mu',
+  '风铃': 'Wind Bell', '香炉': 'Incense Burner', '一盆兰': 'Orchid', '荷花': 'Lotus', '锦鲤': 'Koi', '题壁字': 'Wall Script', '石凳': 'Stone Stool', '茶盘': 'Tea Tray',
+  '檐下': 'Under the eaves', '白墙': 'White wall', '太湖石旁': 'By the rock', '石台左侧': 'Left ledge', '地砖中央': 'Center floor', '近处水面': 'Near water', '常客·阿沐': 'Regular · Mu',
   // 商店（P4）
   '恢复购买': 'Restore purchases', '在这台设备换了 Apple ID 或重装后，把买过的找回来': 'Bring back what you bought after reinstalling or switching Apple ID',
   '已恢复 {n} 项': 'Restored {n} item(s)', '没有可恢复的购买': 'Nothing to restore', '已取消': 'Cancelled', '购买没有完成': 'Purchase didn\'t complete',

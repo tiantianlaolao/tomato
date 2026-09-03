@@ -92,6 +92,15 @@ async function catalog() {
   catch (e) { catalogAll = {}; }
   return catalogAll;
 }
+// 按天分钟表（汤札周牌/小牌墙用）：近 300 天里约六成的日子有记录，分钟 25/50/75 轮着来（确定性，截图稳定）
+function demoDays() {
+  const out = {}, t = new Date(); t.setHours(0, 0, 0, 0);
+  for (let i = 0; i < 300; i++) {
+    const d = new Date(t); d.setDate(d.getDate() - i);
+    if ((i * 7 + 3) % 10 < 6) out[d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')] = 25 * (1 + (i % 3));
+  }
+  return out;
+}
 async function demoView(theme) {
   const all = await catalog();
   const cat = all[theme] || { slots: [], towels: [], props: [], visitors: [] };
@@ -99,13 +108,17 @@ async function demoView(theme) {
   const empty = q.get('rw') === 'empty';
   const ledger = empty
     ? { total_min: 0, spent_min: 0, avail_min: 0, sessions_done: 0, visit_days: 0, month: '2026-09', month_days: [] }
-    : { total_min: 400, spent_min: 120, avail_min: 280, sessions_done: 17, visit_days: 9, month: '2026-09', month_days: [1, 2, 3, 5, 8, 9, 12, 15, 16] };
+    : { total_min: 400, spent_min: 120, avail_min: 280, sessions_done: 17, visit_days: 9, month: '2026-09', month_days: [1, 2, 3, 5, 8, 9, 12, 15, 16], days: demoDays() };
   const full = q.get('rw') === 'full';   // 五个槽位全摆满，看位置用
+  const full2 = q.get('rw') === 'full2'; // 另一组（茶盘/蒲团/锦鲤/梅枝巾），每个槽位两件轮着看
   const state = empty
     ? { towels: [], hung: '', props: [], placed: {}, visitors: [], purchases: [] }
     : full
-    ? { towels: ['t01', 't02', 't03'], hung: 't03', props: ['windbell', 'orchid', 'stonelamp', 'lotus', 'tibi'],
-        placed: { willow: 'windbell', lamp_side: 'orchid', pool_edge: 'stonelamp', water_near: 'lotus', wall: 'tibi' }, visitors: ['v01'], purchases: [] }
+    ? { towels: ['t01', 't02', 't03'], hung: 't03', props: ['windbell', 'orchid', 'censer', 'lotus', 'tibi'],
+        placed: { willow: 'windbell', lamp_side: 'orchid', pool_edge: 'censer', water_near: 'lotus', wall: 'tibi' }, visitors: ['v01'], purchases: [] }
+    : full2
+    ? { towels: ['t06', 't08'], hung: 't06', props: ['windbell', 'stool', 'teatray', 'censer', 'koi', 'tibi'],
+        placed: { willow: 'windbell', lamp_side: 'stool', floor_mid: 'teatray', pool_edge: 'censer', water_near: 'koi', wall: 'tibi' }, visitors: [], purchases: [] }
     : { towels: ['t01', 't02'], hung: 't02', props: ['windbell', 'orchid'], placed: { willow: 'windbell' }, visitors: [], purchases: [] };
   return { ledger, state, catalog: cat, owned_themes: q.get('rw') === 'owned' ? ['onsen'] : [], themes: all.themes || [] };
 }

@@ -49,6 +49,9 @@ pub struct Ledger {
     pub visit_days: u32,       // 有过完成会话的天数（累计，访客触发用）
     pub month: String,         // "2026-09"
     pub month_days: Vec<u32>,  // 本月盖了印的日子（1..31）
+    /// 近 400 天每天的专注分钟（"YYYY-MM-DD" → 分钟，只有有完成会话的日子才有键）。
+    /// 9-3 汤札改周牌 + 月/年全貌墙要按天深浅，month_days 不够用；400 天够画一整年。
+    pub days: BTreeMap<String, u32>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -84,6 +87,8 @@ pub fn ledger_from(history: &str, spent_min: u64, now_ms: u64) -> Ledger {
     let (cy, cm) = (now.year(), now.month());
     let mut total = 0u64; let mut done = 0u32;
     let mut days: BTreeSet<(i32, u32, u32)> = BTreeSet::new();
+    let mut per_day: BTreeMap<String, u32> = BTreeMap::new();
+    let keep_from = now_ms.saturating_sub(400 * 86_400_000);
     for line in history.lines() {
         let Some(mins) = session_minutes(line) else { continue };
         total += mins; done += 1;
@@ -91,13 +96,16 @@ pub fn ledger_from(history: &str, spent_min: u64, now_ms: u64) -> Ledger {
         let t = if r.ended_ms > 0 { r.ended_ms } else { r.started_ms };
         if let Some(d) = Local.timestamp_millis_opt(t as i64).single() {
             days.insert((d.year(), d.month(), d.day()));
+            if t >= keep_from {
+                *per_day.entry(format!("{:04}-{:02}-{:02}", d.year(), d.month(), d.day())).or_insert(0) += mins as u32;
+            }
         }
     }
     let month_days: Vec<u32> = days.iter().filter(|(y, m, _)| *y == cy && *m == cm).map(|(_, _, d)| *d).collect();
     Ledger {
         total_min: total, spent_min, avail_min: total.saturating_sub(spent_min),
         sessions_done: done, visit_days: days.len() as u32,
-        month: format!("{cy:04}-{cm:02}"), month_days,
+        month: format!("{cy:04}-{cm:02}"), month_days, days: per_day,
     }
 }
 
@@ -303,6 +311,10 @@ mod tests {
         assert_eq!(l.sessions_done, 3);
         assert_eq!(l.visit_days, 2, "同一天两场只算一个印，放弃的不算");
         assert!(l.month_days.len() <= 2);
+        // 按天分钟表：两天有键，前天两场 25+25=50，昨天 10；放弃的那天没有键
+        assert_eq!(l.days.len(), 2);
+        let mut v: Vec<u32> = l.days.values().copied().collect(); v.sort();
+        assert_eq!(v, vec![10, 50]);
     }
 
     #[test]
