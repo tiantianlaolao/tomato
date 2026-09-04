@@ -42,6 +42,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 #[cfg(desktop)]
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, State};
+#[cfg(desktop)]
 use tauri_plugin_notification::NotificationExt;
 
 fn now_ms() -> u64 {
@@ -119,6 +120,9 @@ struct App {
     /// 屏幕常亮当前是开是关（只在翻转时才去动 UIApplication）
     #[cfg(mobile)]
     keep_awake: bool,
+    /// 上一拍滴答的时刻（9-4）：两拍相隔 >5s ＝ 中间被 iOS 冻结过，这一拍的音效作废（系统通知已经响过）
+    #[cfg(mobile)]
+    last_tick_ms: u64,
     /// 长期统计（两端都记：桌面端也会有"来过几次"的用处）
     stats: Stats,
 }
@@ -184,6 +188,7 @@ impl App {
             #[cfg(mobile)] arm_count: 0,
             #[cfg(mobile)] arm_err: String::new(),
             #[cfg(mobile)] keep_awake: false,
+            #[cfg(mobile)] last_tick_ms: 0,
             stats,
         }
     }
@@ -300,21 +305,15 @@ struct TrayUi {
 
 // ———————————————————————— 通知 + 音效（音效发给前端 WebAudio 播） ————————————————————————
 fn notify(app: &AppHandle, title: &str, body: &str) {
-    // iOS 上不显式给 sound 就是静默横幅（见下面 SOUND 那条注释）。走这条路的是强提醒和
-    // 久坐提醒 —— 它们本来就是"要把人叫回来"的，没声音等于没有。
-    // 🔴 但必须听「提示音」这个开关：用户 8-29 反馈"关了提示音到点还是响"，
-    //    因为声音其实是系统通知发的，而那条路当时根本没看设置 —— 开关说了不算＝在说假话。
-    // ⚠️ 取完 sound_on 立刻放锁再去碰插件：持锁调插件就是 8-25 那个死锁的翻版。
+    // 走这条路的只有强提醒和久坐提醒（切段通知桌面端也走这里，移动端走排期）。
+    // 🔴 移动端不发即时系统通知（9-4 用户反馈"通知有问题"排查后改）：iOS 后台线程冻结，这条路
+    //    只可能在前台跑 —— 等于对着正在看屏幕的人每分钟弹一条横幅。前台的提醒只留音效
+    //    （collect_tick 已 push sfx "remind"，且听「提示音」开关），后台的等待提醒由
+    //    arm_notifications 在进入等待时**提前排期**（见那边 remind 那段）。
     #[cfg(mobile)]
-    let want_sound = {
-        let state: State<Mutex<App>> = app.state();
-        let on = state.lock().unwrap().settings.sound_on;
-        on
-    };
-    let b = app.notification().builder().title(title).body(body);
-    #[cfg(mobile)]
-    let b = if want_sound { b.sound(SOUND) } else { b };
-    let _ = b.show();
+    { let _ = (app, title, body); }
+    #[cfg(desktop)]
+    { let _ = app.notification().builder().title(title).body(body).show(); }
 }
 fn sfx(app: &AppHandle, kind: &str) {
     let _ = app.emit("sfx", kind);
@@ -355,6 +354,9 @@ fn sched_date(at_ms: u64, shift: bool) -> Option<time::OffsetDateTime> {
 //（源码：ios/Sources/Notification.swift:65-66）。第一版没传，所以就算排上了也不会响。
 #[cfg(mobile)]
 const SOUND: &str = "default";
+/// 本地通知 id 段：9000+i 切段（i = 未来第几次切换），9040+k 等待提醒；remove_active 按这个段清
+#[cfg(mobile)]
+const NOTIF_ID_BASE: i32 = 9000;
 
 #[cfg(mobile)]
 fn arm_notifications(app: &AppHandle) {
@@ -362,7 +364,7 @@ fn arm_notifications(app: &AppHandle) {
 
     // 锁内只取快照，放锁后再碰插件 —— 插件调用会派发到主线程，
     // 持锁去碰就是 8-25 那个死锁的翻版。
-    let (awake_change, switches, sound_on, lang) = {
+    let (awake_change, switches, sound_on, lang, remind) = {
         let state: State<Mutex<App>> = app.state();
         let mut a = state.lock().unwrap();
         let sound_on = a.settings.sound_on;
@@ -371,15 +373,20 @@ fn arm_notifications(app: &AppHandle) {
         // 每秒往主线程派一条 ObjC 消息是白烧电 —— 而省电正是我们要量的东西。
         let want = a.session.status == "running";
         let awake_change = if a.keep_awake != want { a.keep_awake = want; Some(want) } else { None };
+        // 等待提醒（9-4）：进入段间等待且开着强提醒 → 排几条"还等着你呢"（后台唯一能催人的路）。
+        // remind_armed 语义不变：只催本次运行期间进入等待的会话，隔夜恢复的不排。
+        let remind = if a.session.status == "awaiting" && a.settings.strong_remind && a.remind_armed {
+            Some(a.session.stages.get(a.session.idx + 1).map(|s| s.kind == "work").unwrap_or(true))
+        } else { None };
         // 🔴 指纹里必须带上 sound_on：排期是**提前**发出去的，改设置时那批通知已经躺在
         //    系统里了。不带的话"关掉提示音"要等下一次切段才生效，本次会话照响。
-        let fp = format!("{}|{}|{}|{}|{}", a.session.status, a.session.idx, a.session.end_ms, sound_on, lang);
+        let fp = format!("{}|{}|{}|{}|{}|{:?}", a.session.status, a.session.idx, a.session.end_ms, sound_on, lang, remind);
         if fp == a.last_arm {
-            (awake_change, None, sound_on, lang) // 排期没变，不用往 Swift 桥上白敲一遍
+            (awake_change, None, sound_on, lang, remind) // 排期没变，不用往 Swift 桥上白敲一遍
         } else {
             a.last_arm = fp;
             let cfg = a.settings.clone();
-            (awake_change, Some(core::future_switches(&a.session, &cfg)), sound_on, lang)
+            (awake_change, Some(core::future_switches(&a.session, &cfg)), sound_on, lang, remind)
         }
     };
 
@@ -396,6 +403,9 @@ fn arm_notifications(app: &AppHandle) {
 
     let n = app.notification();
     let _ = n.cancel_all(); // 先撤销未触发的旧排期
+    // 已送达、还堆在通知中心的旧条目也清掉（9-4）：cancel_all 只管 pending，不清的话一场下来
+    // 通知中心里躺着一串"上岸歇会儿"。id 段固定：9000+ 切段、9040+ 等待提醒
+    let _ = n.remove_active((NOTIF_ID_BASE..NOTIF_ID_BASE + 80).collect());
 
     // 没授权就别排：排了也不会响，还会让诊断条上的数字骗人
     let granted = matches!(n.permission_state(), Ok(PermissionState::Granted));
@@ -404,6 +414,24 @@ fn arm_notifications(app: &AppHandle) {
     let mut count = 0usize;
     let mut err = String::new();
     if granted {
+        // 等待提醒：进入等待后 +1…+5 分钟各一条（iOS 重复通知最短 60s、且到点没人管也不该无限催）
+        if let Some(next_is_work) = remind {
+            let en = lang == "en";
+            let (title, body) = if en {
+                ("Still waiting for you", if next_is_work { "Break's long over — come back and start the next block." } else { "Work ended a while ago — go take a break." })
+            } else {
+                ("还等着你呢", if next_is_work { "休息早结束了，回来把下一段工作开起来。" } else { "工作早就结束了，去歇一会儿吧。" })
+            };
+            for k in 0..5u64 {
+                let Some(date) = sched_date(now + 60_000 * (k + 1), true) else { continue };
+                let mut b = n.builder().id(NOTIF_ID_BASE + 40 + k as i32).title(title).body(body).silent();
+                if sound_on { b = b.sound(SOUND); }
+                match b.schedule(Schedule::At { date, repeating: false, allow_while_idle: true }).show() {
+                    Ok(_) => count += 1,
+                    Err(e) => if err.is_empty() { err = e.to_string(); },
+                }
+            }
+        }
         for (i, sw) in switches.iter().enumerate() {
             if sw.at_ms <= now + 1000 {
                 continue; // 已经过去的时刻，iOS 也不会触发
@@ -421,7 +449,9 @@ fn arm_notifications(app: &AppHandle) {
             };
             // 🔴「提示音」开关要管到这儿：段末那一声其实是系统排期通知发的，
             //    不看设置的话，用户把开关关了照样响 ＝ 开关在说假话
-            let mut b = n.builder().id(9000 + i as i32).title(title).body(body);
+            // 🔴 silent（9-4）＝**前台不弹不响**（插件 willPresent 对 silent 的条目返回空选项），
+            //    后台照常送达带声。前台的切段声由 collect_tick 的 sfx 统一发，否则系统一声 + App 一声双响。
+            let mut b = n.builder().id(NOTIF_ID_BASE + i as i32).title(title).body(body).silent();
             if sound_on { b = b.sound(SOUND); }
             match b
                 .schedule(Schedule::At { date, repeating: false, allow_while_idle: true })
@@ -513,6 +543,12 @@ fn collect_tick(a: &mut App) -> UiWork {
     let mut w = UiWork::default();
     let now = now_ms();
     let cfg = a.settings.clone();
+    // iOS 回前台的第一拍（9-4）：后台冻结期间发生的切段，系统排期通知已经响过了，
+    // 这一拍再放 App 音效就是双响 → 本拍所有音效作废（状态推进、落盘、state 推送照常）
+    #[cfg(mobile)]
+    let stale = a.last_tick_ms != 0 && now.saturating_sub(a.last_tick_ms) > 5_000;
+    #[cfg(mobile)]
+    { a.last_tick_ms = now; }
 
     core::project(&mut a.session, &cfg, now);
 
@@ -523,15 +559,19 @@ fn collect_tick(a: &mut App) -> UiWork {
         match st.as_str() {
             "running" => {
                 if let Some(cur) = a.session.stages.get(idx) {
-                    let kind = if cur.kind == "work" { "工作" } else { "休息" };
-                    // 🔴 移动端这三类切段通知由 arm_notifications 的**排期**负责：
-                    //    iOS 前台也会弹排期通知，两条路一起走就会双响。
+                    let real_switch = a.prev_status != "idle" && !(a.prev_status == "paused" && a.prev_idx == idx);
+                    // 🔴 移动端切段的**系统通知**由 arm_notifications 的排期负责（前台 silent 不弹）；
+                    //    前台的切段**音效**两端统一在这里发（9-4 之前移动端这一处没发，自动衔接段前台只有系统那一声，
+                    //    等待/完成却是系统+App 两声 —— 现在系统前台不响、App 每次切段都响一声）。
                     #[cfg(desktop)]
-                    if a.prev_status != "idle" && !(a.prev_status == "paused" && a.prev_idx == idx) {
+                    if real_switch {
+                        let kind = if cur.kind == "work" { "工作" } else { "休息" };
                         w.notices.push((format!("第 {}/{} 段 · {}", idx + 1, total, kind),
                             format!("{} {} 分钟，开始。", kind, (cur.secs + 30) / 60)));
-                        w.sfx.push("switch");
                     }
+                    #[cfg(mobile)]
+                    let _ = (cur, total);
+                    if real_switch { w.sfx.push("switch"); }
                 }
             }
             "awaiting" => {
@@ -744,6 +784,9 @@ fn collect_tick(a: &mut App) -> UiWork {
         }
         w.rest_regrab = want_rest;
     }
+
+    #[cfg(mobile)]
+    if stale { w.sfx.clear(); }
 
     w
 }
@@ -1318,6 +1361,9 @@ pub fn run() {
     // 原生登录（9-3 账号线，capabilities/mobile.json 放行 social-auth:default）
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_social_auth::init());
+    // 内购桥（P4 9-4，plugins/tauri-plugin-iap，capabilities/mobile.json 放行 iap:default）：只在移动端挂，桌面没有商店
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_iap::init());
 
     let builder = builder
         .setup(|app| {

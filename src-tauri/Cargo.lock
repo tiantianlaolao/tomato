@@ -3672,6 +3672,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-plugin-iap"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+]
+
+[[package]]
 name = "tauri-plugin-notification"
 version = "2.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3971,6 +3981,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-autostart",
  "tauri-plugin-global-shortcut",
+ "tauri-plugin-iap",
  "tauri-plugin-notification",
  "tauri-plugin-social-auth",
  "time",

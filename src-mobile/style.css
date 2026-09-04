@@ -230,3 +230,10 @@ input[type=range]{flex:1;accent-color:#e8915c}
 .rwask span{flex:1}
 .rwask .btn{font:inherit;font-size:12px;padding:6px 12px;border-radius:9px;border:1px solid rgba(232,145,92,.6);background:rgba(232,145,92,.25);color:#f0c9a0}
 .rwask .btn.ghost{background:transparent;border-color:rgba(120,96,68,.4);color:rgba(203,184,154,.7)}
+/* 9-4：提示行（进度/拒绝理由）素色，跟橘色的买前确认一眼分开；.set 是整套购买的常驻行 */
+.rwask.info{border-color:rgba(120,96,68,.45);background:rgba(40,30,22,.9);color:#cbb89a}
+.rwask.set{margin-bottom:12px}
+.rwask.set b{color:#f0c9a0}
+.rwask.set small{display:block;font-size:11px;color:rgba(203,184,154,.6);margin-top:2px}
+/* 9-4：还没做的载体（访客）置灰"敬请期待"，不可点；已拥有的不灰 */
+.rwitem.soon:not(.own){opacity:.4;pointer-events:none;filter:grayscale(1)}

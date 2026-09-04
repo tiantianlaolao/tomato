@@ -1,0 +1,15 @@
+[package]
+name = "tauri-plugin-iap"
+version = "0.1.0"
+description = "capyroom 内购桥：StoreKit 2（iOS）。只做四件事——拉商品 / 购买 / 恢复 / 读凭证；落账在 App 内核（reward_purchase）。"
+edition = "2021"
+# 🔴 tauri-plugin 的 build 约定：links 必须等于 crate 名，否则 try_build 报 LinksMissing
+links = "tauri-plugin-iap"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = { version = "2" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

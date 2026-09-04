@@ -44,6 +44,10 @@ const RW = window.RW = {
     theme = theme || this.theme;
     if (HAS_BRIDGE) return this._set(await inv('reward_purchase', { theme, kind, id, tx: tx || '' }));
     if (kind === 'theme') { if (!this.view.owned_themes.includes(id)) this.view.owned_themes.push(id); return this._set(this.view); }
+    if (kind === 'towelset') {   // 整套：八条逐条按 buy 落账，已有的跳过（与内核同语义）
+      (this.view.catalog.towels || []).forEach(t => { try { demoUnlock(this.view, 'towel', t.id, 'buy'); } catch (e) {} });
+      return this._set(this.view);
+    }
     try { return this._set(demoUnlock(this.view, kind, id, 'buy')); } catch (e) { return this.view; }
   },
   // 内测包专属：全部解锁 / 撤回（交易号 internal，不碰攒来的和真买的）。浏览器 DEMO 里也能演。

@@ -635,19 +635,39 @@ async function renderHistory() {
 }
 // 缩略图：有真图（assets/p3/<主题>/<id>.png）就盖上去，没有就露出底下的两个字
 const rwArt = (id, txt) => '<div class="rw-art"><img src="assets/p3/' + RW.theme + '/' + id + '.png" onerror="this.remove()">' + txt + '</div>';
+// ── 面板顶部只有一条"说话的行"（9-4 用户反馈：点十次出十行）──
+//   两种身份分开长相：.ask（橘色）= 买前确认，.info（素色）= 进度提示 / 拒绝理由。
+//   后来的顶掉先前的，任何时候最多一行；面板重绘（renderHistory）自然清空。.set 是整套购买的常驻行，不算在内。
+function rwBar(body, cls) {
+  body.querySelectorAll('.rwask:not(.set)').forEach(x => x.remove());
+  const bar = document.createElement('div'); bar.className = 'rwask ' + cls;
+  body.prepend(bar); return bar;
+}
 // 买之前问一句（自绘，不用 confirm）：真商店会再弹苹果的付款面板，这里只挡误触
 function rwBuy(body, kind, item, theme, after) {
-  const old = body.querySelector('.rwask'); if (old) old.remove();
-  const bar = document.createElement('div'); bar.className = 'rwask';
+  const bar = rwBar(body, 'ask');
   const price = Store.price(item);
   bar.innerHTML = '<span>' + '买下「' + (item.name || item.id) + '」，' + price + '？' + '</span>';
   const ok = document.createElement('button'); ok.className = 'btn'; ok.textContent = '买下';
   const no = document.createElement('button'); no.className = 'btn ghost'; no.textContent = '算了';
   ok.onclick = async () => { try { await Store.buy(kind, item, theme); bar.remove(); after && after(); } catch (e) { rwErr(body, e); } };
   no.onclick = () => bar.remove();
-  bar.appendChild(ok); bar.appendChild(no); body.prepend(bar);
+  bar.appendChild(ok); bar.appendChild(no);
 }
-const rwErr = (body, e) => { const t = document.createElement('div'); t.className = 'tip warn'; t.textContent = String(e && e.message || e); body.prepend(t); };
+// 进度提示：一句"还差多少"，旁边直接给「买下 ¥N」（能买时）。规矩：点物件本身永远是看进度，买只在按钮上，
+// 两件事一眼分得开（9-4 用户反馈：点同一个位置分不清是买还是看还差多久）
+function rwHint(body, msg, buy) {
+  const bar = rwBar(body, 'info');
+  const s = document.createElement('span'); s.textContent = msg; bar.appendChild(s);
+  if (buy && Store.canBuy()) {
+    const b = document.createElement('button'); b.className = 'btn'; b.textContent = '买下 ' + Store.price(buy.item);
+    b.onclick = () => rwBuy(body, buy.kind, buy.item, buy.theme, buy.after);
+    bar.appendChild(b);
+  }
+  const no = document.createElement('button'); no.className = 'btn ghost'; no.textContent = '知道了';
+  no.onclick = () => bar.remove(); bar.appendChild(no);
+}
+const rwErr = (body, e) => rwHint(body, String(e && e.message || e), null);
 // 汤札（9-3 用户三次把关后的定案）：**一天一块牌**——
 //   ① 本周 7 个挂钩（一～日）：来过的那天挂一块牌（tag.png 当底：日期 / 朱印「汤」/ 当天分钟），没来的只剩空钩；
 //      今天没泡＝空钩+一句"泡一场，挂上今天的牌"；点一块牌→下面流水只看那天；只看本周不翻页
@@ -747,8 +767,19 @@ async function renderStamps(body) {
 // 收藏：手拭巾（固定顺序里程碑；到了就领；也可买）
 function renderTowels(body) {
   const v = RW.view, L = v.ledger, hung = v.state.hung;
+  const towels = v.catalog.towels || [];
+  // 整套（9-4 用户点名"没找到一次性买全部"）：目录 towel_set 一个 sku 买八条；全有了就不露
+  const setInfo = v.catalog.towel_set;
+  if (setInfo && Store.canBuy() && towels.some(t => !RW.owned('towel', t.id))) {
+    const set = Object.assign({ id: 'set', name: '整套手拭巾' }, setInfo);
+    const bar = document.createElement('div'); bar.className = 'rwask set';
+    bar.innerHTML = '<span><b>整套手拭巾</b><small>八条一次拥有</small></span>';
+    const b = document.createElement('button'); b.className = 'btn'; b.textContent = '买下 ' + Store.price(set);
+    b.onclick = () => rwBuy(body, 'towelset', set, RW.theme, renderHistory);
+    bar.appendChild(b); body.appendChild(bar);
+  }
   const grid = document.createElement('div'); grid.className = 'rwgrid';
-  (v.catalog.towels || []).forEach(t => {
+  towels.forEach(t => {
     const own = RW.owned('towel', t.id), can = L.total_min >= t.min;
     const el = document.createElement('div');
     el.className = 'rwitem' + (own ? ' own' : '') + (hung === t.id ? ' hung' : '');
@@ -758,13 +789,14 @@ function renderTowels(body) {
       try {
         if (own) await RW.hang(hung === t.id ? '' : t.id);
         else if (can) await RW.unlock('towel', t.id, 'earn');
-        else if (Store.canBuy()) { rwBuy(body, 'towel', t, RW.theme, renderHistory); return; }
-        else return;
+        // 没到里程碑：点巾子＝看还差多少（提示行里顺带给"买下"按钮），不直接进购买
+        else { rwHint(body, '「' + t.name + '」还差 ' + (t.min - L.total_min) + ' 分钟就能领', { kind: 'towel', item: t, theme: RW.theme, after: renderHistory }); return; }
         renderHistory();
       } catch (e) { rwErr(body, e); }
     };
     if (!own && !can && Store.canBuy()) {
       const b = document.createElement('button'); b.className = 'buy'; b.textContent = Store.price(t);
+      b.onclick = (ev) => { ev.stopPropagation(); rwBuy(body, 'towel', t, RW.theme, renderHistory); };
       el.appendChild(b);
     }
     grid.appendChild(el);
@@ -797,7 +829,7 @@ function renderGarden(body) {
         try {
           if (own) await RW.place(sl.id, placed ? '' : p.id);
           else if (can) await RW.unlock('prop', p.id, 'earn');
-          else { rwErr(body, '可用分钟不够，还差 ' + (p.cost_min - L.avail_min) + ' 分钟'); return; }
+          else { rwHint(body, '「' + p.name + '」可用分钟还差 ' + (p.cost_min - L.avail_min) + ' 分钟', { kind: 'prop', item: p, theme: RW.theme, after: renderHistory }); return; }
           renderHistory();
         } catch (e) { rwErr(body, e); }
       };
@@ -817,16 +849,13 @@ function renderGarden(body) {
     const wrap = document.createElement('div'); wrap.className = 'slot';
     wrap.innerHTML = '<div class="slot-head"><b>访客</b><span>一共来过 ' + L.visit_days + ' 天</span></div>';
     const row = document.createElement('div'); row.className = 'rwrow';
+    // 9-4 用户定：访客这条线（阿沐来访的演出）还没做 → 置灰「敬请期待」，不点不卖。
+    //   🔴 提交审核时 visitor 那个 sku 别附到版本上（ASC 里留着不提交），界面里没有入口的内购会被打回。
+    //   已经拥有的（内测全解锁）照旧显示"常来"。
     vs.forEach(p => {
-      const own = RW.owned('visitor', p.id), can = L.visit_days >= p.days;
-      const el = document.createElement('div'); el.className = 'rwitem small' + (own ? ' own' : '');
-      el.innerHTML = rwArt(p.id, '豚') + '<b>' + p.name + '</b><span>' + (own ? '常来' : can ? '可以请了' : '再来 ' + (p.days - L.visit_days) + ' 天') + '</span>';
-      el.onclick = async () => { if (own || !can) return; try { await RW.unlock('visitor', p.id, 'earn'); renderHistory(); } catch (e) { rwErr(body, e); } };
-      if (!own && Store.canBuy()) {
-        const b = document.createElement('button'); b.className = 'buy'; b.textContent = Store.price(p);
-        b.onclick = (ev) => { ev.stopPropagation(); rwBuy(body, 'visitor', p, RW.theme, renderHistory); };
-        el.appendChild(b);
-      }
+      const own = RW.owned('visitor', p.id);
+      const el = document.createElement('div'); el.className = 'rwitem small soon' + (own ? ' own' : '');
+      el.innerHTML = rwArt(p.id, '豚') + '<b>' + p.name + '</b><span>' + (own ? '常来' : '敬请期待') + '</span>';
       row.appendChild(el);
     });
     wrap.appendChild(row); body.appendChild(wrap);

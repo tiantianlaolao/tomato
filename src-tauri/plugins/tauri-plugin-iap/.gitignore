@@ -1,0 +1,3 @@
+# 构建时由 tauri-plugin 拷进来的 tauri iOS API（Package.swift 引 ../.tauri/tauri-api）
+.tauri/
+ios/.build/

@@ -153,6 +153,7 @@
    }
   ],
   "towel_set": {
+   "name": "整套手拭巾",
    "sku": "com.tybbtech.capyroom.ink.towelset",
    "price_cny": 18,
    "price_usd": 2.99

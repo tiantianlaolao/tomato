@@ -204,6 +204,18 @@ pub fn purchase(dir: &Path, theme: &str, kind: &str, id: &str, tx: &str, now_ms:
         }
         return Ok(view(dir, theme, now_ms));
     }
+    // 整套手拭巾（目录 towel_set，一个 sku 买全部；9-4 用户点名"没找到一次性买全部"）：
+    // 逐条按 buy 落账、tx 记同一个交易号；已有的那条跳过（幂等，恢复购买会再送一遍）。
+    // 不单独记一条 "towelset" 流水——revoke_internal / merge_remote 认的都是单条 sku，整套拆成单条最省事。
+    if kind == "towelset" {
+        let cat = catalog_theme(theme);
+        let ids: Vec<String> = cat.get("towels").and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|t| t.get("id").and_then(|v| v.as_str()).map(String::from)).collect())
+            .unwrap_or_default();
+        if ids.is_empty() { return Err("目录里没有整套".into()); }
+        for tid in &ids { purchase(dir, theme, "towel", tid, tx, now_ms)?; }
+        return Ok(view(dir, theme, now_ms));
+    }
     match unlock(dir, theme, kind, id, "buy", now_ms) {
         Ok(v) => {
             if tx.is_empty() { return Ok(v); }
@@ -476,4 +488,25 @@ mod tests {
         assert!(!merge_remote(&d, &now_remote, 9000, 10000));
     }
 
+    #[test]
+    fn purchase_towelset_unlocks_all_idempotent() {
+        let d = tmp("towelset"); let now = 1_800_000_000_000u64;
+        unlock(&d, "ink", "towel", "t01", "buy", now).unwrap();   // 先单买一条
+        let v = purchase(&d, "ink", "towelset", "set", "tx-set", now).unwrap();
+        assert_eq!(v.state.towels.len(), 8, "整套＝目录里全部八条");
+        // 单买的那条不重复记；整套补的七条都带整套交易号
+        let ps = load(&d).themes["ink"].purchases.clone();
+        assert_eq!(ps.len(), 8);
+        assert_eq!(ps.iter().filter(|p| p.tx == "tx-set").count(), 7);
+        // 恢复购买再送一遍：不多记、不报错
+        let v2 = purchase(&d, "ink", "towelset", "set", "tx-set", now).unwrap();
+        assert_eq!(v2.state.towels.len(), 8);
+        assert_eq!(load(&d).themes["ink"].purchases.len(), 8);
+        // 整套走 internal 交易号也能被 revoke_internal 精确撤回（真买的 t01 留着）
+        let d2 = tmp("towelset-internal");
+        unlock(&d2, "ink", "towel", "t01", "buy", now).unwrap();
+        purchase(&d2, "ink", "towelset", "set", INTERNAL_TX, now).unwrap();
+        let v3 = revoke_internal(&d2, "ink", now).unwrap();
+        assert_eq!(v3.state.towels, vec!["t01".to_string()]);
+    }
 }

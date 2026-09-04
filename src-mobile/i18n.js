@@ -25,6 +25,10 @@ const D = {
   '今年来了 {n} 天 · 泡了 {m} 小时 {k} 分': '{n} days this year · soaked {m} h {k} min',
   '来了 {n} 天 · 泡了 {m} 小时 {k} 分': '{n} days this month · soaked {m} h {k} min',
   '泡一场，挂上今天的牌': 'Soak once to hang today\'s tag', '今年': 'Year',
+  // 商店提示行（9-4）：带名字的整句必须排在 '还差 {n} 分钟' / '可用分钟不够，还差 {n} 分钟' 这类泛句前面
+  '「{s}」还差 {n} 分钟就能领': '"{s}": {n} min to go', '「{s}」可用分钟还差 {n} 分钟': '"{s}": {n} more minutes needed',
+  '「{s}」再来 {n} 天它就会来': '"{s}" will come after {n} more days',
+  '买下 {p}': 'Buy {p}', '知道了': 'Got it', '敬请期待': 'Coming soon', '整套手拭巾': 'Towel set', '八条一次拥有': 'All eight at once', '等待批准后自动到账': 'Pending approval — it will arrive automatically',
   // 账号与同步（9-3）
   '账号': 'Account', '登录后跨设备同步': 'Sign in to sync across devices',
   '流水、序列、定时计划、奖励和偏好会跟着账号走；不登录一切照用': 'Sessions, sequences, schedules, rewards and preferences follow your account. Everything works without signing in.',

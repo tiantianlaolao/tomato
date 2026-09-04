@@ -21,6 +21,10 @@ tauri-build = { version = "2", features = [] }
 #    它在 iOS/Windows 上本身是空转（tauri 内部 cfg(target_os="macos") 保护），留着无害。
 tauri = { version = "2", features = ["image-png", "macos-private-api"] }
 tauri-plugin-notification = "2"
+# 内购桥（P4，9-4）：本仓内的小插件 plugins/tauri-plugin-iap，Rust 只注册 Swift 类，四条命令全在 Swift（StoreKit 2）。
+# 🔴 放通用 dependencies 不放 target 块：它的 build.rs 生成 ACL 权限文件，capabilities/mobile.json 的 "iap:default"
+#    在桌面构建时也会被校验（同 build.rs 里 social-auth 那条 inlined 声明的道理）；桌面上 init 是空插件、不注册。
+tauri-plugin-iap = { path = "plugins/tauri-plugin-iap" }
 chrono = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

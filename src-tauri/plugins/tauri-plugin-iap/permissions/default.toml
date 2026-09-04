@@ -1,0 +1,13 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = """
+capyroom 内购：拉商品 / 购买 / 恢复购买 / 读已有凭证。
+四条都是"问苹果"，落账另走内核 reward_purchase。
+"""
+permissions = [
+  "allow-products",
+  "allow-purchase",
+  "allow-restore",
+  "allow-entitlements",
+]

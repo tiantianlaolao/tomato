@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "mobile",
-  "description": "移动端专属：原生登录（Apple / Google，tauri-plugin-social-auth）",
+  "description": "移动端专属：原生登录（Apple / Google，tauri-plugin-social-auth）+ 内购桥（plugins/tauri-plugin-iap，StoreKit 2）",
   "platforms": ["iOS", "android"],
   "windows": ["main"],
   "permissions": [
-    "social-auth:default"
+    "social-auth:default",
+    "iap:default"
   ]
 }
