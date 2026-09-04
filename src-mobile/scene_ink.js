@@ -132,13 +132,43 @@ window.SCENES.ink = {
         const im = img(id);
         jobs.push({ r, id, name, im, y: r.top ? r.y : r.y2 });
       };
+      // 锦鲤微动画（9-4 用户："有没有可能做成微动画，感觉在游动"）：图里两条鱼头尾相反、但都躺在同一条 ↘ 斜轴上，
+      // 所以：①把水色精灵按 -θ 转正存一张离屏（一次）②每帧沿鱼身轴切 14 条、按行波做正弦错位＝尾摆（两头摆得大、中段小）
+      // ③整体加几像素慢漂 + ±2.5° 微转。不画涟漪（容易假）。draw() 在有角色通道的段跟视频帧走 24fps，所以顺滑不额外花电。
+      const KOI_AXIS = 0.66;   // 鱼身轴相对图片 x 轴的夹角（量图：尾 (60,60)→头 (400,330) ≈ 38°）
+      const paintKoi = (im, c, x, y, w, h) => {
+        const sp = sprite(im, 'water');
+        let rot = im._koiRot;
+        if (!rot) {
+          const D = Math.ceil(Math.hypot(sp.width, sp.height));
+          rot = im._koiRot = off(D, D); const g = rot.getContext('2d');
+          g.translate(D / 2, D / 2); g.rotate(-KOI_AXIS); g.drawImage(sp, -sp.width / 2, -sp.height / 2);
+        }
+        const t = performance.now() / 1000, D = rot.width, N = 14, sw = D / N;
+        const k = w / sp.width;                       // 精灵 → 画布的缩放
+        const dx = w * 0.05 * Math.sin(t * 2 * Math.PI / 13), dy = h * 0.03 * Math.sin(t * 2 * Math.PI / 9 + 1);
+        c.save(); c.globalAlpha = 0.93;
+        c.translate(x + w / 2 + dx, y + h / 2 + dy);
+        c.rotate(KOI_AXIS + 0.045 * Math.sin(t * 2 * Math.PI / 17));   // 离屏是按 -θ 转正的，这里转回去＝原朝向
+        c.scale(k, k);
+        for (let i = 0; i < N; i++) {
+          const u = (i + 0.5) / N;                                     // 0..1 沿鱼身轴
+          const amp = D * 0.012 * (0.5 + Math.abs(u - 0.5) * 1.6);      // 两头（尾巴）摆得大，中段小
+          const off_y = amp * Math.sin(t * 2 * Math.PI * 1.1 - u * 2 * Math.PI * 0.9);
+          const cw = Math.min(sw + 1, D - i * sw);                     // 多切 1px 盖住条与条之间的缝
+          c.drawImage(rot, i * sw, 0, cw, D, -D / 2 + i * sw, -D / 2 + off_y, cw, D);
+        }
+        c.restore();
+      };
       const paint = (j, c) => {          // c＝画到哪块画布（有角色通道时是离屏）
         const im = j.im, r = j.r, R = E.rect(r);
         let w, h;
         if (PROP_W[j.id]) { w = PROP_W[j.id] * FW; h = w * im.height / im.width; }
         else { const s = Math.min((R.w * (r.scale || 1)) / im.width, (R.h * (r.scale || 1)) / im.height); w = im.width * s; h = im.height * s; }
         const x = R.x + (R.w - w) / 2, y = r.top ? R.y : R.y + R.h - h;
-        if (WATER[j.id]) {
+        if (j.id === 'koi') {
+          paintKoi(im, c, x, y, w, h);
+        } else if (WATER[j.id]) {
           c.globalAlpha = 0.93; c.drawImage(sprite(im, 'water'), x, y, w, h); c.globalAlpha = 1;
         } else if (FLAT[j.id]) {
           c.drawImage(im, x, y, w, h);
