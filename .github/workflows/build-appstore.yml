@@ -75,10 +75,18 @@ jobs:
           $PB -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string $REV" "$PL"
           echo "URL scheme 已注册（值不打印）"
 
+      # 🔴 只支持 iPhone（9-4 提审卡点：设备族默认 "1,2" ＝ 支持 iPad → ASC 强制要 iPad 12.9 寸截图；
+      #    产品是"手机立在桌上的摆件"，iPad 上按 iPhone 兼容模式跑就行）。tauri 没有这个配置项，
+      #    只能在 tauri ios init 之后往 project.yml 的 iOS target settings.base 里插一行。
+      - name: '只支持 iPhone（TARGETED_DEVICE_FAMILY=1）'
+        run: |
+          perl -0pi -e 's/^(\s*)ENABLE_BITCODE:/$1TARGETED_DEVICE_FAMILY: "1"\n$1ENABLE_BITCODE:/m' src-tauri/gen/apple/project.yml
+          grep -n "TARGETED_DEVICE_FAMILY" src-tauri/gen/apple/project.yml || { echo "❌ 没插进去"; exit 1; }
+
       - name: '确认 iOS 专属配置合并进去了'
         continue-on-error: true
         run: |
-          grep -E "PRODUCT_NAME|PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|deploymentTarget|iOS:" src-tauri/gen/apple/project.yml
+          grep -E "PRODUCT_NAME|PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|deploymentTarget|iOS:|TARGETED_DEVICE_FAMILY" src-tauri/gen/apple/project.yml
 
       - name: '编译（不签名）'
         run: npx tauri ios build --ci -v --no-sign --archive-only

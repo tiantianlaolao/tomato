@@ -94,6 +94,12 @@ jobs:
           echo "URL scheme 已注册（反转 client id，值不打印）"
           $PB -c "Print :CFBundleURLTypes" "$PL" | grep -c googleusercontent || true
 
+      # 🔴 只支持 iPhone（9-4 提审卡点：默认 "1,2" 支持 iPad → ASC 强制要 iPad 截图）。与 build-appstore.yml 同一步，改要两边一起。
+      - name: '只支持 iPhone（TARGETED_DEVICE_FAMILY=1）'
+        run: |
+          perl -0pi -e 's/^(\s*)ENABLE_BITCODE:/$1TARGETED_DEVICE_FAMILY: "1"\n$1ENABLE_BITCODE:/m' src-tauri/gen/apple/project.yml
+          grep -n "TARGETED_DEVICE_FAMILY" src-tauri/gen/apple/project.yml || { echo "❌ 没插进去"; exit 1; }
+
       # 探测跑只看了目录结构没看内容，所以"tauri.ios.conf.json 有没有被合并"
       # 是靠这一步实证的（PRODUCT_BUNDLE_IDENTIFIER / DEVELOPMENT_TEAM 三项）。
       - name: '确认 iOS 专属配置合并进去了'
