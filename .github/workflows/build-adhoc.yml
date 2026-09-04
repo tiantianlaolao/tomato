@@ -205,6 +205,12 @@ jobs:
           [ -n "$APP" ] || { echo "❌ 没找到 .app"; find src-tauri/gen/apple -name "*.app" -o -name "*.xcarchive" | head; exit 1; }
           echo "app = $APP"
 
+          # 只支持 iPhone：Info.plist 的 UIDeviceFamily 改成 [1]（与 build-appstore.yml 同一步；project.yml 那行实测压不住）
+          PB=/usr/libexec/PlistBuddy; PL="$APP/Info.plist"
+          $PB -c "Delete :UIDeviceFamily" "$PL" 2>/dev/null || true
+          $PB -c "Add :UIDeviceFamily array" "$PL"; $PB -c "Add :UIDeviceFamily:0 integer 1" "$PL"
+          $PB -c "Print :UIDeviceFamily" "$PL"
+
           PROF=$RUNNER_TEMP/capyroom.mobileprovision
           cp "$PROF" "$APP/embedded.mobileprovision"
 

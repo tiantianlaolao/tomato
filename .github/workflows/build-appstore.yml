@@ -152,7 +152,12 @@ jobs:
           $PB -c "Set :CFBundleVersion $BUILD_NUM" "$PL"
           # 出口合规：只用系统 TLS，不含自研加密（豁免类）。不声明的话每次上传都停在「缺少合规信息」
           $PB -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PL" 2>/dev/null || $PB -c "Set :ITSAppUsesNonExemptEncryption false" "$PL"
-          echo "----- 版本 -----"; $PB -c "Print :CFBundleShortVersionString" "$PL"; $PB -c "Print :CFBundleVersion" "$PL"; $PB -c "Print :MinimumOSVersion" "$PL"
+          # 🔴 只支持 iPhone 的最终落点：ASC 按 Info.plist 的 UIDeviceFamily 判设备族、判要不要 iPad 截图。
+          #    project.yml 里插的 TARGETED_DEVICE_FAMILY=1 实测被 xcodegen/tauri 压回 "1,2"（build 59 拆包仍是 [1,2]），
+          #    所以签名前直接把 plist 改成 [1]，这一步才是作数的。
+          $PB -c "Delete :UIDeviceFamily" "$PL" 2>/dev/null || true
+          $PB -c "Add :UIDeviceFamily array" "$PL"; $PB -c "Add :UIDeviceFamily:0 integer 1" "$PL"
+          echo "----- 版本 -----"; $PB -c "Print :CFBundleShortVersionString" "$PL"; $PB -c "Print :CFBundleVersion" "$PL"; $PB -c "Print :MinimumOSVersion" "$PL"; $PB -c "Print :UIDeviceFamily" "$PL"
 
           PROF=$RUNNER_TEMP/capyroom.mobileprovision
           cp "$PROF" "$APP/embedded.mobileprovision"
