@@ -70,7 +70,7 @@ const Scene = {
     let saved = null;
     try { saved = localStorage.getItem('capy_scene'); } catch (e) {}
     const qsScene = new URLSearchParams(location.search).get('scene');   // 截图验收用
-    this.use(sceneId || qsScene || saved || 'onsen');
+    this.use(sceneId || qsScene || saved || 'ink');   // 默认中国风（8-31 定：中国风免费默认；9-4 日系暂时下掉）
     // 🔴 canvas fillText 不会触发 @font-face 加载，必须显式预载；
     //    加载完立刻重画一次（8fps 循环也会自愈，这里只是别让首屏闪一帧衬线字）
     if (document.fonts && document.fonts.load) {

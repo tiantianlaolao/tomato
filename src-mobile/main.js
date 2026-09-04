@@ -428,22 +428,27 @@ function renderSettings() {
   };
 
   sec('场景');
-  const th = rowEl('主题', '换一个院子陪你（切换即生效）');
-  const tseg = document.createElement('div'); tseg.className = 'seg';
-  let curScene = 'onsen';
-  try { curScene = localStorage.getItem('capy_scene') || 'onsen'; } catch (e) {}
-  // P4 主题锁：付费主题没买时按钮带锁和价格，点了走购买；只在 Store.enforce()（真商店或开发开关）时生效
-  [['ink','水墨庭院'],['onsen','野天风吕']].forEach(([v, t]) => {
-    const b = document.createElement('button');
-    const info = RW.themeInfo(v), locked = Store.enforce() && info && info.paid && !RW.ownsTheme(v);
-    b.textContent = locked ? (t + ' 🔒 ' + Store.price(info)) : t; b.className = curScene === v ? 'on' : '';
-    b.onclick = () => {
-      if (locked) { rwBuy($('sheetBody'), 'theme', info, v, () => { Scene.setScene(v); applyHint(); RW.load(v).catch(() => {}); renderSettings(); }); return; }
-      Scene.setScene(v); applyHint(); RW.load(v).catch(() => {}); renderSettings();
-    };
-    tseg.appendChild(b);
-  });
-  th.appendChild(tseg);
+  // 9-4 商店包收口（用户定"暂时下掉"）：目录里 hidden 的主题（日系动效未同步）整个不露，只剩一个主题时主题行也不显示；
+  // 日系修好后把目录里的 hidden 去掉就回来。⛔ 别删 ASC 里的 theme.onsen 商品（product ID 删了永久作废），只是不附到版本上。
+  const themeList = [['ink','水墨庭院'],['onsen','野天风吕']].filter(([v]) => { const i = RW.themeInfo(v); return !(i && i.hidden); });
+  if (themeList.length > 1) {
+    const th = rowEl('主题', '换一个院子陪你（切换即生效）');
+    const tseg = document.createElement('div'); tseg.className = 'seg';
+    let curScene = 'ink';
+    try { curScene = localStorage.getItem('capy_scene') || 'ink'; } catch (e) {}
+    // P4 主题锁：付费主题没买时按钮带锁和价格，点了走购买；只在 Store.enforce()（真商店或开发开关）时生效
+    themeList.forEach(([v, t]) => {
+      const b = document.createElement('button');
+      const info = RW.themeInfo(v), locked = Store.enforce() && info && info.paid && !RW.ownsTheme(v);
+      b.textContent = locked ? (t + ' 🔒 ' + Store.price(info)) : t; b.className = curScene === v ? 'on' : '';
+      b.onclick = () => {
+        if (locked) { rwBuy($('sheetBody'), 'theme', info, v, () => { Scene.setScene(v); applyHint(); RW.load(v).catch(() => {}); renderSettings(); }); return; }
+        Scene.setScene(v); applyHint(); RW.load(v).catch(() => {}); renderSettings();
+      };
+      tseg.appendChild(b);
+    });
+    th.appendChild(tseg);
+  }
   // 语言（9-2 全球发布：中英双语，默认跟系统；手动切换记 localStorage 并同步给内核选通知文案）
   const lr = rowEl('语言 / Language');
   const lseg = document.createElement('div'); lseg.className = 'seg';
@@ -999,9 +1004,10 @@ if (!HAS_BRIDGE) {
   ];
   renderPlans();
   feed(fixture(qs.get('demo') || 'running'));
-  RW.load(Scene.scene ? Scene.scene.id : 'onsen').then(() => {   // P3 DEMO 账本（?rw=empty 空 / ?rw=full 摆满 / ?rw=owned 已买日系；?buy=1 露出购买）
-    const cur = Scene.scene && Scene.scene.id;
-    if (cur && Store.enforce() && !RW.ownsTheme(cur)) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
+  RW.load(Scene.scene ? Scene.scene.id : 'ink').then(() => {   // P3 DEMO 账本（?rw=empty 空 / ?rw=full 摆满 / ?rw=owned 已买日系；?buy=1 露出购买）
+    const cur = Scene.scene && Scene.scene.id, info = cur && RW.themeInfo(cur);
+    // 浏览器验收：?scene=onsen 显式指定的不退回（要看日系时还能看）；只有本机记住的 hidden 主题才退
+    if (cur && ((Store.enforce() && !RW.ownsTheme(cur)) || (info && info.hidden && !qs.get('scene')))) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
   }).catch(() => {});
   setInterval(() => {
     if (!view || view.status !== 'running') return;
@@ -1036,9 +1042,10 @@ if (!HAS_BRIDGE) {
       Account.init();
       feed(b.view);
       // P3 账本 → P4 商店探测 → 主题锁：存的是付费主题又没买（且有真商店/开发开关）就退回中国风
-      RW.load(Scene.scene ? Scene.scene.id : 'onsen').then(() => Store.init()).then(() => {
-        const cur = Scene.scene && Scene.scene.id;
-        if (cur && Store.enforce() && !RW.ownsTheme(cur)) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
+      RW.load(Scene.scene ? Scene.scene.id : 'ink').then(() => Store.init()).then(() => {
+        const cur = Scene.scene && Scene.scene.id, info = cur && RW.themeInfo(cur);
+        // 付费没买、或目录里标了 hidden（9-4 日系暂时下掉）→ 退回中国风
+        if (cur && ((Store.enforce() && !RW.ownsTheme(cur)) || (info && info.hidden))) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
       }).catch(() => {});
       // 语言同步：前端按系统语言定，内核只在发系统通知时用它选文案；不一致就推一次
       if (settings && settings.lang !== I18N.lang) { settings.lang = I18N.lang; pushSettings(); }
