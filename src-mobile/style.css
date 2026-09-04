@@ -14,6 +14,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
 /* 整场视频状态机（8-30 定案）：双 video 交替 + 雾吞吐转场 + 数字叠加层 */
 #stage video.layer{object-fit:cover;object-position:center;opacity:0;transition:opacity .5s}
 #stage video.layer.on{opacity:1}
+#stage video.layer.cut{transition:none}   /* 9-4 接口硬切：换类那一帧不走淡化（scene.js playOn hard） */
 #ovc{pointer-events:none}
 #fog{position:absolute;inset:0;pointer-events:none;z-index:3;opacity:0;transition:opacity .9s;
   background:radial-gradient(ellipse at 50% 70%, #cfd6d8 0%, #aab4b8 60%, #97a1a6 100%)}

@@ -137,7 +137,7 @@ const Scene = {
     const el = this.cur(); if (!el || el.readyState < 2) return false;
     // 换段后 500ms 内复刻 CSS 的交叉淡化（旧段打底、新段按进度叠），不然画布一盖淡化就没了
     const old = this.vids[1 - this.vi], t = (performance.now() - (this.swapAt || 0)) / 500;
-    if (old && old !== el && old.getAttribute('src') && old.readyState >= 2 && t < 1) {
+    if (!this.hardCut && old && old !== el && old.getAttribute('src') && old.readyState >= 2 && t < 1) {
       cx.drawImage(old, ...this.coverRect(old)); cx.globalAlpha = Math.max(0, Math.min(1, t));
     }
     cx.drawImage(el, ...this.coverRect(el)); cx.globalAlpha = 1;
@@ -203,13 +203,30 @@ const Scene = {
     }, FOG_MS);
   },
 
-  playOn(el, seg, loop) {
+  // hard（9-4）：接口处**硬切**——游出/游回两段与工作循环的接口帧只差几像素，0.5s 交叉淡化反而让两个水豚
+  //   同时可见半秒（用户："大小两个水豚晃一下"）。硬切＝等新段**第一帧解码到位**（rVFC 首拍 / loadeddata）
+  //   再一次性换类，换类时两个元素都临时去掉 transition；canvas 侧 drawVideo 也不再叠旧帧。
+  playOn(el, seg, loop, hard) {
     const old = this.cur();
+    this.hardCut = !!hard;
     el.loop = !!loop;
     el.src = this.src(seg);
     el.currentTime = 0;
     el.play().catch(() => {});
-    el.onloadeddata = () => { if (!this.ready) { this.ready = true; this.draw(); } };
+    let revealed = false;
+    const reveal = () => {
+      if (revealed || this.cur() !== el) return;
+      revealed = true;
+      el.classList.add('cut'); old.classList.add('cut');
+      el.classList.add('on'); if (old !== el) old.classList.remove('on');
+      requestAnimationFrame(() => { el.classList.remove('cut'); old.classList.remove('cut'); });
+      this.draw();
+    };
+    el.onloadeddata = () => {
+      if (!this.ready) { this.ready = true; this.draw(); }
+      if (hard) reveal();
+    };
+    if (hard) setTimeout(reveal, 1500);   // 首帧迟迟不来（网络卡）也别让画面停在旧段
     // 角色通道跟帧：视频每呈现一帧就拿 mediaTime 重画叠加层（过渡段每帧、循环段隔帧——循环里水豚只是呼吸）
     this.vt = -1;
     if (el.requestVideoFrameCallback) {
@@ -217,18 +234,20 @@ const Scene = {
       const tick = (now, md) => {
         if (el._vfc !== tok || this.cur() !== el) return;
         this.vt = md.mediaTime;
+        if (hard) reveal();                    // 硬切：第一帧真的呈现了才换类
         if (this.hasMatte()) this.draw();      // 有角色通道的段每帧重画（过渡段连视频帧一起画，同帧）
         el.requestVideoFrameCallback(tick);
       };
       el.requestVideoFrameCallback(tick);
     }
-    el.classList.add('on');
+    if (!hard) el.classList.add('on');
     // 🔴 首次喂数据时新旧是同一个元素——摘 .on/卸 src 只对"真的旧元素"做，
     //    否则刚点亮就被自己摘掉＝黑屏（idle/paused 首屏黑就是这个）
     if (old !== el) {
-      this.swapAt = performance.now();
-      old.classList.remove('on');
-      setTimeout(() => { if (this.cur() !== old) { old.pause(); old.removeAttribute('src'); old.load(); } }, 700);
+      this.swapAt = hard ? 0 : performance.now();
+      if (!hard) old.classList.remove('on');
+      // 硬切时旧段要撑到新段首帧露出（最晚 1.5s 兜底）之后再卸
+      setTimeout(() => { if (this.cur() !== old) { old.pause(); old.removeAttribute('src'); old.load(); } }, hard ? 2200 : 700);
     }
     this.vi = this.vids.indexOf(el);
     this.seg = seg;
@@ -269,7 +288,7 @@ const Scene = {
             // 铃响：先游到池边（一次性段），演完入雾换休息循环
             const token = ++this.swapToken;
             const sp = this.spare();
-            this.playOn(sp, S.swimOut, false);
+            this.playOn(sp, S.swimOut, false, true);   // 硬切：游出首帧钉的就是工作循环帧
             sp.onended = () => {
               if (token !== this.swapToken) return;
               this.fogSwap(seg, true);
@@ -286,7 +305,7 @@ const Scene = {
               this.fog.classList.remove('on');
               sp.onended = () => {
                 if (token !== this.swapToken) return;
-                this.playOn(this.spare(), seg, true);
+                this.playOn(this.spare(), seg, true, true);   // 硬切：游回尾帧钉的就是工作循环首帧
               };
             }, FOG_MS);
           } else {
