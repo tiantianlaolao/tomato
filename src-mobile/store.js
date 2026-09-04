@@ -15,6 +15,7 @@ const inv = (cmd, args) => T.core.invoke(cmd, args);
 const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
 let backend = 'mock', products = {};   // sku -> {id, displayPrice, price, name}
+let diag = { backend: 'mock', why: '还没探测' };   // init 的结果，调汤里显示
 
 const Store = window.Store = {
   backend: () => backend,
@@ -25,18 +26,28 @@ const Store = window.Store = {
   // 探测一次：有插件且能拉到商品才算真商店；失败静默回 mock。
   // 有真商店就顺手把苹果这边已拥有的静默落账（换机/重装/家人共享不用等人点"恢复购买"；幂等）。
   async init() {
-    if (!HAS_BRIDGE || !isIOS) return backend;
+    if (!HAS_BRIDGE || !isIOS) { diag = { backend, why: HAS_BRIDGE ? '不是 iOS' : '浏览器' }; return backend; }
+    const skus = allSkus();
+    diag = { backend: 'mock', requested: skus.length, got: 0, why: '' };
     try {
-      const skus = allSkus();
       const r = await inv('plugin:iap|products', { ids: skus });
       (r && r.products || []).forEach(p => { products[p.id] = p; });
-      if (Object.keys(products).length) backend = 'ios';
-    } catch (e) { backend = 'mock'; }
+      diag.got = Object.keys(products).length;
+      if (diag.got) backend = 'ios'; else diag.why = '苹果返回 0 件（商品在 ASC 没生效 / 沙盒未就绪 / 这台机连不上沙盒）';
+    } catch (e) {
+      // 🔴 拒绝原文必须留下来（9-4 真机"拉不到价格"）：是 ACL 拦了、插件没挂上、还是苹果那边报错，三种只能靠这句分
+      backend = 'mock'; diag.why = String(e && (e.message || e.code) || e).slice(0, 200);
+    }
+    diag.backend = backend;
     if (backend === 'ios') {
       try { await applyOwned(await inv('plugin:iap|entitlements', {})); } catch (e) { console.warn('iap entitlements', e); }
     }
     return backend;
   },
+  // 诊断（调汤里显示）：{backend, requested, got, why}
+  diag: () => diag,
+  // 重连：重新拉一次商品（沙盒登录后、网络恢复后用）
+  async reconnect() { products = {}; backend = 'mock'; return this.init(); },
 
   // 显示价：真商店用苹果给的本地化价；mock 按语言给 ¥ / $
   price(item) {

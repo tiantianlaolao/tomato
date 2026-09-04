@@ -467,6 +467,14 @@ function renderSettings() {
     catch (e) { rb.textContent = String(e.message || e); }
   };
   rr.appendChild(rb);
+  // 商店诊断（9-4 真机"拉不到价格"）：连没连上、要了几件拿到几件、拒绝原文，一行看清；「重连」再拉一次
+  const dg = Store.diag() || {};
+  const storeRow = rowEl('商店', dg.backend === 'ios'
+    ? ('已连接 · 商品 ' + dg.got + '/' + dg.requested)
+    : ('未连接 · ' + (dg.why || '') + (dg.requested ? '（要了 ' + dg.requested + ' 件，拿到 ' + (dg.got || 0) + ' 件）' : '')));
+  const storeBtn = document.createElement('button'); storeBtn.className = 'btn ghost'; storeBtn.textContent = '重连';
+  storeBtn.onclick = async () => { storeBtn.textContent = '…'; try { await Store.reconnect(); } catch (e) {} renderSettings(); };
+  storeRow.appendChild(storeBtn);
   // 内测包专属（CAPY_INTERNAL 编进来才有）：一键拥有全部付费内容 / 撤回，交易号 internal，不碰攒来的和真买的
   if (RW.internal) {
     sec('内测');
