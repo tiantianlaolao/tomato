@@ -15,7 +15,8 @@
   },
   "bundle": {
     "iOS": {
-      "developmentTeam": "8J6A847P66"
+      "developmentTeam": "8J6A847P66",
+      "minimumSystemVersion": "15.0"
     }
   }
 }

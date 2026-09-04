@@ -99,8 +99,11 @@ jobs:
       - name: '确认 iOS 专属配置合并进去了'
         continue-on-error: true
         run: |
-          echo "===== 期望 identifier=${BUNDLE_ID}，DEVELOPMENT_TEAM=8J6A847P66 ====="
-          grep -E "PRODUCT_NAME|PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM" src-tauri/gen/apple/project.yml
+          echo "===== 期望 identifier=${BUNDLE_ID}，DEVELOPMENT_TEAM=8J6A847P66，deploymentTarget iOS 15.0 ====="
+          # 🔴 最低版本必须 ≥15（tauri.ios.conf.json minimumSystemVersion）：内购桥的 Swift 用 async/await，
+          #    目标写 13 时 Xcode 会把兼容用的 libswift_Concurrency.dylib 塞进 Frameworks，它找 @rpath/libswiftCore.dylib
+          #    而这个工程的 rpath 没有 /usr/lib/swift → 启动即 dyld 中止（9-4 build 51 闪退，崩溃日志 "Library missing"）
+          grep -E "PRODUCT_NAME|PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|deploymentTarget|iOS:" src-tauri/gen/apple/project.yml
           xcodebuild -list -project "$XCPROJ"
 
       # ═══════════ sign=false：只验编译 ═══════════
