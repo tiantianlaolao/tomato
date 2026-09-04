@@ -15,6 +15,9 @@
   <!-- 出口合规（9-4 商店包）：只用系统 TLS 和平台登录，不含自研加密＝豁免类。不声明的话每次上传都停在「缺少合规信息」 -->
   <key>ITSAppUsesNonExemptEncryption</key>
   <false/>
+  <!-- iPad 只支持竖屏必须声明全屏运行（不进多任务分屏），否则 ASC 上传报 "need to include all of the orientations"（9-4 build 56 被拒） -->
+  <key>UIRequiresFullScreen</key>
+  <true/>
   <key>UISupportedInterfaceOrientations</key>
   <array>
     <string>UIInterfaceOrientationPortrait</string>
