@@ -1,0 +1,194 @@
+# capyroom 商店包：编译 → App Store Profile 签名 → IPA → 上传 App Store Connect（9-4）。
+#
+# 与 build-adhoc.yml 同一套骨架（Tauri 只编译不签名、Profile 用 ASC API 自建、自己 codesign），差异只有四点：
+#   ① 不设 CAPY_INTERNAL → 包里没有「内测：全部解锁」和开发开关
+#   ② Profile 类型 appstore（IOS_APP_STORE，不带设备清单）
+#   ③ 版本号：CFBundleShortVersionString 写 ASC 里那条版本记录的号（1.0），CFBundleVersion = git 提交数（每次上传必须递增）
+#   ④ 上传走 xcrun altool --upload-app + ASC API 密钥（戳了么 build-ios.yml 跑通的同一条命令）
+# 🔴 公开仓两条红线：日志全网可见，任何步骤不许 echo secret 内容；绝不能加 pull_request_target 触发。
+# 🔴 最低版本必须 ≥15（tauri.ios.conf.json）：内购桥的 Swift 用 async/await，13 会嵌兼容并发库启动即崩（build 51）。
+name: build-appstore
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: '上传到 App Store Connect（false = 只出 IPA 存 artifact）'
+        type: boolean
+        default: true
+      marketing_version:
+        description: 'CFBundleShortVersionString（必须等于 ASC 里那条版本记录的号）'
+        type: string
+        default: '1.0'
+
+env:
+  BUNDLE_ID: com.tybbtech.capyroom
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # build 号用 git 提交数，浅克隆会恒等于 1
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 'npm ci'
+        run: npm ci
+
+      - name: 'tauri ios init'
+        run: npx tauri ios init --ci
+
+      # 同 build-adhoc：tauri ios init 生成的图标是模板默认图，显式覆盖
+      - name: '装图标（覆盖模板默认图标）'
+        run: |
+          DEST=src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset
+          cp src-tauri/icons/ios/*.png "$DEST"/
+          ls -la "$DEST"/AppIcon-60x60@2x.png
+
+      # 同 build-adhoc：Google 登录的两个 client id + 反转 URL scheme（值全来自 Secrets，不打印）
+      - name: '注入 Google 登录配置（Info.plist）'
+        env:
+          GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
+          GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
+        run: |
+          PL=src-tauri/gen/apple/Info.plist
+          [ -f "$PL" ] || PL=$(find src-tauri/gen/apple -maxdepth 2 -name Info.plist | head -1)
+          echo "Info.plist = $PL"
+          if [ -z "$GOOGLE_IOS_CLIENT_ID" ]; then echo "没配 GOOGLE_IOS_CLIENT_ID，跳过"; exit 0; fi
+          PB=/usr/libexec/PlistBuddy
+          $PB -c "Add :GOOGLE_IOS_CLIENT_ID string $GOOGLE_IOS_CLIENT_ID" "$PL" 2>/dev/null || $PB -c "Set :GOOGLE_IOS_CLIENT_ID $GOOGLE_IOS_CLIENT_ID" "$PL"
+          if [ -n "$GOOGLE_SERVER_CLIENT_ID" ]; then
+            $PB -c "Add :GOOGLE_SERVER_CLIENT_ID string $GOOGLE_SERVER_CLIENT_ID" "$PL" 2>/dev/null || $PB -c "Set :GOOGLE_SERVER_CLIENT_ID $GOOGLE_SERVER_CLIENT_ID" "$PL"
+          fi
+          REV=$(echo "$GOOGLE_IOS_CLIENT_ID" | awk -F. '{for(i=NF;i>0;i--){printf "%s%s",$i,(i>1?".":"")}}')
+          $PB -c "Add :CFBundleURLTypes array" "$PL" 2>/dev/null || true
+          $PB -c "Add :CFBundleURLTypes:0 dict" "$PL"
+          $PB -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$PL"
+          $PB -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string $REV" "$PL"
+          echo "URL scheme 已注册（值不打印）"
+
+      - name: '确认 iOS 专属配置合并进去了'
+        continue-on-error: true
+        run: |
+          grep -E "PRODUCT_NAME|PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|deploymentTarget|iOS:" src-tauri/gen/apple/project.yml
+
+      - name: '编译（不签名）'
+        run: npx tauri ios build --ci -v --no-sign --archive-only
+
+      - name: '确认包里没有内测开关'
+        run: |
+          APP=$(find src-tauri/gen/apple/build -path "*/Products/Applications/*.app" -maxdepth 6 -type d | head -1)
+          BIN="$APP/$(basename "$APP" .app)"
+          # CAPY_INTERNAL 没设 → option_env! 编成 None；这里只是双保险地确认前端标记进了包
+          echo "移动端标记: $(strings "$BIN" | grep -c _mobile_marker_capyroom)"
+
+      - name: '导入签名证书'
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          KC=$RUNNER_TEMP/build.keychain-db
+          KCPW=$(uuidgen)
+          echo "KC=$KC" >> $GITHUB_ENV
+          printenv APPLE_CERTIFICATE_BASE64 | base64 --decode > $RUNNER_TEMP/dist.p12
+          security create-keychain -p "$KCPW" $KC
+          security set-keychain-settings -lut 3600 $KC
+          security unlock-keychain -p "$KCPW" $KC
+          security import $RUNNER_TEMP/dist.p12 -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KC
+          security set-key-partition-list -S apple-tool:,apple: -k "$KCPW" $KC
+          security list-keychain -d user -s $KC login.keychain
+          security default-keychain -s $KC
+          security find-identity -v -p codesigning $KC
+
+      - name: '放置 App Store Connect 密钥'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
+        run: |
+          mkdir -p ~/private_keys
+          printenv ASC_API_KEY_BASE64 | base64 --decode > ~/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          echo "密钥 $(wc -c < ~/private_keys/AuthKey_${ASC_KEY_ID}.p8) 字节"
+
+      - name: '准备 python 环境'
+        run: |
+          python3 -m venv $RUNNER_TEMP/venv
+          $RUNNER_TEMP/venv/bin/python -m pip install --quiet pyjwt cryptography
+
+      - name: '用 ASC API 建 App Store Profile'
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
+        run: |
+          $RUNNER_TEMP/venv/bin/python ci/asc_profile.py "$BUNDLE_ID" $RUNNER_TEMP/capyroom.mobileprovision appstore
+
+      - name: '写版本号 + 出口合规，签名并打成 IPA'
+        run: |
+          set -e
+          APP=$(find src-tauri/gen/apple/build -path "*/Products/Applications/*.app" -maxdepth 6 -type d | head -1)
+          [ -n "$APP" ] || { echo "❌ 没找到 .app"; exit 1; }
+          echo "app = $APP"
+          PB=/usr/libexec/PlistBuddy
+          PL="$APP/Info.plist"
+          BUILD_NUM=$(git rev-list --count HEAD)
+          echo "BUILD_NUM=$BUILD_NUM" >> $GITHUB_ENV
+          $PB -c "Set :CFBundleShortVersionString ${{ inputs.marketing_version }}" "$PL"
+          $PB -c "Set :CFBundleVersion $BUILD_NUM" "$PL"
+          # 出口合规：只用系统 TLS，不含自研加密（豁免类）。不声明的话每次上传都停在「缺少合规信息」
+          $PB -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PL" 2>/dev/null || $PB -c "Set :ITSAppUsesNonExemptEncryption false" "$PL"
+          echo "----- 版本 -----"; $PB -c "Print :CFBundleShortVersionString" "$PL"; $PB -c "Print :CFBundleVersion" "$PL"; $PB -c "Print :MinimumOSVersion" "$PL"
+
+          PROF=$RUNNER_TEMP/capyroom.mobileprovision
+          cp "$PROF" "$APP/embedded.mobileprovision"
+          security cms -D -i "$PROF" > $RUNNER_TEMP/prof.plist
+          $PB -x -c 'Print :Entitlements' $RUNNER_TEMP/prof.plist > $RUNNER_TEMP/ent.plist
+          echo "----- entitlements -----"; cat $RUNNER_TEMP/ent.plist
+
+          IDENT=$(security find-identity -v -p codesigning "$KC" | awk '/Apple Distribution/{print $2; exit}')
+          [ -n "$IDENT" ] || { echo "❌ 钥匙串里没有分发证书"; exit 1; }
+          # 🔴 先签内层再签壳（顺序反了外层签名会被内层改动作废）
+          if [ -d "$APP/Frameworks" ]; then
+            find "$APP/Frameworks" -name "*.dylib" -o -name "*.framework" | while read f; do
+              echo "  签 $f"; codesign --force --sign "$IDENT" --timestamp=none "$f"
+            done
+          fi
+          codesign --force --sign "$IDENT" --entitlements $RUNNER_TEMP/ent.plist --timestamp=none "$APP"
+          codesign --verify --strict --verbose=2 "$APP"
+
+          mkdir -p $RUNNER_TEMP/pack/Payload $RUNNER_TEMP/export
+          cp -R "$APP" $RUNNER_TEMP/pack/Payload/
+          (cd $RUNNER_TEMP/pack && zip -qry $RUNNER_TEMP/export/capyroom-${{ inputs.marketing_version }}-$BUILD_NUM.ipa Payload)
+          ls -l $RUNNER_TEMP/export
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capyroom-appstore-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+          if-no-files-found: error
+
+      - name: '上传 App Store Connect'
+        if: ${{ inputs.upload }}
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcrun altool --upload-app \
+            -f "$(ls $RUNNER_TEMP/export/*.ipa | head -1)" \
+            -t ios \
+            --apiKey $ASC_KEY_ID \
+            --apiIssuer $ASC_ISSUER_ID
+          echo "已上传：版本 ${{ inputs.marketing_version }} build $BUILD_NUM（ASC 处理约 10-30 分钟后出现在版本页的构建列表）"
+
+      - name: '清理'
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/build.keychain-db 2>/dev/null || true
+          rm -rf ~/private_keys

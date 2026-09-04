@@ -12,6 +12,9 @@
 -->
 <plist version="1.0">
 <dict>
+  <!-- 出口合规（9-4 商店包）：只用系统 TLS 和平台登录，不含自研加密＝豁免类。不声明的话每次上传都停在「缺少合规信息」 -->
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
   <key>UISupportedInterfaceOrientations</key>
   <array>
     <string>UIInterfaceOrientationPortrait</string>

@@ -454,11 +454,13 @@ function renderSettings() {
     lseg.appendChild(b);
   });
   lr.appendChild(lseg);
-  // P3 真钱链路做完但默认藏着（P4 接 IAP 才打开）——这是开发开关，不是用户功能
-  const bd = rowEl('显示购买（开发）', '沐录里显示 ¥ 按钮；正式包接内购前保持关闭');
-  const bb = document.createElement('button'); bb.className = 'sw' + (RW.showBuy() ? ' on' : '');
-  bb.onclick = () => { RW.setShowBuy(!RW.showBuy()); bb.classList.toggle('on', RW.showBuy()); };
-  bd.appendChild(bb);
+  // 开发开关：mock 后端也露 ¥ 按钮（写死价格）。🔴 只在内测包露（9-4 商店包收口）——正式包有真商店，这个开关只会误导
+  if (RW.internal) {
+    const bd = rowEl('显示购买（开发）', '沐录里显示 ¥ 按钮；正式包接内购前保持关闭');
+    const bb = document.createElement('button'); bb.className = 'sw' + (RW.showBuy() ? ' on' : '');
+    bb.onclick = () => { RW.setShowBuy(!RW.showBuy()); bb.classList.toggle('on', RW.showBuy()); };
+    bd.appendChild(bb);
+  }
   // 恢复购买（苹果 5.1.1：必须独立于登录，且随时可用）
   const rr = rowEl('恢复购买', '在这台设备换了 Apple ID 或重装后，把买过的找回来');
   const rb = document.createElement('button'); rb.className = 'btn'; rb.textContent = '恢复购买';

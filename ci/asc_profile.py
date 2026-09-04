@@ -21,7 +21,11 @@ import jwt  # PyJWT
 API = "https://api.appstoreconnect.apple.com"
 BUNDLE_ID = sys.argv[1] if len(sys.argv) > 1 else "com.tybbtech.capyroom"
 OUT = sys.argv[2] if len(sys.argv) > 2 else "capyroom.mobileprovision"
-PROFILE_NAME = "capyroom AdHoc CI"
+# 第三个参数：adhoc（默认）| appstore（9-4 商店包：IOS_APP_STORE，不带设备清单）
+KIND = sys.argv[3] if len(sys.argv) > 3 else "adhoc"
+APPSTORE = KIND == "appstore"
+PROFILE_NAME = "capyroom AppStore CI" if APPSTORE else "capyroom AdHoc CI"
+PROFILE_TYPE = "IOS_APP_STORE" if APPSTORE else "IOS_APP_ADHOC"
 
 
 def load_key():
@@ -97,16 +101,20 @@ cert_ids = [c["id"] for c in certs]
 print(f"② 分发证书 {len(certs)} 张：" +
       ", ".join(c["attributes"].get("name", "?")[:40] for c in certs))
 
-# ── ③ 已注册设备（Ad-Hoc 只能装进这些机器）─────────────────
-code, b = call("GET", "/v1/devices?filter[status]=ENABLED&limit=200")
-if code != 200:
-    die(f"查 devices 失败 HTTP {code}", b)
-devs = [d for d in b.get("data", []) if d["attributes"].get("platform") == "IOS"]
-if not devs:
-    die("账号里没有已注册的 iOS 设备 —— Ad-Hoc 包装不进任何机器")
-dev_ids = [d["id"] for d in devs]
-print(f"③ 已注册 iOS 设备 {len(devs)} 台：" +
-      ", ".join(d["attributes"].get("name", "?")[:20] for d in devs[:6]))
+# ── ③ 已注册设备（Ad-Hoc 只能装进这些机器；App Store Profile 不带设备）─────────────────
+dev_ids = []
+if not APPSTORE:
+    code, b = call("GET", "/v1/devices?filter[status]=ENABLED&limit=200")
+    if code != 200:
+        die(f"查 devices 失败 HTTP {code}", b)
+    devs = [d for d in b.get("data", []) if d["attributes"].get("platform") == "IOS"]
+    if not devs:
+        die("账号里没有已注册的 iOS 设备 —— Ad-Hoc 包装不进任何机器")
+    dev_ids = [d["id"] for d in devs]
+    print(f"③ 已注册 iOS 设备 {len(devs)} 台：" +
+          ", ".join(d["attributes"].get("name", "?")[:20] for d in devs[:6]))
+else:
+    print("③ App Store Profile：不带设备清单")
 
 # ── ④ 旧 Profile 先删 ────────────────────────────────
 # 🔴 必须删了重建，不能复用：Profile 里的设备列表是**建的那一刻固化**的，
@@ -118,15 +126,17 @@ if code == 200:
             c2, _ = call("DELETE", f"/v1/profiles/{d['id']}")
             print(f"④ 删掉同名旧 Profile（HTTP {c2}）")
 
-# ── ⑤ 建 Ad-Hoc Profile ──────────────────────────────
+# ── ⑤ 建 Profile（Ad-Hoc 带设备；App Store 不带）──────────────────────────────
+rel = {
+    "bundleId": {"data": {"type": "bundleIds", "id": bundle_uid}},
+    "certificates": {"data": [{"type": "certificates", "id": i} for i in cert_ids]},
+}
+if not APPSTORE:
+    rel["devices"] = {"data": [{"type": "devices", "id": i} for i in dev_ids]}
 code, b = call("POST", "/v1/profiles", {"data": {
     "type": "profiles",
-    "attributes": {"name": PROFILE_NAME, "profileType": "IOS_APP_ADHOC"},
-    "relationships": {
-        "bundleId": {"data": {"type": "bundleIds", "id": bundle_uid}},
-        "certificates": {"data": [{"type": "certificates", "id": i} for i in cert_ids]},
-        "devices": {"data": [{"type": "devices", "id": i} for i in dev_ids]},
-    },
+    "attributes": {"name": PROFILE_NAME, "profileType": PROFILE_TYPE},
+    "relationships": rel,
 }})
 if code not in (200, 201):
     die(f"建 Profile 失败 HTTP {code}", b)
