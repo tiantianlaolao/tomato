@@ -124,26 +124,18 @@ jobs:
 
       # 登录插件拖着 VK ID SDK（com.vk.id:vkid），它不在 Google/MavenCentral，只在 VK 自家 artifactory；
       # Tauri 模板的 settings.gradle 是 FAIL_ON_PROJECT_REPOS，仓库只能加在这里（首跑 9-5 就栽在 "Could not find com.vk.id:vkid:2.6.0"）
-      - name: '加 VK ID 的 maven 仓库（settings.gradle）'
+      # 9-5 四跑摸清的仓库结构：settings.gradle 只是两行壳（include ':app' + apply from 'tauri.settings.gradle'，后者构建期才生成）；
+      # 仓库在**根 build.gradle.kts** 的 `allprojects { repositories { google(); mavenCentral() } }` —— 项目层一声明，
+      # settings 层的 dependencyResolutionManagement 整个被忽略（Gradle 原话 "The project declares repositories, effectively ignoring
+      # the repositories you have declared in the settings"）。所以只能往根文件这个块里插；allprojects 也覆盖插件模块自己的类路径。
+      - name: '加 VK ID 的 maven 仓库（根 build.gradle.kts allprojects）'
         run: |
-          ls -la src-tauri/gen/android/ | grep -i settings
-          S=$(ls src-tauri/gen/android/settings.gradle* | head -1)
-          echo "settings 文件 = $S"; echo "----- 原文 -----"; cat "$S"
-          echo "----- tauri.settings.gradle（真正的仓库块在这，Tauri 自己管，不动它）-----"; cat src-tauri/gen/android/tauri.settings.gradle || true
-          # 三跑（9-5）看清了：settings.gradle 只是 `include ':app'` + `apply from: 'tauri.settings.gradle'` 两行壳，
-          # google()/mavenCentral() 都在被 apply 的那个文件里。Gradle 的 dependencyResolutionManagement 可以多次调用、仓库叠加，
-          # 所以在壳文件末尾追加一块独立的即可，不碰 Tauri 生成的那份。
-          cat >> "$S" <<'GRADLE'
-
-          // capyroom CI 追加：登录插件依赖的 VK ID SDK 只在 VK 自家 artifactory
-          dependencyResolutionManagement {
-              repositories {
-                  maven { url 'https://artifactory-external.vkpartner.ru/artifactory/vkid-sdk-android/' }
-              }
-          }
-          GRADLE
-          grep -q "vkpartner.ru" "$S"
-          echo "----- 改后 -----"; cat "$S"
+          R=src-tauri/gen/android/build.gradle.kts
+          echo "----- 原文 -----"; cat "$R"
+          grep -q "mavenCentral()" "$R"
+          sed -i 's#^\(\s*\)mavenCentral()#\1mavenCentral()\n\1maven { url = uri("https://artifactory-external.vkpartner.ru/artifactory/vkid-sdk-android/") }   // capyroom CI 追加：登录插件依赖的 VK ID SDK 只在 VK 自家 artifactory#' "$R"
+          grep -q "vkpartner.ru" "$R"
+          echo "----- 改后 -----"; sed -n '/^allprojects/,/^}/p' "$R"
 
       # 竖屏锁定（与 iOS 一致）：模板的 MainActivity 没写 screenOrientation
       - name: '竖屏 + 版本号'
@@ -164,7 +156,7 @@ jobs:
             --config "{\"bundle\":{\"android\":{\"versionCode\":${BUILD_NUM}}}}"
           find src-tauri/gen/android/app/build/outputs -name "*.apk" | head
           # 追加段在构建后还在不在（Tauri 构建期会不会重写 gen/ 里的 gradle 文件——这里留个证据）
-          grep -c "capyroom CI 追加" src-tauri/gen/android/app/build.gradle.kts src-tauri/gen/android/settings.gradle
+          grep -c "capyroom CI 追加" src-tauri/gen/android/app/build.gradle.kts src-tauri/gen/android/build.gradle.kts
 
       - name: '成品自检（aapt 读回，不信 gradle 说的）'
         run: |
