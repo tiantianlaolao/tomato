@@ -482,6 +482,15 @@ function renderSettings() {
   const storeBtn = document.createElement('button'); storeBtn.className = 'btn ghost'; storeBtn.textContent = '重连';
   storeBtn.onclick = async () => { storeBtn.textContent = '…'; try { await Store.reconnect(); } catch (e) {} renderSettings(); };
   storeRow.appendChild(storeBtn);
+  // 画面诊断（9-5 安卓真机"水波没有/过场切不了"）：视频有没有源、解没解码、在不在播、每秒出几帧、叠加层画一次多少毫秒、play() 拒绝原文；
+  // 「刷新」再采一次（Δt = 两次之间 currentTime 走了多少，走 0 = 视频没在动）
+  const sceneRow = rowEl('画面', '视频与叠加层的实时状态，按「刷新」再采一次');
+  const scenePre = document.createElement('div');
+  scenePre.style.cssText = 'white-space:pre-wrap;word-break:break-all;font:11px/1.5 ui-monospace,Menlo,monospace;opacity:.85;flex-basis:100%;margin-top:4px';
+  scenePre.textContent = (window.Scene && Scene.diag) ? Scene.diag() : '-';
+  const sceneBtn = document.createElement('button'); sceneBtn.className = 'btn ghost'; sceneBtn.textContent = '刷新';
+  sceneBtn.onclick = () => { scenePre.textContent = Scene.diag(); };
+  sceneRow.appendChild(sceneBtn); sceneRow.appendChild(scenePre);
   // 内测包专属（CAPY_INTERNAL 编进来才有）：一键拥有全部付费内容 / 撤回，交易号 internal，不碰攒来的和真买的
   if (RW.internal) {
     sec('内测');

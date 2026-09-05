@@ -212,7 +212,7 @@ const Scene = {
     el.loop = !!loop;
     el.src = this.src(seg);
     el.currentTime = 0;
-    el.play().catch(() => {});
+    el.play().catch((e) => { this.noteErr('play', e); });
     let revealed = false;
     const reveal = () => {
       if (revealed || this.cur() !== el) return;
@@ -234,6 +234,7 @@ const Scene = {
       const tick = (now, md) => {
         if (el._vfc !== tok || this.cur() !== el) return;
         this.vt = md.mediaTime;
+        this.vfcTicks = (this.vfcTicks || 0) + 1;   // 诊断：视频真的在出帧（安卓 9-5"水波没有"排查）
         if (hard) reveal();                    // 硬切：第一帧真的呈现了才换类
         if (this.hasMatte()) this.draw();      // 有角色通道的段每帧重画（过渡段连视频帧一起画，同帧）
         el.requestVideoFrameCallback(tick);
@@ -276,7 +277,7 @@ const Scene = {
       // 暂停/恢复＝停格与解冻，不换段不进雾
       if (ph === 'paused') { this.frozen = true; this.cur().pause(); }
       else if (wasPh === 'paused' && this.segFor(ph, view) === this.seg) {
-        this.frozen = false; this.cur().play().catch(() => {});
+        this.frozen = false; this.cur().play().catch((e) => { this.noteErr('resume', e); });
       } else {
         this.frozen = false;
         const seg = this.segFor(ph, view);
@@ -319,6 +320,15 @@ const Scene = {
 
   // ── 叠加层：数字 + 状态调光 + 调试框（8fps 足够）──────────────
   draw() {
+    const t0 = performance.now();
+    try { this._draw(); } finally {
+      // 诊断：每次叠加层重画的耗时（EMA）+ 次数——安卓上过渡段每帧 drawImage(video)+挖洞，画布跟不跟得上在这看
+      const ms = performance.now() - t0;
+      this.drawMs = (this.drawMs || ms) * 0.9 + ms * 0.1;
+      this.drawN = (this.drawN || 0) + 1;
+    }
+  },
+  _draw() {
     const cx = this.cx, v = this.view, S = this.scene;
     if (!cx || !S) return;
     cx.clearRect(0, 0, this.W, this.H);
@@ -358,6 +368,45 @@ const Scene = {
     }
   },
 
+  // 诊断（9-5 安卓真机"水波没有/过场切不了"）：play() 的拒绝原文别再吞掉——三种病（没解码 / 没播 / 播了画布跟不上）在这一行里分开
+  noteErr(where, e) {
+    const s = e && (e.name ? e.name + ': ' + (e.message || '') : String(e));
+    this.playErr = where + ' ' + (s || '?').slice(0, 120);
+  },
+  diag() {
+    const now = performance.now();
+    const first = !this._dg;
+    const prev = this._dg || { t: now, ticks: this.vfcTicks || 0, draws: this.drawN || 0, ct: -1 };
+    const dt = Math.max(0.001, (now - prev.t) / 1000);
+    const rate = (n) => first ? '-' : (n / dt).toFixed(1);   // 首次采样没有上一拍可比，速率一律显示 -，按「刷新」再看
+    const cur = this.vids && this.vids[this.vi];
+    const vinfo = (el, i) => {
+      if (!el) return 'v' + i + ':-';
+      const src = el.currentSrc || el.getAttribute('src') || '';
+      const kind = !src ? 'nosrc' : src.startsWith('blob:') ? 'blob' : src.startsWith('http') ? 'net' : 'file';
+      const err = el.error ? ('ERR' + el.error.code + (el.error.message ? '(' + el.error.message.slice(0, 60) + ')' : '')) : '';
+      return 'v' + i + (el.classList.contains('on') ? '*' : '') + ':' + kind + ' rs' + el.readyState + ' ns' + el.networkState +
+        (el.paused ? ' paused' : ' playing') + (el.ended ? ' ended' : '') + ' t=' + el.currentTime.toFixed(2) +
+        ' ' + (el.videoWidth || 0) + 'x' + (el.videoHeight || 0) + (err ? ' ' + err : '');
+    };
+    const ct = cur ? cur.currentTime : -1;
+    const adv = (prev.ct >= 0 && ct >= 0) ? (ct - prev.ct).toFixed(2) : '?';
+    const ua = navigator.userAgent, m = /Chrome\/(\d+)/.exec(ua);
+    const probe = document.createElement('video');
+    const out = [
+      'seg=' + this.seg + ' phase=' + this.phase + ' ready=' + this.ready + ' frozen=' + this.frozen + ' running=' + this.running + ' hidden=' + document.hidden,
+      'vfc=' + (('requestVideoFrameCallback' in HTMLVideoElement.prototype) ? 'yes' : 'NO') + ' ticks/s=' + rate((this.vfcTicks || 0) - prev.ticks) + ' mediaTime=' + (this.vt >= 0 ? this.vt.toFixed(2) : '-') + ' Δt=' + adv,
+      'draw ' + (this.drawMs || 0).toFixed(1) + 'ms ×' + rate((this.drawN || 0) - prev.draws) + '/s  overlayFps=' + (this.lastFps || 0).toFixed(1) + ' matte=' + (this.hasMatte() ? 'on' : 'off') + ' ' + this.W + 'x' + this.H + '@' + this.DPR,
+      vinfo(this.vids[0], 0), vinfo(this.vids[1], 1),
+      'playErr=' + (this.playErr || '-'),
+      'canPlay baseline=' + (probe.canPlayType('video/mp4; codecs="avc1.42E01E"') || 'no') + ' high=' + (probe.canPlayType('video/mp4; codecs="avc1.64001F"') || 'no') +
+        ' chrome=' + (m ? m[1] : '?') + (/; wv\)/.test(ua) ? ' wv' : '') + (/Android/i.test(ua) ? ' android' : /iPhone/.test(ua) ? ' ios' : ''),
+      (window.AS && AS.diag) ? AS.diag() : 'AS=-',
+    ];
+    this._dg = { t: now, ticks: this.vfcTicks || 0, draws: this.drawN || 0, ct };
+    return out.join('\n');
+  },
+
   hitEntry(cssX, cssY) {
     const S = this.scene;
     if (!S) return null;
@@ -383,7 +432,7 @@ const Scene = {
   start() {
     if (this.running) return;
     this.running = true; this.lastTs = 0; this.nextFrameAt = 0;
-    if (this.seg && !this.frozen) this.cur().play().catch(() => {});
+    if (this.seg && !this.frozen) this.cur().play().catch((e) => { this.noteErr('start', e); });
     this.raf = requestAnimationFrame((t) => this.frame(t));
   },
   stop() {

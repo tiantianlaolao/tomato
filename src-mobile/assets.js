@@ -19,7 +19,10 @@
 'use strict';
 
 const HOST = 'https://www.tybbtech.com/capyroom/assets/';
-const DEV = location.protocol === 'http:' || location.protocol === 'https:';
+// 🔴 9-5 安卓真机"水波没有/过场切不了"的根：以前按 protocol 判开发环境（http/https = 浏览器截图/dev），
+//    iOS 壳是 tauri://localhost 没事，**安卓壳是 http://tauri.localhost** → 被当成 dev → 视频指向包内 assets/video-cn/
+//    （按规矩不进包）→ 全 404 → 视频永远不来。改成"有 Tauri 桥就是正式包"，协议不再参与判断。
+const DEV = !(window.__TAURI__ && window.__TAURI__.core);
 
 let cur = null;          // {base, dir, names}
 const map = {};          // '<base>/<name>' -> blob objectURL（永不 revoke，整场复用）
@@ -42,6 +45,14 @@ window.AS = {
     if (!cur) return null;
     if (DEV) return cur.dir + '/matte/' + file;
     return map[cur.base + '/matte/' + file] || HOST + cur.base + '/matte/' + file;
+  },
+  // 诊断一行（调汤「画面」行用）：dev 还是正式、资产源、当前主题几段已缓进 IDB（其余走网播）
+  diag() {
+    if (!cur) return 'AS: 没配场景';
+    const names = cur.names || [];
+    const cached = names.filter((n) => (map[cur.base + '/' + n] || '').startsWith('blob:')).length;
+    const matte = Object.keys(map).filter((k) => k.startsWith(cur.base + '/matte/')).length;
+    return 'AS ' + (DEV ? 'DEV(本地目录 ' + cur.dir + ')' : 'PROD ' + HOST) + ' base=' + cur.base + ' 视频缓存 ' + cached + '/' + names.length + ' 通道文件 ' + matte + ' origin=' + location.origin;
   },
 };
 
