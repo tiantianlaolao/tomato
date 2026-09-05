@@ -16,7 +16,10 @@ USER = os.environ["OTA_SSH_USER"]
 PWD  = os.environ["OTA_SSH_PASSWORD"]
 
 LIVE  = "/var/www/capyroom/_t"
-STAGE = "/tmp/capyroom_ota"          # 🔴 用 /tmp 不用 ~：sudo bash -c 里的 ~ 会变成 root 的家目录
+# 🔴 用 /tmp 不用 ~：sudo bash -c 里的 ~ 会变成 root 的家目录
+# 🔴 暂存目录必须每次唯一（9-5）：测试线和 Play 线同时出包，共用 /tmp/capyroom_ota 时后进来的 rm -rf 把前一个正在拼的分块删了
+#    （"cat …part*: No such file"）。带上 run id，本地跑就带 pid。
+STAGE = "/tmp/capyroom_ota_" + os.environ.get("GITHUB_RUN_ID", str(os.getpid()))
 FILES = sys.argv[1:]
 if not FILES:
     sys.exit("没有要传的文件")
