@@ -138,6 +138,21 @@ jobs:
           grep -q "vkpartner.ru" "$R"
           echo "----- 改后 -----"; sed -n '/^allprojects/,/^}/p' "$R"
 
+      # 六跑（9-5）：release 开着 R8，VK ID SDK 引用的 ru.ok.tracer.*（VK 自家崩溃上报，compileOnly 没打进来）和 javax.inject
+      # 在 R8 眼里是 Missing class → 直接失败。我们不用 VK/Yandex 登录，那些路径永远走不到，-dontwarn 即可（不关 R8）。
+      - name: 'R8：VK/Yandex 用不到的缺类只警告不报错（proguard-rules.pro）'
+        run: |
+          P=src-tauri/gen/android/app/proguard-rules.pro
+          cat >> $P <<'PRO'
+
+          # capyroom CI 追加：登录插件拖进来的 VK ID / Yandex SDK，我们不用；它们引用的可选依赖不在包里
+          -dontwarn ru.ok.tracer.**
+          -dontwarn javax.inject.**
+          -dontwarn com.vk.**
+          -dontwarn com.yandex.**
+          PRO
+          cat $P
+
       # 竖屏锁定（与 iOS 一致）：模板的 MainActivity 没写 screenOrientation
       - name: '竖屏 + 版本号'
         run: |
