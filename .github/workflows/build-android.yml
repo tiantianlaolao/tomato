@@ -113,6 +113,7 @@ jobs:
                   manifestPlaceholders["VKIDClientSecret"] = "0"
                   manifestPlaceholders["VKIDRedirectHost"] = "vk.com"
                   manifestPlaceholders["VKIDRedirectScheme"] = "vk0"
+                  manifestPlaceholders["YANDEX_CLIENT_ID"] = "0"   // 五跑：Yandex authsdk 的 manifest 同样要占位符（data@host/scheme + meta-data）
               }
           }
           dependencies {
