@@ -1,0 +1,247 @@
+# capyroom（番茄时钟移动端）Android 构建 —— 海外版第一步：骨架跑通（9-5）。
+#
+# 与 build-adhoc.yml（iOS）同一个思路，两跑拆开"编译问题"和"签名问题"：
+#   sign=false：只出未签名的 release APK，验 Tauri android 工程 + Rust 交叉编译 + 插件安卓半边能不能编出来
+#   sign=true ：apksigner 签名 → 旁装页 android.html → 上架 /var/www/capyroom/_t/，手机浏览器打开直接装
+#
+# 🔴 与戳了么（Capacitor）不同，这里是 **Tauri android**：工程由 `tauri android init` 生成到 src-tauri/gen/android/
+#    （gen/ 不进仓），版本号走 gen 出来的 tauri.properties —— 改 gradle 里的 versionCode 没用，
+#    只能用 `tauri android build --config '{"bundle":{"android":{"versionCode":N}}}'` 覆盖。
+# 🔴 登录插件 tauri-plugin-social-auth 安卓半边：按 <applicationId>.BuildConfig.GOOGLE_SERVER_CLIENT_ID 反射读
+#    （值走 Gradle 的 System.getenv，不落文件、不打印）；它还拖着 VK ID SDK，
+#    VK 的 manifest 有 ${VKIDRedirectScheme} 等占位符，不给值 manifest 合并直接炸 —— 这里填哑值。
+#    Apple 登录在安卓上插件明确不支持（SOCIAL_AUTH_UNSUPPORTED_PLATFORM），界面上已不显示那个键。
+# 🔴 内购桥 plugins/tauri-plugin-iap 只有 StoreKit（iOS）；安卓上 store.js 走 mock，Play 结算是后面的事。
+# 🔴 公开仓两条红线：日志全网可见，任何步骤不许 echo secret 内容；绝不能加 pull_request_target 触发。
+name: build-android
+
+on:
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: '签名并出 APK + 上架旁装页（false = 只跑不签名的编译冒烟）'
+        type: boolean
+        default: false
+
+env:
+  # 内测包标记（同 build-adhoc.yml）：调汤里露出「内测：全部解锁」。以后的商店包 workflow 不设这个。
+  CAPY_INTERNAL: "1"
+  PACKAGE: com.tybbtech.capyroom
+  APP_LABEL: capyroom
+  OTA_BASE: https://www.tybbtech.com/capyroom/_t
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # build 号用 git 提交数，浅克隆会恒等于 1
+
+      # 只编 arm64（真机全是 arm64；模拟器/x86 以后要再加 target）
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 'npm ci'
+        run: npm ci
+
+      # Tauri 交叉编译 Rust 要 NDK：runner 镜像自带，路径在 ANDROID_NDK_LATEST_HOME；没有就装一个
+      - name: 'NDK'
+        run: |
+          if [ -n "$ANDROID_NDK_LATEST_HOME" ] && [ -d "$ANDROID_NDK_LATEST_HOME" ]; then
+            NDK="$ANDROID_NDK_LATEST_HOME"
+          else
+            sdkmanager --install "ndk;27.2.12479018" > /dev/null
+            NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          fi
+          test -f "$NDK/source.properties"
+          echo "NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$NDK" >> $GITHUB_ENV
+          grep Pkg.Revision "$NDK/source.properties"
+
+      - name: 'tauri android init'
+        run: npx tauri android init --ci --skip-targets-install
+
+      # 生成出来的工程按 tauri.android.conf.json 走：identifier / minSdk 26（登录插件安卓半边要求 ≥26）
+      - name: '确认 Android 专属配置合并进去了'
+        run: |
+          G=src-tauri/gen/android/app/build.gradle.kts
+          grep -nE "namespace|applicationId|minSdk|compileSdk|targetSdk|versionCode|versionName|isMinifyEnabled" $G
+          grep -q "applicationId = \"$PACKAGE\"" $G
+          grep -q "minSdk = 26" $G
+          grep -n "app_name" src-tauri/gen/android/app/src/main/res/values/strings.xml
+
+      # 图标：与 iOS 那步同一个防线——不信模板，显式覆盖（src-tauri/icons/android 是 `tauri icon` 生成的 mipmap 套）
+      - name: '装图标（覆盖模板默认图标）'
+        run: |
+          DEST=src-tauri/gen/android/app/src/main/res
+          cp -R src-tauri/icons/android/. "$DEST"/
+          ls -la "$DEST"/mipmap-xxxhdpi/ | head -5
+
+      # Gradle 追加段：Kotlin DSL 允许再开一次 android {} 往上叠
+      #   ① GOOGLE_SERVER_CLIENT_ID 编进 BuildConfig（登录插件反射读；Secret 没配就是空串，Google 键点了报错但不崩）
+      #   ② VK ID SDK 的 manifest 占位符哑值（不用 VK，但没值 manifest 合并会炸）
+      #   ③ 登录插件的库开了 core library desugaring，App 侧也开（AGP 要求消费方一致）
+      - name: '追加 Gradle 配置（登录插件安卓半边）'
+        env:
+          GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
+        run: |
+          G=src-tauri/gen/android/app/build.gradle.kts
+          cat >> $G <<'KTS'
+
+          // ---- capyroom CI 追加（.github/workflows/build-android.yml）----
+          android {
+              buildFeatures { buildConfig = true }
+              compileOptions { isCoreLibraryDesugaringEnabled = true }
+              defaultConfig {
+                  buildConfigField("String", "GOOGLE_SERVER_CLIENT_ID", "\"" + (System.getenv("GOOGLE_SERVER_CLIENT_ID") ?: "") + "\"")
+                  manifestPlaceholders["VKIDClientID"] = "0"
+                  manifestPlaceholders["VKIDClientSecret"] = "0"
+                  manifestPlaceholders["VKIDRedirectHost"] = "vk.com"
+                  manifestPlaceholders["VKIDRedirectScheme"] = "vk0"
+              }
+          }
+          dependencies {
+              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+          }
+          KTS
+          tail -20 $G
+          if [ -z "$GOOGLE_SERVER_CLIENT_ID" ]; then echo "::warning::没配 GOOGLE_SERVER_CLIENT_ID，Google 登录在这个包里不可用"; else echo "GOOGLE_SERVER_CLIENT_ID 已交给 Gradle（值不打印）"; fi
+
+      # 竖屏锁定（与 iOS 一致）：模板的 MainActivity 没写 screenOrientation
+      - name: '竖屏 + 版本号'
+        run: |
+          M=src-tauri/gen/android/app/src/main/AndroidManifest.xml
+          sed -i 's#android:name=".MainActivity"#android:name=".MainActivity"\n            android:screenOrientation="portrait"#' $M
+          grep -q 'android:screenOrientation="portrait"' $M
+          BUILD_NUM=$(git rev-list --count HEAD)
+          echo "BUILD_NUM=$BUILD_NUM" >> $GITHUB_ENV
+          VERSION=$(node -p "require('./src-tauri/tauri.android.conf.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION build=$BUILD_NUM"
+
+      # 不配签名 → Gradle 出 app-universal-release-unsigned.apk；签名我们自己做（与 iOS 一样：每一步确定）
+      - name: '编译 release APK（未签名）'
+        run: |
+          npx tauri android build --apk --target aarch64 --ci \
+            --config "{\"bundle\":{\"android\":{\"versionCode\":${BUILD_NUM}}}}"
+          find src-tauri/gen/android/app/build/outputs -name "*.apk" | head
+
+      - name: '成品自检（aapt 读回，不信 gradle 说的）'
+        run: |
+          UNSIGNED=$(find src-tauri/gen/android/app/build/outputs/apk -name "*release*unsigned*.apk" | head -1)
+          [ -n "$UNSIGNED" ] || { echo "❌ 没找到未签名 APK"; exit 1; }
+          echo "UNSIGNED=$UNSIGNED" >> $GITHUB_ENV
+          BT=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1)
+          echo "BT=$BT" >> $GITHUB_ENV
+          AAPT="$BT/aapt"
+          "$AAPT" dump badging "$UNSIGNED" | grep -E "^package:|application-label:|sdkVersion|targetSdkVersion" | head -5
+          "$AAPT" dump badging "$UNSIGNED" | grep -q "package: name='$PACKAGE'"
+          "$AAPT" dump badging "$UNSIGNED" | grep -q "versionCode='$BUILD_NUM'"
+          "$AAPT" dump badging "$UNSIGNED" | grep -q "sdkVersion:'26'"
+          echo "----- 权限（安卓 13+ 通知要 POST_NOTIFICATIONS；排期通知看 SCHEDULE_EXACT_ALARM/USE_EXACT_ALARM）-----"
+          "$AAPT" dump permissions "$UNSIGNED" | grep -E "uses-permission" | sed 's/^/  /'
+          echo "----- 打进包的是移动端前端？（Tauri 把 frontendDist 嵌进 .so，路径键明文可查；判据用文件名不用页面内容）-----"
+          mkdir -p $RUNNER_TEMP/so && unzip -o -q "$UNSIGNED" 'lib/arm64-v8a/*' -d $RUNNER_TEMP/so
+          SO=$(find $RUNNER_TEMP/so -name "*.so" | head -1); echo "so = $SO ($(wc -c < "$SO") 字节)"
+          echo "  移动端标记 _mobile_marker_capyroom : $(grep -a -c _mobile_marker_capyroom "$SO" || true)（应 ≥1）"
+          for f in pet.html companion.js rest.html viz.js; do echo "  桌面端独有 $f : $(grep -a -c "$f" "$SO" || true)（应 0）"; done
+          ls -l "$UNSIGNED"
+
+      # ═══════════ sign=true：签名 + 旁装页 + OTA ═══════════
+      # 🔴 这把 keystore = 备案绑定的正式钥匙（D:\ios密钥备份\capyroom\capyroom-release.jks），永不能换。
+      - name: '签名（zipalign + apksigner）'
+        if: ${{ inputs.sign }}
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$KS_B64" || { echo "❌ 没配 ANDROID_KEYSTORE_BASE64"; exit 1; }
+          printenv KS_B64 | base64 -d > $RUNNER_TEMP/release.jks
+          mkdir -p $RUNNER_TEMP/out
+          "$BT/zipalign" -p -f 4 "$UNSIGNED" $RUNNER_TEMP/aligned.apk
+          "$BT/apksigner" sign --ks $RUNNER_TEMP/release.jks --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
+            --out $RUNNER_TEMP/out/capyroom.apk $RUNNER_TEMP/aligned.apk
+          rm -f $RUNNER_TEMP/release.jks
+          "$BT/apksigner" verify --print-certs $RUNNER_TEMP/out/capyroom.apk | grep -E "Verifies|SHA-1|SHA-256" | head -4
+          cp $RUNNER_TEMP/out/capyroom.apk "$RUNNER_TEMP/out/capyroom-v${VERSION}-${BUILD_NUM}.apk"
+          ls -l $RUNNER_TEMP/out
+
+      - name: '生成 android.html（旁装页）'
+        if: ${{ inputs.sign }}
+        run: |
+          SIZE=$(( $(stat -c %s $RUNNER_TEMP/out/capyroom.apk) / 1048576 ))
+          cat > $RUNNER_TEMP/out/android.html <<HTML
+          <!doctype html><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <title>capyroom · Android 测试包</title>
+          <style>body{font:16px/1.8 system-ui,-apple-system;margin:0;padding:56px 24px;
+          background:#14100d;color:#cbb89a;text-align:center}
+          h1{font-size:22px;margin:0 0 6px;color:#f0c9a0}p{color:#8a7a63;font-size:14px;margin:4px 0}
+          a.install{display:inline-block;margin-top:28px;padding:14px 34px;background:#e8590c;
+          color:#fff;text-decoration:none;border-radius:12px;font-size:17px}
+          .n{margin-top:34px;font-size:12px;color:#6f6047;line-height:1.9}</style>
+          <h1>capyroom</h1>
+          <p>Android 测试包 v${VERSION}（build ${BUILD_NUM}）· 约 ${SIZE} MB</p>
+          <p><a class="install" href="${OTA_BASE}/capyroom.apk">下载安装</a></p>
+          <div class="n">用手机浏览器打开这一页，下载完点开安装<br>
+          第一次会要求允许"安装未知来源应用"<br>
+          包名 ${PACKAGE}，与正式版同一签名，装上会直接覆盖<br>
+          Google 登录要等 Google Cloud 里登记了签名 SHA-1 才通；Apple 登录安卓没有<br>
+          购买在这版是模拟的（Play 结算还没接）<br>
+          iOS 测试包在 <a href="install.html">install.html</a></div>
+          HTML
+          ls -l $RUNNER_TEMP/out/android.html
+
+      - name: '准备 python 环境'
+        if: ${{ inputs.sign }}
+        run: |
+          python3 -m venv $RUNNER_TEMP/venv
+          $RUNNER_TEMP/venv/bin/python -m pip install --quiet paramiko
+
+      - name: '上架 OTA'
+        if: ${{ inputs.sign }}
+        env:
+          OTA_SSH_HOST: ${{ secrets.OTA_SSH_HOST }}
+          OTA_SSH_PORT: ${{ secrets.OTA_SSH_PORT }}
+          OTA_SSH_USER: ${{ secrets.OTA_SSH_USER }}
+          OTA_SSH_PASSWORD: ${{ secrets.OTA_SSH_PASSWORD }}
+        run: |
+          $RUNNER_TEMP/venv/bin/python ci/ota_deploy.py \
+            $RUNNER_TEMP/out/capyroom.apk \
+            $RUNNER_TEMP/out/android.html
+          curl -sfI "${OTA_BASE}/capyroom.apk" | head -1
+          echo "::notice title=安卓旁装页::${OTA_BASE}/android.html  (v${VERSION} / ${BUILD_NUM})"
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.sign }}
+        continue-on-error: true
+        with:
+          name: capyroom-android
+          path: ${{ runner.temp }}/out/*
+          if-no-files-found: warn
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.sign }}
+        continue-on-error: true
+        with:
+          name: capyroom-android-unsigned
+          path: ${{ env.UNSIGNED }}
+          if-no-files-found: warn

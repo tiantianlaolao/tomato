@@ -569,8 +569,10 @@ function renderAccount(box, rowEl) {
       }
       say(r.error === 'net' ? '网络不通，稍后再试' : '登录没成功');
     };
-    row.appendChild(btn('用 Apple 登录', 'pri', () => doLogin('apple')));
-    row.appendChild(btn('用 Google 登录', '', () => doLogin('google')));   // 9-3 用户："没看到 Google"→一直显示；区分只管手机号那两行
+    // 安卓没有 Apple 登录（tauri-plugin-social-auth 在安卓上对 apple_sign_in 明确回 UNSUPPORTED_PLATFORM），键不显示；Google 键升成主键
+    const onAndroid = /Android/i.test(navigator.userAgent);
+    if (!onAndroid) row.appendChild(btn('用 Apple 登录', 'pri', () => doLogin('apple')));
+    row.appendChild(btn('用 Google 登录', onAndroid ? 'pri' : '', () => doLogin('google')));   // 9-3 用户："没看到 Google"→一直显示；区分只管手机号那两行
     box.appendChild(row);
     // 手机号（中国区）：所连服务端配了短信才露；探测异步回来后补渲染一次
     if (!A.IS_OVERSEAS) {

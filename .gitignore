@@ -9,5 +9,9 @@ src-mobile/assets/video-cn/
 
 # 部署脚本含服务器明文密码，绝不进仓
 _deploy_*.py
+# 签名凭证（9-4 备案）：Android keystore / 凭证卡 / 证书副本，备份在 D:\ios密钥备份\capyroom\
+_android_signing/
+_signing_info/
+_credentials_card.md
 # 账号服务本地测试库
 server/data/
