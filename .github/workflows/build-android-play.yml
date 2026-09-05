@@ -207,13 +207,14 @@ jobs:
           # 广告 ID：现在没接 Play 结算库，成品里不该有；将来接了 Billing 要照戳了么加 tools:node=remove
           if "$AAPT" dump permissions "$APK" | grep -q "com.google.android.gms.permission.AD_ID"; then
             echo "::error title=AD_ID::成品含广告 ID 权限，隐私申报会打架"; exit 1; fi
-          # 成品里的前端必须指美服（sed 静默失败的最后一道闸）：Tauri 把前端嵌进 .so，路径键和 JS 明文可 grep
+          # 🔴 Tauri 的 generate_context! 把 frontendDist 压缩后嵌进 .so —— JS 正文（WEB_BASE 域名）grep 必然一无所获，
+          #    只有资源的**路径键**是明文（build-adhoc.yml 早记过这条，Play 线首跑又按域名 grep 栽了一次）。
+          #    域名替换的闸门在上面「指向海外实例」那步的源码 grep 断言；这里只核"打进去的是移动端前端"。
           mkdir -p $RUNNER_TEMP/so && unzip -o -q "$APK" 'lib/arm64-v8a/libtomato_lib.so' -d $RUNNER_TEMP/so
           SO=$RUNNER_TEMP/so/lib/arm64-v8a/libtomato_lib.so; test -f "$SO"
-          echo "  美服 WEB_BASE 命中: $(grep -a -c "stampday.tybbtech.com/capyroom/" "$SO" || true)（应 ≥1）"
-          echo "  国内 WEB_BASE 残留: $(grep -a -c "www.tybbtech.com/capyroom/api" "$SO" || true)（应 0）"
-          grep -a -q "stampday.tybbtech.com/capyroom/" "$SO"
-          echo "  内测标记 CAPY_INTERNAL 不应生效：$(grep -a -c "_mobile_marker_capyroom" "$SO" || true) 处前端标记（只证明是移动端前端）"
+          echo "  移动端标记 _mobile_marker_capyroom : $(grep -a -c "_mobile_marker_capyroom" "$SO" || true)（应 ≥1）"
+          grep -a -q "_mobile_marker_capyroom" "$SO"
+          for f in pet.html companion.js rest.html viz.js; do echo "  桌面端独有 $f : $(grep -a -c "$f" "$SO" || true)（应 0）"; done
           ls -l $RUNNER_TEMP/out
 
       - name: '生成 android-play.html（旁装页，英文）'
