@@ -190,7 +190,9 @@ jobs:
           "$AAPT" dump permissions "$UNSIGNED" | grep -E "uses-permission" | sed 's/^/  /'
           echo "----- 打进包的是移动端前端？（Tauri 把 frontendDist 嵌进 .so，路径键明文可查；判据用文件名不用页面内容）-----"
           mkdir -p $RUNNER_TEMP/so && unzip -o -q "$UNSIGNED" 'lib/arm64-v8a/*' -d $RUNNER_TEMP/so
-          SO=$(find $RUNNER_TEMP/so -name "*.so" | head -1); echo "so = $SO ($(wc -c < "$SO") 字节)"
+          # 七跑教训：APK 里还有 androidx 的小 .so，`head -1` 抓错对象 → 点名 libtomato_lib.so
+          SO=$(find $RUNNER_TEMP/so -name "libtomato_lib.so" | head -1); [ -n "$SO" ] || { echo "❌ APK 里没有 libtomato_lib.so"; find $RUNNER_TEMP/so -name "*.so"; exit 1; }
+          echo "so = $SO ($(wc -c < "$SO") 字节)"
           echo "  移动端标记 _mobile_marker_capyroom : $(grep -a -c _mobile_marker_capyroom "$SO" || true)（应 ≥1）"
           for f in pet.html companion.js rest.html viz.js; do echo "  桌面端独有 $f : $(grep -a -c "$f" "$SO" || true)（应 0）"; done
           ls -l "$UNSIGNED"
