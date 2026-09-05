@@ -122,6 +122,16 @@ jobs:
           tail -20 $G
           if [ -z "$GOOGLE_SERVER_CLIENT_ID" ]; then echo "::warning::没配 GOOGLE_SERVER_CLIENT_ID，Google 登录在这个包里不可用"; else echo "GOOGLE_SERVER_CLIENT_ID 已交给 Gradle（值不打印）"; fi
 
+      # 登录插件拖着 VK ID SDK（com.vk.id:vkid），它不在 Google/MavenCentral，只在 VK 自家 artifactory；
+      # Tauri 模板的 settings.gradle 是 FAIL_ON_PROJECT_REPOS，仓库只能加在这里（首跑 9-5 就栽在 "Could not find com.vk.id:vkid:2.6.0"）
+      - name: '加 VK ID 的 maven 仓库（settings.gradle）'
+        run: |
+          S=src-tauri/gen/android/settings.gradle
+          grep -q "google()" $S
+          sed -i "s#^\(\s*\)google()#\1google()\n\1maven { url 'https://artifactory-external.vkpartner.ru/artifactory/vkid-sdk-android/' }#" $S
+          grep -q "vkpartner.ru" $S
+          sed -n '/dependencyResolutionManagement/,/^}/p' $S
+
       # 竖屏锁定（与 iOS 一致）：模板的 MainActivity 没写 screenOrientation
       - name: '竖屏 + 版本号'
         run: |
