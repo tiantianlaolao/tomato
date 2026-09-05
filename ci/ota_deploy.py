@@ -25,7 +25,20 @@ if not FILES:
     sys.exit("没有要传的文件")
 
 
-def run(ssh, cmd, sudo=False):
+def connect():
+    c = paramiko.SSHClient()
+    c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    c.connect(HOST, PORT, USER, PWD, timeout=25)
+    c.get_transport().set_keepalive(20)   # 🔴 并行 scp 那几分钟控制连接是闲的，不发 keepalive 会被踢（9-5 Play 线 24MB 包实证）
+    return c
+
+
+def run(_ssh, cmd, sudo=False):
+    global ssh
+    tr = ssh.get_transport()
+    if tr is None or not tr.is_active():
+        print("  SSH 会话已断（长传输期间被踢），重连一次")
+        ssh = connect()
     if sudo:
         cmd = "sudo -S -p '' bash -c " + "'" + cmd.replace("'", "'\"'\"'") + "'"
     stdin, stdout, stderr = ssh.exec_command(cmd, timeout=180)
@@ -38,9 +51,7 @@ def run(ssh, cmd, sudo=False):
     return out
 
 
-ssh = paramiko.SSHClient()
-ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh.connect(HOST, PORT, USER, PWD, timeout=25)
+ssh = connect()
 
 run(ssh, f"rm -rf {STAGE} && mkdir -p {STAGE}")
 
