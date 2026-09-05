@@ -1,0 +1,297 @@
+# capyroom Android **海外版 → Google Play**（9-5）。
+#
+# 与 build-android.yml（测试线：国内服务端 + 内测全解锁 + 旁装）同一套 Tauri android 骨架，五处不同：
+#   ① 不设 CAPY_INTERNAL（商店包没有「内测：全部解锁」）
+#   ② 服务端 + 资产都指海外实例 stampday.tybbtech.com/capyroom/（account.js WEB_BASE → IS_OVERSEAS 自动为真：
+#      手机号登录行消失、只剩 Google；assets.js HOST → 视频从美服镜像拉）
+#   ③ 产物 = **AAB**（Play 只收 bundle，jarsigner 签）+ 一份 apksigner 签好的 APK（真机旁装验收：Play 上架前只能这么测）
+#   ④ 多编 armv7（Play 要覆盖 32 位老机；测试线只编 arm64）
+#   ⑤ 落点：AAB 传 Play 内测轨道（有服务账号 secret 才传；没有就只留 artifact，手动传 Play Console）；APK 传 _t/android-play.html
+# 🔴 签名 = 备案绑定的那把 keystore（与官网直发包同一把）。Play App Signing 建议选「上传自己的密钥」（PEPK 交这把），
+#    这样 Play 装的包和官网包同签名互相覆盖；若让 Google 生成，Google Cloud 的 Android OAuth client 要登记两个 SHA-1。
+# 🔴 AAB 用 jarsigner（apksigner 不签 bundle），APK 用 apksigner；成品全部用 aapt 读回核对，不信 gradle。
+# 🔴 公开仓两条红线：日志全网可见，任何步骤不许 echo secret 内容；绝不能加 pull_request_target 触发。
+name: build-android-play
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'android-play-v*'
+
+permissions:
+  contents: write
+
+env:
+  PACKAGE: com.tybbtech.capyroom
+  APP_LABEL: capyroom
+  OTA_BASE: https://www.tybbtech.com/capyroom/_t
+  OVERSEAS_BASE: https://stampday.tybbtech.com/capyroom/
+
+jobs:
+  android-play:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 'npm ci'
+        run: npm ci
+
+      - name: 'NDK'
+        run: |
+          if [ -n "$ANDROID_NDK_LATEST_HOME" ] && [ -d "$ANDROID_NDK_LATEST_HOME" ]; then
+            NDK="$ANDROID_NDK_LATEST_HOME"
+          else
+            sdkmanager --install "ndk;27.2.12479018" > /dev/null
+            NDK="$ANDROID_HOME/ndk/27.2.12479018"
+          fi
+          test -f "$NDK/source.properties"
+          echo "NDK_HOME=$NDK" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$NDK" >> $GITHUB_ENV
+
+      # 🔴 只认 const 那一整行（与戳了么同一条教训：净靠 sed 静默失败过太多次），改完立刻 grep 断言
+      - name: '指向海外实例（account.js WEB_BASE + assets.js HOST）'
+        run: |
+          A=src-mobile/account.js; S=src-mobile/assets.js
+          grep -q "^const WEB_BASE = 'https://www.tybbtech.com/capyroom/';" $A
+          sed -i "s|^const WEB_BASE = 'https://www.tybbtech.com/capyroom/';|const WEB_BASE = '${OVERSEAS_BASE}';|" $A
+          grep -q "^const WEB_BASE = '${OVERSEAS_BASE}';" $A
+          grep -q "^const IS_OVERSEAS = !WEB_BASE.startsWith('https://www.tybbtech.com/');" $A
+          grep -q "^const HOST = 'https://www.tybbtech.com/capyroom/assets/';" $S
+          sed -i "s|^const HOST = 'https://www.tybbtech.com/capyroom/assets/';|const HOST = '${OVERSEAS_BASE}assets/';|" $S
+          grep -q "^const HOST = '${OVERSEAS_BASE}assets/';" $S
+          echo "WEB_BASE / HOST = 美服 stampday；IS_OVERSEAS 会推成 true（手机号登录行不显示）"
+          # 美服实例真在线才继续（health + 资产镜像各探一发）
+          curl -sf -m 15 "${OVERSEAS_BASE}api/health" | grep -q '"ok":true'
+          curl -sfI -m 15 "${OVERSEAS_BASE}assets/cn-v3/loop_work.mp4" | grep -qi "^HTTP.* 200"
+          echo "美服 health + 资产镜像在线"
+
+      - name: 'tauri android init'
+        run: npx tauri android init --ci --skip-targets-install
+
+      - name: '确认 Android 专属配置合并进去了'
+        run: |
+          G=src-tauri/gen/android/app/build.gradle.kts
+          grep -nE "namespace|applicationId|minSdk|compileSdk|targetSdk|isMinifyEnabled" $G
+          grep -q "applicationId = \"$PACKAGE\"" $G
+          grep -q "minSdk = 26" $G
+
+      - name: '装图标（覆盖模板默认图标）'
+        run: |
+          DEST=src-tauri/gen/android/app/src/main/res
+          cp -R src-tauri/icons/android/. "$DEST"/
+          ls -la "$DEST"/mipmap-xxxhdpi/ | head -5
+
+      # 以下四步与 build-android.yml 逐字相同（登录插件安卓半边的坑：VK maven 仓库 / 占位符 / R8 / BuildConfig），改要两边一起
+      - name: '加 VK ID 的 maven 仓库（根 build.gradle.kts allprojects）'
+        run: |
+          R=src-tauri/gen/android/build.gradle.kts
+          grep -q "mavenCentral()" "$R"
+          sed -i 's#^\(\s*\)mavenCentral()#\1mavenCentral()\n\1maven { url = uri("https://artifactory-external.vkpartner.ru/artifactory/vkid-sdk-android/") }   // capyroom CI 追加：登录插件依赖的 VK ID SDK 只在 VK 自家 artifactory#' "$R"
+          grep -q "vkpartner.ru" "$R"
+
+      - name: '追加 Gradle 配置（登录插件安卓半边）'
+        env:
+          GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
+        run: |
+          G=src-tauri/gen/android/app/build.gradle.kts
+          cat >> $G <<'KTS'
+
+          // ---- capyroom CI 追加（.github/workflows/build-android-play.yml）----
+          android {
+              buildFeatures { buildConfig = true }
+              compileOptions { isCoreLibraryDesugaringEnabled = true }
+              defaultConfig {
+                  buildConfigField("String", "GOOGLE_SERVER_CLIENT_ID", "\"" + (System.getenv("GOOGLE_SERVER_CLIENT_ID") ?: "") + "\"")
+                  manifestPlaceholders["VKIDClientID"] = "0"
+                  manifestPlaceholders["VKIDClientSecret"] = "0"
+                  manifestPlaceholders["VKIDRedirectHost"] = "vk.com"
+                  manifestPlaceholders["VKIDRedirectScheme"] = "vk0"
+                  manifestPlaceholders["YANDEX_CLIENT_ID"] = "0"
+              }
+          }
+          dependencies {
+              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+          }
+          KTS
+          if [ -z "$GOOGLE_SERVER_CLIENT_ID" ]; then echo "::error::商店包必须配 GOOGLE_SERVER_CLIENT_ID（海外版只有 Google 登录）"; exit 1; fi
+          echo "GOOGLE_SERVER_CLIENT_ID 已交给 Gradle（值不打印）"
+
+      - name: 'R8：VK/Yandex 用不到的缺类只警告不报错（proguard-rules.pro）'
+        run: |
+          P=src-tauri/gen/android/app/proguard-rules.pro
+          cat >> $P <<'PRO'
+
+          # capyroom CI 追加：登录插件拖进来的 VK ID / Yandex SDK，我们不用；它们引用的可选依赖不在包里
+          -dontwarn ru.ok.tracer.**
+          -dontwarn javax.inject.**
+          -dontwarn com.vk.**
+          -dontwarn com.yandex.**
+          PRO
+
+      - name: '竖屏 + 版本号'
+        run: |
+          M=src-tauri/gen/android/app/src/main/AndroidManifest.xml
+          sed -i 's#android:name=".MainActivity"#android:name=".MainActivity"\n            android:screenOrientation="portrait"#' $M
+          grep -q 'android:screenOrientation="portrait"' $M
+          BUILD_NUM=$(git rev-list --count HEAD)
+          echo "BUILD_NUM=$BUILD_NUM" >> $GITHUB_ENV
+          VERSION=$(node -p "require('./src-tauri/tauri.android.conf.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION build=$BUILD_NUM"
+
+      # 不配签名 → 未签名的 AAB + APK；签名我们自己做
+      - name: '编译 release AAB + APK（未签名，arm64 + armv7）'
+        run: |
+          npx tauri android build --aab --apk --target aarch64 armv7 --ci \
+            --config "{\"bundle\":{\"android\":{\"versionCode\":${BUILD_NUM}}}}"
+          find src-tauri/gen/android/app/build/outputs \( -name "*.aab" -o -name "*.apk" \) | sort
+          grep -c "capyroom CI 追加" src-tauri/gen/android/app/build.gradle.kts src-tauri/gen/android/build.gradle.kts
+
+      - name: '签名（AAB jarsigner / APK zipalign+apksigner）+ 成品核对'
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$KS_B64" || { echo "❌ 没配 ANDROID_KEYSTORE_BASE64"; exit 1; }
+          printenv KS_B64 | base64 -d > $RUNNER_TEMP/release.jks
+          BT=$(ls -d $ANDROID_HOME/build-tools/*/ | sort -V | tail -1); AAPT="$BT/aapt"
+          mkdir -p $RUNNER_TEMP/out
+          # ---- AAB ----
+          AAB=$(find src-tauri/gen/android/app/build/outputs/bundle -name "*release*.aab" | head -1)
+          [ -n "$AAB" ] || { echo "❌ 没找到 AAB"; exit 1; }
+          OUT_AAB="$RUNNER_TEMP/out/capyroom-v${VERSION}-${BUILD_NUM}.aab"
+          cp "$AAB" "$OUT_AAB"
+          jarsigner -keystore $RUNNER_TEMP/release.jks -storepass "$KS_PASS" -keypass "$KEY_PASS" \
+            -sigalg SHA256withRSA -digestalg SHA-256 "$OUT_AAB" "$KEY_ALIAS"
+          jarsigner -verify "$OUT_AAB" | head -2
+          # ---- APK（旁装验收）----
+          UNSIGNED=$(find src-tauri/gen/android/app/build/outputs/apk -name "*release*unsigned*.apk" | head -1)
+          [ -n "$UNSIGNED" ] || { echo "❌ 没找到未签名 APK"; exit 1; }
+          "$BT/zipalign" -p -f 4 "$UNSIGNED" $RUNNER_TEMP/aligned.apk
+          "$BT/apksigner" sign --ks $RUNNER_TEMP/release.jks --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
+            --out $RUNNER_TEMP/out/capyroom-play.apk $RUNNER_TEMP/aligned.apk
+          rm -f $RUNNER_TEMP/release.jks
+          "$BT/apksigner" verify --print-certs $RUNNER_TEMP/out/capyroom-play.apk | grep -E "SHA-1" | head -1
+          # ---- 成品核对（aapt 读回）----
+          APK=$RUNNER_TEMP/out/capyroom-play.apk
+          "$AAPT" dump badging "$APK" | grep -E "^package:|application-label:|sdkVersion|targetSdkVersion|native-code" | head -6
+          "$AAPT" dump badging "$APK" | grep -q "package: name='$PACKAGE'"
+          "$AAPT" dump badging "$APK" | grep -q "versionCode='$BUILD_NUM'"
+          "$AAPT" dump badging "$APK" | grep -q "versionName='$VERSION'"
+          "$AAPT" dump badging "$APK" | grep -q "sdkVersion:'26'"
+          "$AAPT" dump badging "$APK" | grep "native-code" | grep -q "arm64-v8a"
+          "$AAPT" dump badging "$APK" | grep "native-code" | grep -q "armeabi-v7a"
+          # 广告 ID：现在没接 Play 结算库，成品里不该有；将来接了 Billing 要照戳了么加 tools:node=remove
+          if "$AAPT" dump permissions "$APK" | grep -q "com.google.android.gms.permission.AD_ID"; then
+            echo "::error title=AD_ID::成品含广告 ID 权限，隐私申报会打架"; exit 1; fi
+          # 成品里的前端必须指美服（sed 静默失败的最后一道闸）：Tauri 把前端嵌进 .so，路径键和 JS 明文可 grep
+          mkdir -p $RUNNER_TEMP/so && unzip -o -q "$APK" 'lib/arm64-v8a/libtomato_lib.so' -d $RUNNER_TEMP/so
+          SO=$RUNNER_TEMP/so/lib/arm64-v8a/libtomato_lib.so; test -f "$SO"
+          echo "  美服 WEB_BASE 命中: $(grep -a -c "stampday.tybbtech.com/capyroom/" "$SO" || true)（应 ≥1）"
+          echo "  国内 WEB_BASE 残留: $(grep -a -c "www.tybbtech.com/capyroom/api" "$SO" || true)（应 0）"
+          grep -a -q "stampday.tybbtech.com/capyroom/" "$SO"
+          echo "  内测标记 CAPY_INTERNAL 不应生效：$(grep -a -c "_mobile_marker_capyroom" "$SO" || true) 处前端标记（只证明是移动端前端）"
+          ls -l $RUNNER_TEMP/out
+
+      - name: '生成 android-play.html（旁装页，英文）'
+        run: |
+          SIZE=$(( $(stat -c %s $RUNNER_TEMP/out/capyroom-play.apk) / 1048576 ))
+          cat > $RUNNER_TEMP/out/android-play.html <<HTML
+          <!doctype html><meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <title>capyroom · Android (Play build)</title>
+          <style>body{font:16px/1.8 system-ui,-apple-system;margin:0;padding:56px 24px;
+          background:#14100d;color:#cbb89a;text-align:center}
+          h1{font-size:22px;margin:0 0 6px;color:#f0c9a0}p{color:#8a7a63;font-size:14px;margin:4px 0}
+          a.install{display:inline-block;margin-top:28px;padding:14px 34px;background:#e8590c;
+          color:#fff;text-decoration:none;border-radius:12px;font-size:17px}
+          .n{margin-top:34px;font-size:12px;color:#6f6047;line-height:1.9}</style>
+          <h1>capyroom</h1>
+          <p>Android test build (Play edition) v${VERSION} (build ${BUILD_NUM}) · about ${SIZE} MB</p>
+          <p><a class="install" href="${OTA_BASE}/capyroom-play.apk">Download &amp; install</a></p>
+          <div class="n">Open this page in the phone's browser, then tap the downloaded file to install.<br>
+          Allow "install from unknown sources" the first time.<br>
+          Same package and signature as the store build — installs over the test build, keeps local data.<br>
+          Connects to the overseas server (stampday); Google sign-in only.<br>
+          Purchases are not wired yet (Play Billing comes later).<br>
+          国内测试包在 <a href="android.html">android.html</a></div>
+          HTML
+
+      - name: '准备 python 环境'
+        run: |
+          python3 -m venv $RUNNER_TEMP/venv
+          $RUNNER_TEMP/venv/bin/python -m pip install --quiet paramiko
+
+      - name: '旁装 APK 上架 OTA（_t/）'
+        env:
+          OTA_SSH_HOST: ${{ secrets.OTA_SSH_HOST }}
+          OTA_SSH_PORT: ${{ secrets.OTA_SSH_PORT }}
+          OTA_SSH_USER: ${{ secrets.OTA_SSH_USER }}
+          OTA_SSH_PASSWORD: ${{ secrets.OTA_SSH_PASSWORD }}
+        run: |
+          $RUNNER_TEMP/venv/bin/python ci/ota_deploy.py \
+            $RUNNER_TEMP/out/capyroom-play.apk \
+            $RUNNER_TEMP/out/android-play.html
+          curl -sfI "${OTA_BASE}/capyroom-play.apk" | head -1
+          echo "::notice title=Play 版旁装页::${OTA_BASE}/android-play.html  (v${VERSION} / ${BUILD_NUM})"
+
+      # ---- Play 内测轨道：有服务账号才传。⚠️ 应用的**第一个** bundle 必须在 Play Console 手动上传（API 不能建应用记录），
+      #      之后的版本这里自动传。服务账号：Google Cloud 建 → Play Console「用户和权限」邀请它、给"发布到测试轨道"权限
+      #      → JSON 密钥整个存进 secret PLAY_SERVICE_ACCOUNT_JSON。
+      - name: 'Play 服务账号有没有'
+        env:
+          SA: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$SA" ]; then echo "HAS_PLAY_SA=true" >> $GITHUB_ENV; echo "有服务账号：会传 Play 内测";
+          else echo "HAS_PLAY_SA=false" >> $GITHUB_ENV; echo "::warning::没配 PLAY_SERVICE_ACCOUNT_JSON，AAB 只留 artifact，手动传 Play Console"; fi
+
+      - name: '传 Play 内测轨道'
+        if: env.HAS_PLAY_SA == 'true'
+        uses: r0adkll/upload-google-play@v1.1.3
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: ${{ env.PACKAGE }}
+          releaseFiles: ${{ runner.temp }}/out/capyroom-v${{ env.VERSION }}-${{ env.BUILD_NUM }}.aab
+          track: internal
+          status: completed
+
+      - name: '挂到 GitHub Release（tag 触发时）'
+        if: startsWith(github.ref, 'refs/tags/android-play-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" --generate-notes -R "$GITHUB_REPOSITORY" 2>/dev/null || true
+          gh release upload "$TAG" "$RUNNER_TEMP/out/capyroom-v${VERSION}-${BUILD_NUM}.aab" \
+            "$RUNNER_TEMP/out/capyroom-play.apk" --clobber -R "$GITHUB_REPOSITORY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: capyroom-play-bundle
+          path: |
+            ${{ runner.temp }}/out/capyroom-v*.aab
+            ${{ runner.temp }}/out/capyroom-play.apk
+          if-no-files-found: error
