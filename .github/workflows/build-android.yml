@@ -129,14 +129,20 @@ jobs:
           ls -la src-tauri/gen/android/ | grep -i settings
           S=$(ls src-tauri/gen/android/settings.gradle* | head -1)
           echo "settings 文件 = $S"; echo "----- 原文 -----"; cat "$S"
-          VK=https://artifactory-external.vkpartner.ru/artifactory/vkid-sdk-android/
-          # 二跑（9-5）栽在这步：先假定 Groovy 文件名，grep 直接空手退出、日志一片空白 → 现在先列目录、先 cat 再动手
-          if [[ "$S" == *.kts ]]; then
-            sed -i "s#^\(\s*\)google()#\1google()\n\1maven { url = uri(\"$VK\") }#" "$S"
-          else
-            sed -i "s#^\(\s*\)google()#\1google()\n\1maven { url '$VK' }#" "$S"
-          fi
-          grep -q "vkpartner.ru" "$S" || { echo "❌ 没插进去（模板里没有 google() 这一行？）"; exit 1; }
+          echo "----- tauri.settings.gradle（真正的仓库块在这，Tauri 自己管，不动它）-----"; cat src-tauri/gen/android/tauri.settings.gradle || true
+          # 三跑（9-5）看清了：settings.gradle 只是 `include ':app'` + `apply from: 'tauri.settings.gradle'` 两行壳，
+          # google()/mavenCentral() 都在被 apply 的那个文件里。Gradle 的 dependencyResolutionManagement 可以多次调用、仓库叠加，
+          # 所以在壳文件末尾追加一块独立的即可，不碰 Tauri 生成的那份。
+          cat >> "$S" <<'GRADLE'
+
+          // capyroom CI 追加：登录插件依赖的 VK ID SDK 只在 VK 自家 artifactory
+          dependencyResolutionManagement {
+              repositories {
+                  maven { url 'https://artifactory-external.vkpartner.ru/artifactory/vkid-sdk-android/' }
+              }
+          }
+          GRADLE
+          grep -q "vkpartner.ru" "$S"
           echo "----- 改后 -----"; cat "$S"
 
       # 竖屏锁定（与 iOS 一致）：模板的 MainActivity 没写 screenOrientation
@@ -157,6 +163,8 @@ jobs:
           npx tauri android build --apk --target aarch64 --ci \
             --config "{\"bundle\":{\"android\":{\"versionCode\":${BUILD_NUM}}}}"
           find src-tauri/gen/android/app/build/outputs -name "*.apk" | head
+          # 追加段在构建后还在不在（Tauri 构建期会不会重写 gen/ 里的 gradle 文件——这里留个证据）
+          grep -c "capyroom CI 追加" src-tauri/gen/android/app/build.gradle.kts src-tauri/gen/android/settings.gradle
 
       - name: '成品自检（aapt 读回，不信 gradle 说的）'
         run: |
