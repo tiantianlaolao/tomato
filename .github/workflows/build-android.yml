@@ -126,11 +126,18 @@ jobs:
       # Tauri 模板的 settings.gradle 是 FAIL_ON_PROJECT_REPOS，仓库只能加在这里（首跑 9-5 就栽在 "Could not find com.vk.id:vkid:2.6.0"）
       - name: '加 VK ID 的 maven 仓库（settings.gradle）'
         run: |
-          S=src-tauri/gen/android/settings.gradle
-          grep -q "google()" $S
-          sed -i "s#^\(\s*\)google()#\1google()\n\1maven { url 'https://artifactory-external.vkpartner.ru/artifactory/vkid-sdk-android/' }#" $S
-          grep -q "vkpartner.ru" $S
-          sed -n '/dependencyResolutionManagement/,/^}/p' $S
+          ls -la src-tauri/gen/android/ | grep -i settings
+          S=$(ls src-tauri/gen/android/settings.gradle* | head -1)
+          echo "settings 文件 = $S"; echo "----- 原文 -----"; cat "$S"
+          VK=https://artifactory-external.vkpartner.ru/artifactory/vkid-sdk-android/
+          # 二跑（9-5）栽在这步：先假定 Groovy 文件名，grep 直接空手退出、日志一片空白 → 现在先列目录、先 cat 再动手
+          if [[ "$S" == *.kts ]]; then
+            sed -i "s#^\(\s*\)google()#\1google()\n\1maven { url = uri(\"$VK\") }#" "$S"
+          else
+            sed -i "s#^\(\s*\)google()#\1google()\n\1maven { url '$VK' }#" "$S"
+          fi
+          grep -q "vkpartner.ru" "$S" || { echo "❌ 没插进去（模板里没有 google() 这一行？）"; exit 1; }
+          echo "----- 改后 -----"; cat "$S"
 
       # 竖屏锁定（与 iOS 一致）：模板的 MainActivity 没写 screenOrientation
       - name: '竖屏 + 版本号'
