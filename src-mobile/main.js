@@ -440,7 +440,7 @@ function renderSettings() {
     themeList.forEach(([v, t]) => {
       const b = document.createElement('button');
       const info = RW.themeInfo(v), locked = Store.enforce() && info && info.paid && !RW.ownsTheme(v);
-      b.textContent = locked ? (t + ' 🔒 ' + Store.price(info)) : t; b.className = curScene === v ? 'on' : '';
+      b.textContent = locked ? (t + ' 🔒 ' + Store.price(info)).trim() : t; b.className = curScene === v ? 'on' : '';
       b.onclick = () => {
         if (locked) { rwBuy($('sheetBody'), 'theme', info, v, () => { Scene.setScene(v); applyHint(); RW.load(v).catch(() => {}); renderSettings(); }); return; }
         Scene.setScene(v); applyHint(); RW.load(v).catch(() => {}); renderSettings();
@@ -480,7 +480,13 @@ function renderSettings() {
     ? ('已连接 · 商品 ' + dg.got + '/' + dg.requested)
     : ('未连接 · ' + (dg.why || '') + (dg.requested ? '（要了 ' + dg.requested + ' 件，拿到 ' + (dg.got || 0) + ' 件）' : '')));
   const storeBtn = document.createElement('button'); storeBtn.className = 'btn ghost'; storeBtn.textContent = '重连';
-  storeBtn.onclick = async () => { storeBtn.textContent = '…'; try { await Store.reconnect(); } catch (e) {} renderSettings(); };
+  // 9-18 被拒（点了没反应）：点下立刻变「连接中…」且不能连点；store.js 里每次最多等 15 秒，结果一定回到这一行
+  storeBtn.onclick = async () => {
+    if (storeBtn.disabled) return;
+    storeBtn.disabled = true; storeBtn.textContent = '连接中…';
+    try { await Store.reconnect(); } catch (e) {}
+    if (sheetKind === 'set') renderSettings();
+  };
   storeRow.appendChild(storeBtn);
   // 画面诊断（9-5 安卓真机"水波没有/过场切不了"）：视频有没有源、解没解码、在不在播、每秒出几帧、叠加层画一次多少毫秒、play() 拒绝原文；
   // 「刷新」再采一次（Δt = 两次之间 currentTime 走了多少，走 0 = 视频没在动）
@@ -673,10 +679,14 @@ function rwBar(body, cls) {
 function rwBuy(body, kind, item, theme, after) {
   const bar = rwBar(body, 'ask');
   const price = Store.price(item);
-  bar.innerHTML = '<span>' + '买下「' + (item.name || item.id) + '」，' + price + '？' + '</span>';
+  bar.innerHTML = '<span>' + '买下「' + (item.name || item.id) + '」' + (price ? '，' + price : '') + '？' + '</span>';
   const ok = document.createElement('button'); ok.className = 'btn'; ok.textContent = '买下';
   const no = document.createElement('button'); no.className = 'btn ghost'; no.textContent = '算了';
-  ok.onclick = async () => { try { await Store.buy(kind, item, theme); bar.remove(); after && after(); } catch (e) { rwErr(body, e); } };
+  ok.onclick = async () => {
+    if (ok.disabled) return;
+    ok.disabled = true; ok.textContent = '…';
+    try { await Store.buy(kind, item, theme); bar.remove(); after && after(); } catch (e) { rwErr(body, e); }
+  };
   no.onclick = () => bar.remove();
   bar.appendChild(ok); bar.appendChild(no);
 }
@@ -686,7 +696,7 @@ function rwHint(body, msg, buy) {
   const bar = rwBar(body, 'info');
   const s = document.createElement('span'); s.textContent = msg; bar.appendChild(s);
   if (buy && Store.canBuy()) {
-    const b = document.createElement('button'); b.className = 'btn'; b.textContent = '买下 ' + Store.price(buy.item);
+    const b = document.createElement('button'); b.className = 'btn'; b.textContent = ('买下 ' + Store.price(buy.item)).trim();
     b.onclick = () => rwBuy(body, buy.kind, buy.item, buy.theme, buy.after);
     bar.appendChild(b);
   }
@@ -800,7 +810,7 @@ function renderTowels(body) {
     const set = Object.assign({ id: 'set', name: '整套手拭巾' }, setInfo);
     const bar = document.createElement('div'); bar.className = 'rwask set';
     bar.innerHTML = '<span><b>整套手拭巾</b><small>八条一次拥有</small></span>';
-    const b = document.createElement('button'); b.className = 'btn'; b.textContent = '买下 ' + Store.price(set);
+    const b = document.createElement('button'); b.className = 'btn'; b.textContent = ('买下 ' + Store.price(set)).trim();
     b.onclick = () => rwBuy(body, 'towelset', set, RW.theme, renderHistory);
     bar.appendChild(b); body.appendChild(bar);
   }
@@ -821,7 +831,7 @@ function renderTowels(body) {
       } catch (e) { rwErr(body, e); }
     };
     if (!own && !can && Store.canBuy()) {
-      const b = document.createElement('button'); b.className = 'buy'; b.textContent = Store.price(t);
+      const b = document.createElement('button'); b.className = 'buy'; b.textContent = Store.price(t) || '买下';
       b.onclick = (ev) => { ev.stopPropagation(); rwBuy(body, 'towel', t, RW.theme, renderHistory); };
       el.appendChild(b);
     }
@@ -860,7 +870,7 @@ function renderGarden(body) {
         } catch (e) { rwErr(body, e); }
       };
       if (!own && Store.canBuy()) {
-        const b = document.createElement('button'); b.className = 'buy'; b.textContent = Store.price(p);
+        const b = document.createElement('button'); b.className = 'buy'; b.textContent = Store.price(p) || '买下';
         b.onclick = (ev) => { ev.stopPropagation(); rwBuy(body, 'prop', p, RW.theme, renderHistory); };
         el.appendChild(b);
       }
@@ -1050,6 +1060,8 @@ if (!HAS_BRIDGE) {
         if (sheetKind === 'hist') renderHistory();
       };
       Account.onChange = () => { if (sheetKind === 'set') renderSettings(); };
+      // 商店探测有结果（启动重试 / 回前台重探 / 买成后补价）→ 开着的面板刷一遍，价格换成苹果的本地化价
+      Store.onChange = () => { if (sheetKind === 'set') renderSettings(); else if (sheetKind === 'hist') renderHistory(); };
       Account.init();
       feed(b.view);
       // P3 账本 → P4 商店探测 → 主题锁：存的是付费主题又没买（且有真商店/开发开关）就退回中国风

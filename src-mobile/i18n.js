@@ -29,7 +29,7 @@ const D = {
   '「{s}」还差 {n} 分钟就能领': '"{s}": {n} min to go', '「{s}」可用分钟还差 {n} 分钟': '"{s}": {n} more minutes needed',
   '「{s}」再来 {n} 天它就会来': '"{s}" will come after {n} more days',
   '买下 {p}': 'Buy {p}', '知道了': 'Got it', '敬请期待': 'Coming soon',
-  '商店': 'Store', '重连': 'Reconnect', '已连接 · 商品 {n}/{m}': 'Connected · {n}/{m} products', '还没探测': 'not probed yet',
+  '商店': 'Store', '重连': 'Reconnect', '连接中…': 'Connecting…', '苹果没有回应（{n} 秒超时）': 'No response from Apple ({n}s timeout)', '已连接 · 商品 {n}/{m}': 'Connected · {n}/{m} products', '还没探测': 'not probed yet',
   '未连接 · {s}（要了 {n} 件，拿到 {m} 件）': 'Not connected · {s} (asked {n}, got {m})', '未连接 · {s}': 'Not connected · {s}',
   '苹果返回 0 件（商品在 ASC 没生效 / 沙盒未就绪 / 这台机连不上沙盒）': 'Apple returned 0 products (not live in ASC / sandbox not ready / cannot reach sandbox)', '整套手拭巾': 'Towel set', '八条一次拥有': 'All eight at once', '等待批准后自动到账': 'Pending approval — it will arrive automatically',
   // 账号与同步（9-3）
@@ -116,7 +116,7 @@ const D = {
   // 商店（P4）
   '恢复购买': 'Restore purchases', '在这台设备换了 Apple ID 或重装后，把买过的找回来': 'Bring back what you bought after reinstalling or switching Apple ID',
   '已恢复 {n} 项': 'Restored {n} item(s)', '没有可恢复的购买': 'Nothing to restore', '已取消': 'Cancelled', '购买没有完成': 'Purchase didn\'t complete',
-  '买下「{s}」，{p}？': 'Buy "{s}" for {p}?', '买下': 'Buy', '买下整套': 'Buy the set', '已拥有': 'Owned', '主题包': 'Theme pack',
+  '买下「{s}」，{p}？': 'Buy "{s}" for {p}?', '买下「{s}」？': 'Buy "{s}"?', '买下': 'Buy', '买下整套': 'Buy the set', '已拥有': 'Owned', '主题包': 'Theme pack',
   '内测': 'Internal build', '内测：全部解锁': 'Internal: unlock everything', '主题包和本主题全部单件一键拥有，只为看效果；商店包没有这个按钮': 'Own every theme pack and item of this theme at once, for testing only; store builds don\'t have this',
   '全部解锁': 'Unlock all', '已解锁': 'Unlocked', '清除内测解锁': 'Clear internal unlocks', '只撤回内测解锁的，攒来的和真买的原样保留': 'Removes only internal unlocks; earned and purchased items stay', '清除': 'Clear', '已清除': 'Cleared', '不是内测包': 'Not an internal build',
   // 内核拒绝理由
