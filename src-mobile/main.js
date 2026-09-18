@@ -474,29 +474,33 @@ function renderSettings() {
     catch (e) { rb.textContent = String(e.message || e); }
   };
   rr.appendChild(rb);
-  // 商店诊断（9-4 真机"拉不到价格"）：连没连上、要了几件拿到几件、拒绝原文，一行看清；「重连」再拉一次
-  const dg = Store.diag() || {};
-  const storeRow = rowEl('商店', dg.backend === 'ios'
-    ? ('已连接 · 商品 ' + dg.got + '/' + dg.requested)
-    : ('未连接 · ' + (dg.why || '') + (dg.requested ? '（要了 ' + dg.requested + ' 件，拿到 ' + (dg.got || 0) + ' 件）' : '')));
-  const storeBtn = document.createElement('button'); storeBtn.className = 'btn ghost'; storeBtn.textContent = '重连';
-  // 9-18 被拒（点了没反应）：点下立刻变「连接中…」且不能连点；store.js 里每次最多等 15 秒，结果一定回到这一行
-  storeBtn.onclick = async () => {
-    if (storeBtn.disabled) return;
-    storeBtn.disabled = true; storeBtn.textContent = '连接中…';
-    try { await Store.reconnect(); } catch (e) {}
-    if (sheetKind === 'set') renderSettings();
-  };
-  storeRow.appendChild(storeBtn);
-  // 画面诊断（9-5 安卓真机"水波没有/过场切不了"）：视频有没有源、解没解码、在不在播、每秒出几帧、叠加层画一次多少毫秒、play() 拒绝原文；
-  // 「刷新」再采一次（Δt = 两次之间 currentTime 走了多少，走 0 = 视频没在动）
-  const sceneRow = rowEl('画面', '视频与叠加层的实时状态，按「刷新」再采一次');
-  const scenePre = document.createElement('div');
-  scenePre.style.cssText = 'white-space:pre-wrap;word-break:break-all;font:11px/1.5 ui-monospace,Menlo,monospace;opacity:.85;flex-basis:100%;margin-top:4px';
-  scenePre.textContent = (window.Scene && Scene.diag) ? Scene.diag() : '-';
-  const sceneBtn = document.createElement('button'); sceneBtn.className = 'btn ghost'; sceneBtn.textContent = '刷新';
-  sceneBtn.onclick = () => { scenePre.textContent = Scene.diag(); };
-  sceneRow.appendChild(sceneBtn); sceneRow.appendChild(scenePre);
+  // 🔴 两行诊断只在内测包露（9-18 第二次被拒＝审核员点了诊断行里的「重连」）：正式包不给审核员/用户看调试信息；
+  //    正式包不需要手动重连——价格按钮一律显示，启动自动重试 3 次、回前台再探（store.js）
+  if (RW.internal) {
+    // 商店诊断（9-4 真机"拉不到价格"）：连没连上、要了几件拿到几件、拒绝原文，一行看清；「重连」再拉一次
+    const dg = Store.diag() || {};
+    const storeRow = rowEl('商店', dg.backend === 'ios'
+      ? ('已连接 · 商品 ' + dg.got + '/' + dg.requested)
+      : ('未连接 · ' + (dg.why || '') + (dg.requested ? '（要了 ' + dg.requested + ' 件，拿到 ' + (dg.got || 0) + ' 件）' : '')));
+    const storeBtn = document.createElement('button'); storeBtn.className = 'btn ghost'; storeBtn.textContent = '重连';
+    // 9-18 被拒（点了没反应）：点下立刻变「连接中…」且不能连点；store.js 里每次最多等 15 秒，结果一定回到这一行
+    storeBtn.onclick = async () => {
+      if (storeBtn.disabled) return;
+      storeBtn.disabled = true; storeBtn.textContent = '连接中…';
+      try { await Store.reconnect(); } catch (e) {}
+      if (sheetKind === 'set') renderSettings();
+    };
+    storeRow.appendChild(storeBtn);
+    // 画面诊断（9-5 安卓真机"水波没有/过场切不了"）：视频有没有源、解没解码、在不在播、每秒出几帧、叠加层画一次多少毫秒、play() 拒绝原文；
+    // 「刷新」再采一次（Δt = 两次之间 currentTime 走了多少，走 0 = 视频没在动）
+    const sceneRow = rowEl('画面', '视频与叠加层的实时状态，按「刷新」再采一次');
+    const scenePre = document.createElement('div');
+    scenePre.style.cssText = 'white-space:pre-wrap;word-break:break-all;font:11px/1.5 ui-monospace,Menlo,monospace;opacity:.85;flex-basis:100%;margin-top:4px';
+    scenePre.textContent = (window.Scene && Scene.diag) ? Scene.diag() : '-';
+    const sceneBtn = document.createElement('button'); sceneBtn.className = 'btn ghost'; sceneBtn.textContent = '刷新';
+    sceneBtn.onclick = () => { scenePre.textContent = Scene.diag(); };
+    sceneRow.appendChild(sceneBtn); sceneRow.appendChild(scenePre);
+  }
   // 内测包专属（CAPY_INTERNAL 编进来才有）：一键拥有全部付费内容 / 撤回，交易号 internal，不碰攒来的和真买的
   if (RW.internal) {
     sec('内测');
