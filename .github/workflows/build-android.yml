@@ -57,6 +57,7 @@ jobs:
         with:
           accept-android-sdk-licenses: false
           log-accepted-android-sdk-licenses: false
+          packages: ''          # 默认会装 'tools'，新版 sdkmanager 里这个包已经没了（Failed to find package 'tools' → 退出 1）
 
       - uses: gradle/actions/setup-gradle@v4
 
