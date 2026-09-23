@@ -45,7 +45,12 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # 🔴 9-23：runner 预装 cmdline-tools 12，setup-android 嫌版本不对另下 16，16 的 `sdkmanager --licenses` 卡在
+      #    Google TV 等 6 份许可证上直接退出 1。预装 SDK 许可证本来就接受过了 → 不让它再跑许可证那一步。
       - uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: false
+          log-accepted-android-sdk-licenses: false
 
       - uses: gradle/actions/setup-gradle@v4
 
