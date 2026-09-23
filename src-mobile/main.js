@@ -430,7 +430,9 @@ function renderSettings() {
   sec('场景');
   // 9-4 商店包收口（用户定"暂时下掉"）：目录里 hidden 的主题（日系动效未同步）整个不露，只剩一个主题时主题行也不显示；
   // 日系修好后把目录里的 hidden 去掉就回来。⛔ 别删 ASC 里的 theme.onsen 商品（product ID 删了永久作废），只是不附到版本上。
-  const themeList = [['ink','水墨庭院'],['onsen','野天风吕']].filter(([v]) => { const i = RW.themeInfo(v); return !(i && i.hidden); });
+  // 🔴 付费主题在"没有商店"的正式包里（国内安卓官网包 / 没接结算的 Play 包）整个不露，而不是免费（9-23 两端核对）：
+  //    enforce() 在这些包里恒 false，只靠锁会把付费主题白送；内测包 / 开发开关（showBuy）照旧露，方便看效果。
+  const themeList = [['ink','水墨庭院'],['onsen','野天风吕']].filter(([v]) => { const i = RW.themeInfo(v); return !(i && i.hidden) && !(HAS_BRIDGE && i && i.paid && !Store.enforce() && !RW.internal && !RW.ownsTheme(v)); });
   if (themeList.length > 1) {
     const th = rowEl('主题', '换一个院子陪你（切换即生效）');
     const tseg = document.createElement('div'); tseg.className = 'seg';
@@ -466,14 +468,16 @@ function renderSettings() {
     bb.onclick = () => { RW.setShowBuy(!RW.showBuy()); bb.classList.toggle('on', RW.showBuy()); };
     bd.appendChild(bb);
   }
-  // 恢复购买（苹果 5.1.1：必须独立于登录，且随时可用）
-  const rr = rowEl('恢复购买', '在这台设备换了 Apple ID 或重装后，把买过的找回来');
-  const rb = document.createElement('button'); rb.className = 'btn'; rb.textContent = '恢复购买';
-  rb.onclick = async () => {
-    try { const n = await Store.restore(); rb.textContent = '已恢复 ' + n + ' 项'; RW.load().catch(() => {}); }
-    catch (e) { rb.textContent = String(e.message || e); }
-  };
-  rr.appendChild(rb);
+  // 恢复购买（苹果 5.1.1：必须独立于登录，且随时可用）。只在能买的包里露（9-23：安卓没接结算，这行写着 Apple ID 还点不动）
+  if (Store.canBuy()) {
+    const rr = rowEl('恢复购买', '在这台设备换了 Apple ID 或重装后，把买过的找回来');
+    const rb = document.createElement('button'); rb.className = 'btn'; rb.textContent = '恢复购买';
+    rb.onclick = async () => {
+      try { const n = await Store.restore(); rb.textContent = '已恢复 ' + n + ' 项'; RW.load().catch(() => {}); }
+      catch (e) { rb.textContent = String(e.message || e); }
+    };
+    rr.appendChild(rb);
+  }
   // 🔴 两行诊断只在内测包露（9-18 第二次被拒＝审核员点了诊断行里的「重连」）：正式包不给审核员/用户看调试信息；
   //    正式包不需要手动重连——价格按钮一律显示，启动自动重试 3 次、回前台再探（store.js）
   if (RW.internal) {
@@ -560,6 +564,13 @@ function renderSettings() {
   const tip = document.createElement('div'); tip.className = 'tip';
   tip.textContent = '托盘、开机自启、桌宠小窗是桌面端专有的，手机上没有这些概念，所以这里不列。';
   box.appendChild(tip);
+  // App 备案号（9-22 下号）：中国区的包（iOS 全球一个包 / 国内安卓官网包）按规定要在 App 内标出；海外 Play 包不露。
+  // 系统字体渲染，不走楷体子集，不用重跑 make_subset
+  if (!(window.Account && Account.IS_OVERSEAS)) {
+    const icp = document.createElement('div'); icp.className = 'tip'; icp.style.textAlign = 'center';
+    icp.textContent = 'App 备案号：京ICP备2022025009号-4A';
+    box.appendChild(icp);
+  }
 }
 async function pushSettings() {
   if (!HAS_BRIDGE) return;
@@ -1032,7 +1043,7 @@ if (!HAS_BRIDGE) {
   RW.load(Scene.scene ? Scene.scene.id : 'ink').then(() => {   // P3 DEMO 账本（?rw=empty 空 / ?rw=full 摆满 / ?rw=owned 已买日系；?buy=1 露出购买）
     const cur = Scene.scene && Scene.scene.id, info = cur && RW.themeInfo(cur);
     // 浏览器验收：?scene=onsen 显式指定的不退回（要看日系时还能看）；只有本机记住的 hidden 主题才退
-    if (cur && ((Store.enforce() && !RW.ownsTheme(cur)) || (info && info.hidden && !qs.get('scene')))) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
+    if (cur && ((!RW.ownsTheme(cur) && (Store.enforce() || (HAS_BRIDGE && !RW.internal))) || (info && info.hidden && !qs.get('scene')))) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
   }).catch(() => {});
   setInterval(() => {
     if (!view || view.status !== 'running') return;
@@ -1072,7 +1083,7 @@ if (!HAS_BRIDGE) {
       RW.load(Scene.scene ? Scene.scene.id : 'ink').then(() => Store.init()).then(() => {
         const cur = Scene.scene && Scene.scene.id, info = cur && RW.themeInfo(cur);
         // 付费没买、或目录里标了 hidden（9-4 日系暂时下掉）→ 退回中国风
-        if (cur && ((Store.enforce() && !RW.ownsTheme(cur)) || (info && info.hidden))) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
+        if (cur && ((!RW.ownsTheme(cur) && (Store.enforce() || (HAS_BRIDGE && !RW.internal))) || (info && info.hidden))) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
       }).catch(() => {});
       // 语言同步：前端按系统语言定，内核只在发系统通知时用它选文案；不一致就推一次
       if (settings && settings.lang !== I18N.lang) { settings.lang = I18N.lang; pushSettings(); }

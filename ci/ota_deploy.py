@@ -15,7 +15,7 @@ PORT = int(os.environ.get("OTA_SSH_PORT", "22"))
 USER = os.environ["OTA_SSH_USER"]
 PWD  = os.environ["OTA_SSH_PASSWORD"]
 
-LIVE  = "/var/www/capyroom/_t"
+LIVE  = os.environ.get("OTA_DIR", "/var/www/capyroom/_t")   # 官网正式线传 /var/www/capyroom/dl（build-android.yml release=true）
 # 🔴 用 /tmp 不用 ~：sudo bash -c 里的 ~ 会变成 root 的家目录
 # 🔴 暂存目录必须每次唯一（9-5）：测试线和 Play 线同时出包，共用 /tmp/capyroom_ota 时后进来的 rm -rf 把前一个正在拼的分块删了
 #    （"cat …part*: No such file"）。带上 run id，本地跑就带 pid。

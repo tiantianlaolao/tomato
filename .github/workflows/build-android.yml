@@ -22,10 +22,13 @@ on:
         description: '签名并出 APK + 上架旁装页（false = 只跑不签名的编译冒烟）'
         type: boolean
         default: false
+      release:
+        description: '国内官网正式包（不带内测按钮，落 /capyroom/dl/ + android.json，官网 /apps 卡自动读版本）；勾了自动签名'
+        type: boolean
+        default: false
 
 env:
-  # 内测包标记（同 build-adhoc.yml）：调汤里露出「内测：全部解锁」。以后的商店包 workflow 不设这个。
-  CAPY_INTERNAL: "1"
+  # 内测包标记 CAPY_INTERNAL 不在这里设：release=false 时由编译那一步 export（option_env! 只看有没有，设成空串也算有）
   PACKAGE: com.tybbtech.capyroom
   APP_LABEL: capyroom
   OTA_BASE: https://www.tybbtech.com/capyroom/_t
@@ -168,6 +171,8 @@ jobs:
       # 不配签名 → Gradle 出 app-universal-release-unsigned.apk；签名我们自己做（与 iOS 一样：每一步确定）
       - name: '编译 release APK（未签名）'
         run: |
+          # 测试包带内测按钮（全部解锁），官网正式包不带
+          if [ "${{ inputs.release }}" != "true" ]; then export CAPY_INTERNAL=1; echo "内测包"; else echo "官网正式包：不设 CAPY_INTERNAL"; fi
           npx tauri android build --apk --target aarch64 --ci \
             --config "{\"bundle\":{\"android\":{\"versionCode\":${BUILD_NUM}}}}"
           find src-tauri/gen/android/app/build/outputs -name "*.apk" | head
@@ -200,7 +205,7 @@ jobs:
       # ═══════════ sign=true：签名 + 旁装页 + OTA ═══════════
       # 🔴 这把 keystore = 备案绑定的正式钥匙（D:\ios密钥备份\capyroom\capyroom-release.jks），永不能换。
       - name: '签名（zipalign + apksigner）'
-        if: ${{ inputs.sign }}
+        if: ${{ inputs.sign || inputs.release }}
         env:
           KS_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -220,7 +225,7 @@ jobs:
           ls -l $RUNNER_TEMP/out
 
       - name: '生成 android.html（旁装页）'
-        if: ${{ inputs.sign }}
+        if: ${{ inputs.sign && !inputs.release }}
         run: |
           SIZE=$(( $(stat -c %s $RUNNER_TEMP/out/capyroom.apk) / 1048576 ))
           cat > $RUNNER_TEMP/out/android.html <<HTML
@@ -246,13 +251,13 @@ jobs:
           ls -l $RUNNER_TEMP/out/android.html
 
       - name: '准备 python 环境'
-        if: ${{ inputs.sign }}
+        if: ${{ inputs.sign || inputs.release }}
         run: |
           python3 -m venv $RUNNER_TEMP/venv
           $RUNNER_TEMP/venv/bin/python -m pip install --quiet paramiko
 
       - name: '上架 OTA'
-        if: ${{ inputs.sign }}
+        if: ${{ inputs.sign && !inputs.release }}
         env:
           OTA_SSH_HOST: ${{ secrets.OTA_SSH_HOST }}
           OTA_SSH_PORT: ${{ secrets.OTA_SSH_PORT }}
@@ -265,8 +270,38 @@ jobs:
           curl -sfI "${OTA_BASE}/capyroom.apk" | head -1
           echo "::notice title=安卓旁装页::${OTA_BASE}/android.html  (v${VERSION} / ${BUILD_NUM})"
 
+      # ═══════════ release=true：国内官网正式线（9-23）═══════════
+      # 落 /var/www/capyroom/dl/：capyroom.apk（永远最新）+ 带版本号的存档 + android.json（官网 /apps 卡按它显示版本/大小）
+      - name: '官网正式线：上架 dl/'
+        if: ${{ inputs.release }}
+        env:
+          OTA_SSH_HOST: ${{ secrets.OTA_SSH_HOST }}
+          OTA_SSH_PORT: ${{ secrets.OTA_SSH_PORT }}
+          OTA_SSH_USER: ${{ secrets.OTA_SSH_USER }}
+          OTA_SSH_PASSWORD: ${{ secrets.OTA_SSH_PASSWORD }}
+          OTA_DIR: /var/www/capyroom/dl
+        run: |
+          DL=https://www.tybbtech.com/capyroom/dl
+          O=$RUNNER_TEMP/out
+          SIZE=$(stat -c %s $O/capyroom.apk); SHA=$(sha256sum $O/capyroom.apk | cut -d' ' -f1)
+          cat > $O/android.json <<JSON
+          {
+            "versionCode": ${BUILD_NUM},
+            "versionName": "${VERSION}",
+            "url": "${DL}/capyroom.apk",
+            "archiveUrl": "${DL}/capyroom-v${VERSION}-${BUILD_NUM}.apk",
+            "size": ${SIZE},
+            "sha256": "${SHA}",
+            "date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          JSON
+          cat $O/android.json
+          $RUNNER_TEMP/venv/bin/python ci/ota_deploy.py $O/capyroom.apk "$O/capyroom-v${VERSION}-${BUILD_NUM}.apk" $O/android.json
+          curl -sfI "${DL}/capyroom.apk" | head -1
+          echo "::notice title=官网正式包::${DL}/capyroom.apk  (v${VERSION} / ${BUILD_NUM})"
+
       - uses: actions/upload-artifact@v4
-        if: ${{ inputs.sign }}
+        if: ${{ inputs.sign || inputs.release }}
         continue-on-error: true
         with:
           name: capyroom-android
@@ -274,7 +309,7 @@ jobs:
           if-no-files-found: warn
 
       - uses: actions/upload-artifact@v4
-        if: ${{ !inputs.sign }}
+        if: ${{ !inputs.sign && !inputs.release }}
         continue-on-error: true
         with:
           name: capyroom-android-unsigned
