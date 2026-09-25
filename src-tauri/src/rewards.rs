@@ -4,12 +4,13 @@
 //! 免得两份账对不上。状态落 rewards.json；目录 rewards_catalog.json 与前端是同一份文件
 //! （include_str! 编进二进制，前端按相对路径 fetch 同一份），改数不改代码。
 //!
-//! 四线口径：
-//! - 汤札牌：每天首次完成会话＝一个印，只攒不卖（这里只算"来访天数"，画牌是前端的事）
-//! - 手拭巾：累计分钟到里程碑即可领（earn），或直接买（buy）
-//! - 庭院小物：花可用分钟换（earn，扣 spent_min），或直接买
-//! - 访客：累计来访天数到即可领，或直接买
-//! 红线：分钟永不衰减、放弃会话不计、单会话按工作段数×60 分钟封顶（堵"一段三小时"）。
+//! 9-25 商业化 v3（`商业化方案说明书v3.md`）：**只卖主题包；物件和手拭巾一律不卖，按四条线解锁**——
+//! - 目录里每件带 line/n：gift 见面礼（无条件）/ focus 累计专注分钟 / rest 累计实际休息分钟 /
+//!   days 来访天数 / long 单场专注 ≥ 60 分钟的次数。四个计数都从 history.jsonl 重算（老数据照算）。
+//! - 汤札牌：每天首次完成会话＝一个印（这里只算"来访天数"，画牌是前端的事）。
+//! - 领取（earn）是用户自己点的；领到的小物若该槽位空着就自动摆上，手拭巾晾杆空着就自动挂上。
+//! - buy 路径只留给**老的真金白银单件**（恢复购买按 sku 落账，永久保留，不看门槛）。spent/avail 字段只为读兼容保留。
+//! 红线：分钟永不衰减、放弃会话不计、单会话按工作段数×60 分钟封顶（堵"一段三小时"），休息按休息段数×30 封顶。
 use chrono::{Datelike, Local, TimeZone};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,6 +20,10 @@ use std::path::Path;
 pub const CATALOG: &str = include_str!("../../src-mobile/assets/rewards_catalog.json");
 /// 单个工作段计入上限（分钟）
 pub const SEG_CAP_MIN: u64 = 60;
+/// 单个休息段计入上限（分钟）
+pub const REST_CAP_MIN: u64 = 30;
+/// "长专注"：一场完成的会话专注（封顶后）≥ 这么多分钟
+pub const LONG_MIN: u64 = 60;
 
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
 pub struct ThemeState {
@@ -47,7 +52,9 @@ pub struct Ledger {
     pub spent_min: u64,
     pub avail_min: u64,
     pub sessions_done: u32,
-    pub visit_days: u32,       // 有过完成会话的天数（累计，访客触发用）
+    pub visit_days: u32,       // 有过完成会话的天数（累计；days 线用）
+    pub rest_min: u64,         // 完成会话里实际休息分钟（跳过的不计；rest 线用）
+    pub long_count: u32,       // 专注 ≥ LONG_MIN 的完成会话场数（long 线用）
     pub month: String,         // "2026-09"
     pub month_days: Vec<u32>,  // 本月盖了印的日子（1..31）
     /// 近 400 天每天的专注分钟（"YYYY-MM-DD" → 分钟，只有有完成会话的日子才有键）。
@@ -70,6 +77,7 @@ struct Rec {
     #[serde(default)] started_ms: u64,
     #[serde(default)] ended_ms: u64,
     #[serde(default)] work_secs: u64,
+    #[serde(default)] rest_secs: u64,
     #[serde(default)] stages: Vec<StageLite>,
 }
 #[derive(Deserialize)]
@@ -83,16 +91,26 @@ pub fn session_minutes(rec_json: &str) -> Option<u64> {
     Some((r.work_secs / 60).min(SEG_CAP_MIN * works))
 }
 
+/// 一场会话计多少休息分钟：只算完成的；按实际休息时间；按休息段数 × 30 封顶。
+pub fn session_rest_minutes(rec_json: &str) -> Option<u64> {
+    let r: Rec = serde_json::from_str(rec_json).ok()?;
+    if !r.completed { return None; }
+    let rests = r.stages.iter().filter(|s| s.kind != "work").count().max(1) as u64;
+    Some((r.rest_secs / 60).min(REST_CAP_MIN * rests))
+}
+
 pub fn ledger_from(history: &str, spent_min: u64, now_ms: u64) -> Ledger {
     let now = Local.timestamp_millis_opt(now_ms as i64).single().unwrap_or_else(Local::now);
     let (cy, cm) = (now.year(), now.month());
-    let mut total = 0u64; let mut done = 0u32;
+    let mut total = 0u64; let mut done = 0u32; let mut rest = 0u64; let mut long = 0u32;
     let mut days: BTreeSet<(i32, u32, u32)> = BTreeSet::new();
     let mut per_day: BTreeMap<String, u32> = BTreeMap::new();
     let keep_from = now_ms.saturating_sub(400 * 86_400_000);
     for line in history.lines() {
         let Some(mins) = session_minutes(line) else { continue };
         total += mins; done += 1;
+        rest += session_rest_minutes(line).unwrap_or(0);
+        if mins >= LONG_MIN { long += 1; }
         let r: Rec = match serde_json::from_str(line) { Ok(r) => r, Err(_) => continue };
         let t = if r.ended_ms > 0 { r.ended_ms } else { r.started_ms };
         if let Some(d) = Local.timestamp_millis_opt(t as i64).single() {
@@ -105,7 +123,7 @@ pub fn ledger_from(history: &str, spent_min: u64, now_ms: u64) -> Ledger {
     let month_days: Vec<u32> = days.iter().filter(|(y, m, _)| *y == cy && *m == cm).map(|(_, _, d)| *d).collect();
     Ledger {
         total_min: total, spent_min, avail_min: total.saturating_sub(spent_min),
-        sessions_done: done, visit_days: days.len() as u32,
+        sessions_done: done, visit_days: days.len() as u32, rest_min: rest, long_count: long,
         month: format!("{cy:04}-{cm:02}"), month_days, days: per_day,
     }
 }
@@ -229,6 +247,21 @@ pub fn purchase(dir: &Path, theme: &str, kind: &str, id: &str, tx: &str, now_ms:
     }
 }
 
+/// 这件的解锁条件满没满：满了 None，没满返回"还差什么"（中文，UI 直接显示；前端另有同口径的算法给暗色物件用）。
+pub fn gap(item: &serde_json::Value, l: &Ledger) -> Option<String> {
+    let line = item.get("line").and_then(|v| v.as_str()).unwrap_or("");
+    let n = item.get("n").and_then(|v| v.as_u64()).unwrap_or(u64::MAX);
+    let hm = |m: u64| if m >= 60 { format!("{} 小时 {} 分", m / 60, m % 60) } else { format!("{m} 分钟") };
+    match line {
+        "gift" => None,
+        "focus" => (l.total_min < n).then(|| format!("再专注 {}", hm(n - l.total_min))),
+        "rest" => (l.rest_min < n).then(|| format!("再好好休息 {}", hm(n - l.rest_min))),
+        "days" => ((l.visit_days as u64) < n).then(|| format!("再来 {} 天", n - l.visit_days as u64)),
+        "long" => ((l.long_count as u64) < n).then(|| format!("再来 {} 次 {} 分钟以上的长专注", n - l.long_count as u64, LONG_MIN)),
+        _ => Some("还没到解锁条件".into()),
+    }
+}
+
 /// kind: towel | prop | visitor；via: earn | buy。返回更新后的视图；不满足条件返回中文原因（UI 直接显示）。
 pub fn unlock(dir: &Path, theme: &str, kind: &str, id: &str, via: &str, now_ms: u64) -> Result<RewardsView, String> {
     let mut f = load(dir);
@@ -239,18 +272,9 @@ pub fn unlock(dir: &Path, theme: &str, kind: &str, id: &str, via: &str, now_ms: 
     let st = f.themes.entry(theme.to_string()).or_default();
     let owned = match kind { "towel" => &mut st.towels, "prop" => &mut st.props, _ => &mut st.visitors };
     if owned.iter().any(|x| x == id) { return Err("已经有了".into()); }
-    let mut spend = 0u64;
     match via {
         "earn" => match kind {
-            "towel" => {
-                let need = item.get("min").and_then(|v| v.as_u64()).unwrap_or(u64::MAX);
-                if ledger.total_min < need { return Err(format!("还差 {} 分钟", need - ledger.total_min)); }
-            }
-            "prop" => {
-                let cost = item.get("cost_min").and_then(|v| v.as_u64()).unwrap_or(u64::MAX);
-                if ledger.avail_min < cost { return Err(format!("可用分钟不够，还差 {} 分钟", cost - ledger.avail_min)); }
-                spend = cost;
-            }
+            "towel" | "prop" => { if let Some(g) = gap(&item, &ledger) { return Err(g); } }
             _ => {
                 let need = item.get("days").and_then(|v| v.as_u64()).unwrap_or(u64::MAX) as u32;
                 if ledger.visit_days < need { return Err(format!("再来 {} 天它就会来", need - ledger.visit_days)); }
@@ -261,7 +285,12 @@ pub fn unlock(dir: &Path, theme: &str, kind: &str, id: &str, via: &str, now_ms: 
     }
     owned.push(id.to_string());
     if kind == "towel" && st.hung.is_empty() { st.hung = id.to_string(); }
-    f.spent_min += spend;
+    // 9-25：领到的小物，该槽位空着就自动摆上（已经摆了别的就只领不换）
+    if kind == "prop" {
+        if let Some(slot) = item.get("slot").and_then(|v| v.as_str()) {
+            if !st.placed.contains_key(slot) { st.placed.insert(slot.to_string(), id.to_string()); }
+        }
+    }
     save(dir, &f);
     Ok(view(dir, theme, now_ms))
 }
@@ -381,38 +410,65 @@ mod tests {
         assert_eq!(v, vec![10, 50]);
     }
 
+    /// 带休息段的一场：works 个工作段 + rests 个休息段，实际休息 rest_secs
+    fn rec_r(work_secs: u64, works: usize, rest_secs: u64, rests: usize, ended_ms: u64) -> String {
+        let mut st: Vec<String> = (0..works).map(|_| r#"{"kind":"work","secs":1500}"#.to_string()).collect();
+        st.extend((0..rests).map(|_| r#"{"kind":"break","secs":300}"#.to_string()));
+        format!(r#"{{"plan_name":"x","completed":true,"started_ms":{},"ended_ms":{ended_ms},"work_secs":{work_secs},"rest_secs":{rest_secs},"activity":"","stages":[{}]}}"#,
+            ended_ms.saturating_sub(1000), st.join(","))
+    }
+
     #[test]
-    fn unlock_earn_buy_place_hang() {
+    fn rest_and_long_counters() {
+        let now = 1_800_000_000_000u64;
+        // 休息：一段休息封顶 30（实际 50 分钟→30）；两段休息实际 20 分钟→20；放弃的不算
+        assert_eq!(session_rest_minutes(&rec_r(1500, 1, 3000, 1, now)), Some(30));
+        assert_eq!(session_rest_minutes(&rec_r(3000, 2, 1200, 2, now)), Some(20));
+        assert_eq!(session_rest_minutes(&rec(false, 1500, 1, now)), None);
+        // 长专注：一场 ≥60 分钟才算（两段 2×25=50 不算；两段 2×35=70 算；一段 3 小时封顶 60 也算）
+        let h = [rec_r(3000, 2, 600, 1, now), rec_r(4200, 2, 600, 1, now - DAY), rec(true, 10800, 1, now - 2 * DAY)].join("\n");
+        let l = ledger_from(&h, 0, now);
+        assert_eq!(l.long_count, 2);
+        assert_eq!(l.rest_min, 20);
+    }
+
+    #[test]
+    fn four_lines_unlock_autoplace_and_hang() {
         let d = tmp("unlock"); let now = 1_800_000_000_000u64;
-        // 5 场完成，每场 25 分钟共 125 分钟，跨 5 天（手算：目录里 t01=60 / t02=180 / windbell=120 / orchid=150 / v01=7 天）
-        let h: Vec<String> = (0..5).map(|i| rec(true, 1500, 1, now - i * DAY)).collect();
-        fs::write(d.join("history.jsonl"), h.join("\n")).unwrap();
-        // 手拭巾 t01 要 60 分钟：够
+        // 目录（手算）：t01 gift / t02 focus 60 / teatray rest 30 / windbell days 2 / orchid days 4 / lotus long 1
+        // 零历史：见面礼无条件能领，领了自动挂上
+        fs::write(d.join("history.jsonl"), "").unwrap();
         let v = unlock(&d, "ink", "towel", "t01", "earn", now).unwrap();
         assert_eq!(v.state.towels, vec!["t01"]); assert_eq!(v.state.hung, "t01");
-        // t02 要 180：125 不够，报差额 55
         let e = unlock(&d, "ink", "towel", "t02", "earn", now).unwrap_err();
-        assert!(e.contains("还差 55"), "{e}");
-        // 小物 orchid 150 分钟：可用 125 不够
-        assert!(unlock(&d, "ink", "prop", "orchid", "earn", now).is_err());
-        // windbell 120：够，扣掉后可用 5
+        assert!(e.contains("再专注 1 小时 0 分"), "{e}");
+        // 3 天各一场：25 分钟专注 + 5 分钟休息 → 专注 75、休息 15、来访 3 天、长专注 0
+        let h: Vec<String> = (0..3).map(|i| rec_r(1500, 1, 300, 1, now - i * DAY)).collect();
+        fs::write(d.join("history.jsonl"), h.join("\n")).unwrap();
+        assert!(unlock(&d, "ink", "towel", "t02", "earn", now).is_ok(), "专注 75 ≥ 60");
+        let e = unlock(&d, "ink", "prop", "teatray", "earn", now).unwrap_err();
+        assert!(e.contains("再好好休息 15 分钟"), "{e}");
         let v = unlock(&d, "ink", "prop", "windbell", "earn", now).unwrap();
-        assert_eq!(v.ledger.spent_min, 120); assert_eq!(v.ledger.avail_min, 5);
-        assert_eq!(v.ledger.total_min, 125, "累计分钟不因花费而减");
-        // 买：不看分钟，记流水
-        let v = unlock(&d, "ink", "prop", "koi", "buy", now).unwrap();
-        assert_eq!(v.state.purchases.len(), 1);
-        // 重复解锁拒绝
-        assert!(unlock(&d, "ink", "prop", "koi", "buy", now).is_err());
-        // 摆放：位置要对
+        assert_eq!(v.state.placed.get("willow").map(String::as_str), Some("windbell"), "槽位空着→自动摆上");
+        let e = unlock(&d, "ink", "prop", "orchid", "earn", now).unwrap_err();
+        assert!(e.contains("再来 1 天"), "{e}");
+        let e = unlock(&d, "ink", "prop", "lotus", "earn", now).unwrap_err();
+        assert!(e.contains("长专注"), "{e}");
+        // 重复领取拒绝
+        assert!(unlock(&d, "ink", "prop", "windbell", "earn", now).is_err());
+        // 已经摆了别的：只领不换（先把 lamp_side 摆上老买来的石凳，再补来访天数领兰）
+        purchase(&d, "ink", "prop", "stool", "tx-old", now).unwrap();
+        assert_eq!(load(&d).themes["ink"].placed.get("lamp_side").map(String::as_str), Some("stool"));
+        let mut h2 = h.clone(); h2.push(rec_r(1500, 1, 300, 1, now - 3 * DAY));
+        fs::write(d.join("history.jsonl"), h2.join("\n")).unwrap();
+        let v = unlock(&d, "ink", "prop", "orchid", "earn", now).unwrap();
+        assert_eq!(v.state.placed.get("lamp_side").map(String::as_str), Some("stool"), "占着就不换");
+        // 摆放：位置要对；撤下
         assert!(place(&d, "ink", "wall", "windbell", now).is_err());
-        let v = place(&d, "ink", "willow", "windbell", now).unwrap();
-        assert_eq!(v.state.placed.get("willow").unwrap(), "windbell");
+        let v = place(&d, "ink", "lamp_side", "orchid", now).unwrap();
+        assert_eq!(v.state.placed.get("lamp_side").map(String::as_str), Some("orchid"));
         let v = place(&d, "ink", "willow", "", now).unwrap();
-        assert!(v.state.placed.is_empty());
-        // 访客：需要 7 天，只有 5 天
-        let e = unlock(&d, "ink", "visitor", "v01", "earn", now).unwrap_err();
-        assert!(e.contains("再来 2 天"), "{e}");
+        assert!(v.state.placed.get("willow").is_none());
         // 挂巾
         assert!(hang(&d, "ink", "t08", now).is_err());
         assert_eq!(hang(&d, "ink", "", now).unwrap().state.hung, "");
@@ -443,19 +499,20 @@ mod tests {
     #[test]
     fn internal_grant_then_revoke_keeps_real_ones() {
         let d = tmp("internal"); let now = 1_800_000_000_000u64;
-        // 先有一场完成 → 攒到 t01（60 分钟够），再真买 koi
+        // 先领见面礼 t01（攒来的），再真买 koi（老的单件购买）
         fs::write(d.join("history.jsonl"), [rec(true, 3600, 1, now), rec(true, 3600, 1, now - DAY)].join("\n")).unwrap();
         unlock(&d, "ink", "towel", "t01", "earn", now).unwrap();
         purchase(&d, "ink", "prop", "koi", "tx-real", now).unwrap();
         let v = grant_all(&d, "ink", now).unwrap();
         assert!(v.owned_themes.contains(&"onsen".to_string()));
-        assert_eq!(v.state.towels.len(), 8); assert_eq!(v.state.props.len(), 8); assert_eq!(v.state.visitors.len(), 1);
+        assert_eq!(v.state.towels.len(), 8); assert_eq!(v.state.props.len(), 8); assert!(v.state.visitors.is_empty(), "访客暂缓，目录里没有");
         place(&d, "ink", "willow", "windbell", now).unwrap();
         let v = revoke_internal(&d, "ink", now).unwrap();
         assert!(v.owned_themes.is_empty());
         assert_eq!(v.state.towels, vec!["t01"], "攒来的留着");
         assert_eq!(v.state.props, vec!["koi"], "真买的留着");
-        assert!(v.state.placed.is_empty(), "内测摆的撤下");
+        assert!(v.state.placed.get("willow").is_none(), "内测摆的撤下");
+        assert_eq!(v.state.placed.get("water_near").map(String::as_str), Some("koi"), "真买的自动摆上，撤内测不动它");
         assert_eq!(v.state.purchases.len(), 1); assert_eq!(v.state.purchases[0].tx, "tx-real");
         let _ = fs::remove_dir_all(&d);
     }

@@ -28,6 +28,7 @@ let view = null, plans = [], opsTimer = 0, settings = null;
 
 if (qs.get('boxes')) window.__SHOWBOXES = true;   // 验收用：画出入口命中区
 if (qs.get('matte')) window.__SHOWMATTE = true;   // 验收用：角色通道当前帧红色叠上来看对不对位
+if (!HAS_BRIDGE) window.__feedDemo = (k) => feed(fixture(k));   // 验收用（只在浏览器 DEMO）：切状态看"进入休息"提示
 Scene.mount($('stage'));
 Scene.start();
 // 底部提示跟主题走（每个场景包自带 hint 文案）
@@ -76,9 +77,25 @@ function feed(v) {
   if (!v) return;
   // 会话完成/结束＝流水多一行 → 同步引擎该推了（状态从跑着变成 done/idle 才算，别每秒都碰）
   if (view && view.status !== v.status && (v.status === 'done' || v.status === 'idle')) { try { Account.touch(); } catch (e) {} }
+  const wasPh = view ? Scene.phaseOf(view) : null;
   view = v;
   Scene.update(v);
   syncUI();
+  // 9-25：专注段刚结束、进入休息 → 有新解锁就底部一行轻提示（专注时绝不打扰；同一批只提示一次）
+  if (wasPh === 'work' && Scene.phaseOf(v) === 'break') rwNotice(false);
+}
+// 轻提示：一行字，几秒后自己淡掉，不弹窗、不挡画面。gift=true 是启动时（空闲态）专门报见面礼
+function rwNotice(gift) {
+  RW.load().then(() => {
+    const n = RW.unnoticed().filter(c => !gift || c.item.line === 'gift');
+    if (!n.length) return;
+    RW.markNoticed(n);
+    const t = document.createElement('div'); t.className = 'rwtoast';
+    t.textContent = gift ? '庭院里有一份见面礼，去沐录看看' : '庭院里有新东西可以领了';
+    $('ui').appendChild(t);
+    setTimeout(() => t.classList.add('out'), 4200);
+    setTimeout(() => t.remove(), 5200);
+  }).catch(() => {});
 }
 
 function phase() { return Scene.phaseOf(view); }
@@ -658,18 +675,18 @@ function renderAccount(box, rowEl) {
   box.appendChild(msg);
 }
 
-// ── 沐录：三页（汤札 / 收藏 / 庭院）+ 会话流水（P3，9-2 定案）──
-// 🔴 布置和购买都收在这里，场景里不新增入口；"买"默认隐藏（设置里的开发开关），P4 接 IAP 后打开。
+// ── 沐录：两页（汤札 / 庭院）+ 会话流水（P3 9-2 定案；9-25 商业化 v3：收藏并入庭院、物件不卖）──
+// 🔴 布置收在这里，场景里不新增入口。唯一的购买是主题包（调汤里）。
 let recTab = 'stamps';
 async function renderHistory() {
   const box = $('sheetBody');
   const q = new URLSearchParams(location.search);
-  if (q.get('tab') && !renderHistory._tabInit) { recTab = q.get('tab'); renderHistory._tabInit = true; }
+  if (q.get('tab') && !renderHistory._tabInit) { recTab = q.get('tab') === 'towels' ? 'garden' : q.get('tab'); renderHistory._tabInit = true; }
   box.innerHTML = '<div class="tip">读取中…</div>';
   try { if (!RW.view) await RW.load(); } catch (e) { box.innerHTML = '<div class="tip">读不到账本：' + e + '</div>'; return; }
   box.innerHTML = '';
   const tabs = document.createElement('div'); tabs.className = 'tabs';
-  [['stamps', '汤札'], ['towels', '收藏'], ['garden', '庭院']].forEach(([k, t]) => {
+  [['stamps', '汤札'], ['garden', '庭院']].forEach(([k, t]) => {
     const b = document.createElement('button'); b.textContent = t; b.className = recTab === k ? 'on' : '';
     b.onclick = () => { recTab = k; renderHistory(); };
     tabs.appendChild(b);
@@ -677,7 +694,6 @@ async function renderHistory() {
   box.appendChild(tabs);
   const body = document.createElement('div'); box.appendChild(body);
   if (recTab === 'stamps') return renderStamps(body);
-  if (recTab === 'towels') return renderTowels(body);
   return renderGarden(body);
 }
 // 缩略图：有真图（assets/p3/<主题>/<id>.png）就盖上去，没有就露出底下的两个字
@@ -705,20 +721,14 @@ function rwBuy(body, kind, item, theme, after) {
   no.onclick = () => bar.remove();
   bar.appendChild(ok); bar.appendChild(no);
 }
-// 进度提示：一句"还差多少"，旁边直接给「买下 ¥N」（能买时）。规矩：点物件本身永远是看进度，买只在按钮上，
-// 两件事一眼分得开（9-4 用户反馈：点同一个位置分不清是买还是看还差多久）
-function rwHint(body, msg, buy) {
+// 进度提示：一句"还差什么"（9-25 起物件不卖，提示行不再带购买按钮）
+function rwHint(body, msg) {
   const bar = rwBar(body, 'info');
   const s = document.createElement('span'); s.textContent = msg; bar.appendChild(s);
-  if (buy && Store.canBuy()) {
-    const b = document.createElement('button'); b.className = 'btn'; b.textContent = ('买下 ' + Store.price(buy.item)).trim();
-    b.onclick = () => rwBuy(body, buy.kind, buy.item, buy.theme, buy.after);
-    bar.appendChild(b);
-  }
   const no = document.createElement('button'); no.className = 'btn ghost'; no.textContent = '知道了';
   no.onclick = () => bar.remove(); bar.appendChild(no);
 }
-const rwErr = (body, e) => rwHint(body, String(e && e.message || e), null);
+const rwErr = (body, e) => rwHint(body, String(e && e.message || e));
 // 汤札（9-3 用户三次把关后的定案）：**一天一块牌**——
 //   ① 本周 7 个挂钩（一～日）：来过的那天挂一块牌（tag.png 当底：日期 / 朱印「汤」/ 当天分钟），没来的只剩空钩；
 //      今天没泡＝空钩+一句"泡一场，挂上今天的牌"；点一块牌→下面流水只看那天；只看本周不翻页
@@ -815,105 +825,77 @@ async function renderStamps(body) {
   box.appendChild(n.firstElementChild);
 }
 
-// 收藏：手拭巾（固定顺序里程碑；到了就领；也可买）
-function renderTowels(body) {
-  const v = RW.view, L = v.ledger, hung = v.state.hung;
-  const towels = v.catalog.towels || [];
-  // 整套（9-4 用户点名"没找到一次性买全部"）：目录 towel_set 一个 sku 买八条；全有了就不露
-  const setInfo = v.catalog.towel_set;
-  if (setInfo && Store.canBuy() && towels.some(t => !RW.owned('towel', t.id))) {
-    const set = Object.assign({ id: 'set', name: '整套手拭巾' }, setInfo);
-    const bar = document.createElement('div'); bar.className = 'rwask set';
-    bar.innerHTML = '<span><b>整套手拭巾</b><small>八条一次拥有</small></span>';
-    const b = document.createElement('button'); b.className = 'btn'; b.textContent = ('买下 ' + Store.price(set)).trim();
-    b.onclick = () => rwBuy(body, 'towelset', set, RW.theme, renderHistory);
-    bar.appendChild(b); body.appendChild(bar);
-  }
-  const grid = document.createElement('div'); grid.className = 'rwgrid';
-  towels.forEach(t => {
-    const own = RW.owned('towel', t.id), can = L.total_min >= t.min;
-    const el = document.createElement('div');
-    el.className = 'rwitem' + (own ? ' own' : '') + (hung === t.id ? ' hung' : '');
-    el.innerHTML = rwArt(t.id, t.name.slice(0, 2)) + '<b>' + t.name + '</b>'   // 9-2 用户定：收藏里看到的就是挂出来的（搭竿版）
-      + '<span>' + (own ? (hung === t.id ? '挂着' : '点一下挂上') : (can ? '可以领了' : '泡满 ' + Math.floor(t.min / 60) + ' 小时' + (t.min % 60 ? (t.min % 60) + ' 分' : ''))) + '</span>';
-    el.onclick = async () => {
-      try {
-        if (own) await RW.hang(hung === t.id ? '' : t.id);
-        else if (can) await RW.unlock('towel', t.id, 'earn');
-        // 没到里程碑：点巾子＝看还差多少（提示行里顺带给"买下"按钮），不直接进购买
-        else { rwHint(body, '「' + t.name + '」还差 ' + (t.min - L.total_min) + ' 分钟就能领', { kind: 'towel', item: t, theme: RW.theme, after: renderHistory }); return; }
-        renderHistory();
-      } catch (e) { rwErr(body, e); }
-    };
-    if (!own && !can && Store.canBuy()) {
-      const b = document.createElement('button'); b.className = 'buy'; b.textContent = Store.price(t) || '买下';
-      b.onclick = (ev) => { ev.stopPropagation(); rwBuy(body, 'towel', t, RW.theme, renderHistory); };
-      el.appendChild(b);
-    }
-    grid.appendChild(el);
-  });
-  body.appendChild(grid);
-  const tip = document.createElement('div'); tip.className = 'tip';
-  tip.textContent = '累计泡够就能领，顺序固定。已累计 ' + L.total_min + ' 分钟。';
-  body.appendChild(tip);
-}
-
-// 庭院：固定槽位，一槽一件；花可用分钟换，或买
+// 庭院（9-25 商业化 v3）：手拭巾＝「晾杆」槽位，和其他槽位并列；全部物件都显示——
+//   locked 暗色（点＝还差什么）/ ready 亮色带光点（点＝领取，放大到中央再回原位）/ own 已领（点＝摆上）/ placed 摆着（点＝撤下）
+//   领到的：槽位空着内核自动摆上（晾杆空着自动挂上）。物件不卖；只卖主题（调汤里）。
 function renderGarden(body) {
   const v = RW.view, L = v.ledger, cat = v.catalog;
-  const head = document.createElement('div'); head.className = 'sub';
-  head.textContent = '可用 ' + L.avail_min + ' 分钟（累计 ' + L.total_min + '，已用 ' + L.spent_min + '）';
+  const hm = (m) => m >= 60 ? (Math.floor(m / 60) + ' 小时' + (m % 60 ? ' ' + (m % 60) + ' 分' : '')) : (m + ' 分钟');
+  const head = document.createElement('div'); head.className = 'rwstats';
+  head.innerHTML = '<span><b>' + hm(L.total_min || 0) + '</b><small>专注</small></span>'
+    + '<span><b>' + hm(L.rest_min || 0) + '</b><small>休息</small></span>'
+    + '<span><b>' + (L.visit_days || 0) + ' 天</b><small>来访</small></span>'
+    + '<span><b>' + (L.long_count || 0) + ' 次</b><small>长专注</small></span>';
   body.appendChild(head);
-  (cat.slots || []).forEach(sl => {
+  const section = (name, curName, items, kind, slotId) => {
     const wrap = document.createElement('div'); wrap.className = 'slot';
-    const cur = RW.placedAt(sl.id);
-    const curName = cur ? (RW.cat('props', cur) || {}).name : '空着';
-    wrap.innerHTML = '<div class="slot-head"><b>' + sl.name + '</b><span>' + curName + '</span></div>';
+    wrap.innerHTML = '<div class="slot-head"><b>' + name + '</b><span>' + curName + '</span></div>';
     const row = document.createElement('div'); row.className = 'rwrow';
-    (cat.props || []).filter(p => p.slot === sl.id).forEach(p => {
-      const own = RW.owned('prop', p.id), placed = cur === p.id, can = L.avail_min >= p.cost_min;
+    items.forEach(it => {
+      const st = RW.stateOf(kind, it);
       const el = document.createElement('div');
-      el.className = 'rwitem small' + (own ? ' own' : '') + (placed ? ' hung' : '');
-      el.innerHTML = rwArt(p.id, p.name.slice(0, 2)) + '<b>' + p.name + '</b>'
-        + '<span>' + (placed ? '摆着' : own ? '点一下摆上' : (p.cost_min + ' 分钟换')) + '</span>';
+      el.className = 'rwitem small ' + st;
+      const label = { placed: kind === 'towel' ? '挂着' : '摆着', own: kind === 'towel' ? '点一下挂上' : '点一下摆上', ready: '可以领了', locked: '未解锁' }[st];
+      el.innerHTML = rwArt(it.id, it.name.slice(0, 2)) + '<b>' + it.name + '</b><span>' + label + '</span>';
       el.onclick = async () => {
         try {
-          if (own) await RW.place(sl.id, placed ? '' : p.id);
-          else if (can) await RW.unlock('prop', p.id, 'earn');
-          else { rwHint(body, '「' + p.name + '」可用分钟还差 ' + (p.cost_min - L.avail_min) + ' 分钟', { kind: 'prop', item: p, theme: RW.theme, after: renderHistory }); return; }
+          if (st === 'locked') { rwHint(body, '「' + it.name + '」' + RW.gap(it)); return; }
+          if (st === 'ready') { await rwClaim(el, kind, it); return; }
+          if (kind === 'towel') await RW.hang(st === 'placed' ? '' : it.id);
+          else await RW.place(slotId, st === 'placed' ? '' : it.id);
           renderHistory();
         } catch (e) { rwErr(body, e); }
       };
-      if (!own && Store.canBuy()) {
-        const b = document.createElement('button'); b.className = 'buy'; b.textContent = Store.price(p) || '买下';
-        b.onclick = (ev) => { ev.stopPropagation(); rwBuy(body, 'prop', p, RW.theme, renderHistory); };
-        el.appendChild(b);
-      }
-      row.appendChild(el);
-    });
-    wrap.appendChild(row);
-    body.appendChild(wrap);
-  });
-  // 访客：按来访天数
-  const vs = cat.visitors || [];
-  if (vs.length) {
-    const wrap = document.createElement('div'); wrap.className = 'slot';
-    wrap.innerHTML = '<div class="slot-head"><b>访客</b><span>一共来过 ' + L.visit_days + ' 天</span></div>';
-    const row = document.createElement('div'); row.className = 'rwrow';
-    // 9-4 用户定：访客这条线（阿沐来访的演出）还没做 → 置灰「敬请期待」，不点不卖。
-    //   🔴 提交审核时 visitor 那个 sku 别附到版本上（ASC 里留着不提交），界面里没有入口的内购会被打回。
-    //   已经拥有的（内测全解锁）照旧显示"常来"。
-    vs.forEach(p => {
-      const own = RW.owned('visitor', p.id);
-      const el = document.createElement('div'); el.className = 'rwitem small soon' + (own ? ' own' : '');
-      el.innerHTML = rwArt(p.id, '豚') + '<b>' + p.name + '</b><span>' + (own ? '常来' : '敬请期待') + '</span>';
       row.appendChild(el);
     });
     wrap.appendChild(row); body.appendChild(wrap);
+  };
+  const towels = cat.towels || [];
+  if (towels.length) {
+    const hung = v.state.hung;
+    section((cat.rack && cat.rack.name) || '晾杆', hung ? (RW.cat('towels', hung) || {}).name : '空着', towels, 'towel', '');
   }
+  (cat.slots || []).forEach(sl => {
+    const items = (cat.props || []).filter(p => p.slot === sl.id);
+    if (!items.length) return;
+    const cur = RW.placedAt(sl.id);
+    section(sl.name, cur ? (RW.cat('props', cur) || {}).name : '空着', items, 'prop', sl.id);
+  });
   const tip = document.createElement('div'); tip.className = 'tip';
-  tip.textContent = '换来的东西永远是你的；分钟只增不减，不来也不会掉。';
+  tip.textContent = '专注、休息、常来、长专注，各自会带来不同的东西。领到的永远是你的，只增不减。';
   body.appendChild(tip);
+}
+// 领取：先落账（内核判门槛、空槽自动摆上），成功后物件放大到屏幕中央停一下再缩回原位，然后重绘
+async function rwClaim(el, kind, it) {
+  if (el.dataset.busy) return; el.dataset.busy = '1';
+  await RW.unlock(kind, it.id, 'earn');
+  const art = el.querySelector('.rw-art'), r = art.getBoundingClientRect();
+  const fly = art.cloneNode(true); fly.classList.add('rwfly');
+  Object.assign(fly.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+  document.body.appendChild(fly);
+  const dx = window.innerWidth / 2 - (r.left + r.width / 2), dy = window.innerHeight * 0.42 - (r.top + r.height / 2);
+  const k = Math.min(3.2, (window.innerWidth * 0.5) / r.width);
+  const big = 'translate(' + dx + 'px,' + dy + 'px) scale(' + k + ')';
+  try {
+    // 缓动写在每一段上、整体 linear：整体套 ease-out 会把"停一下"压没（9-25 实测 150ms 就冲顶、剩下一秒全在缩回）
+    await fly.animate([{ transform: 'none', opacity: 0.6, easing: 'cubic-bezier(.2,.8,.2,1)' },
+                       { transform: big, opacity: 1, offset: 0.3 },
+                       { transform: big, opacity: 1, offset: 0.72, easing: 'cubic-bezier(.5,0,.3,1)' },
+                       { transform: 'none', opacity: 1 }],
+      { duration: 1600, easing: 'linear' }).finished;
+  } catch (e) {}
+  fly.remove();
+  renderHistory();
 }
 
 // 🔴 入口在**场景物件**上（§9：画面里没有悬浮按钮）。点哪件东西开哪个面板，
@@ -1044,6 +1026,7 @@ if (!HAS_BRIDGE) {
     const cur = Scene.scene && Scene.scene.id, info = cur && RW.themeInfo(cur);
     // 浏览器验收：?scene=onsen 显式指定的不退回（要看日系时还能看）；只有本机记住的 hidden 主题才退
     if (cur && ((!RW.ownsTheme(cur) && (Store.enforce() || (HAS_BRIDGE && !RW.internal))) || (info && info.hidden && !qs.get('scene')))) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
+    if (view && (view.status === 'idle' || view.status === 'done')) setTimeout(() => rwNotice(true), 1500);   // 见面礼提示（同真机路径）
   }).catch(() => {});
   setInterval(() => {
     if (!view || view.status !== 'running') return;
@@ -1084,6 +1067,8 @@ if (!HAS_BRIDGE) {
         const cur = Scene.scene && Scene.scene.id, info = cur && RW.themeInfo(cur);
         // 付费没买、或目录里标了 hidden（9-4 日系暂时下掉）→ 退回中国风
         if (cur && ((!RW.ownsTheme(cur) && (Store.enforce() || (HAS_BRIDGE && !RW.internal))) || (info && info.hidden))) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
+        // 9-25：见面礼（无条件）——空闲时打开 App 提示一次；跑着的会话里不说
+        if (!view || view.status === 'idle' || view.status === 'done') setTimeout(() => rwNotice(true), 1500);
       }).catch(() => {});
       // 语言同步：前端按系统语言定，内核只在发系统通知时用它选文案；不一致就推一次
       if (settings && settings.lang !== I18N.lang) { settings.lang = I18N.lang; pushSettings(); }

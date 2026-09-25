@@ -211,12 +211,35 @@ input[type=range]{flex:1;accent-color:#e8915c}
 .rwitem.small{flex:none;width:76px}
 .rwitem b{display:block;font-weight:600;color:rgba(203,184,154,.7);margin-top:5px}
 .rwitem span{display:block;font-size:10px;margin-top:2px}
-.rwitem.own{border-color:rgba(232,145,92,.45)}
-.rwitem.own b{color:#f0c9a0}
-.rwitem.hung{background:rgba(58,38,22,.8)}
+.rwitem.own,.rwitem.placed{border-color:rgba(232,145,92,.45)}
+.rwitem.own b,.rwitem.placed b{color:#f0c9a0}
+.rwitem.placed{background:rgba(58,38,22,.8)}
+/* 9-25 v3：全部物件都显示。locked＝暗色剪影；ready＝亮色带光点（能领） */
+.rwitem.locked .rw-art{opacity:.22;filter:grayscale(1) brightness(.5)}
+.rwitem.locked b{color:rgba(203,184,154,.4)}
+.rwitem.ready{border-color:rgba(240,201,160,.85);box-shadow:0 0 10px rgba(240,190,120,.35)}
+.rwitem.ready .rw-art{opacity:1}
+.rwitem.ready b,.rwitem.ready span{color:#f6d3a6}
+.rwitem.ready::after{content:"";position:absolute;right:6px;top:6px;width:7px;height:7px;border-radius:50%;
+  background:#f0a060;box-shadow:0 0 6px #f0a060;animation:rwdot 1.6s ease-in-out infinite}
+@keyframes rwdot{50%{opacity:.35}}
+.rwstats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center;margin-bottom:4px}
+.rwstats span{padding:6px 2px;border-radius:10px;background:rgba(28,22,16,.6);border:1px solid rgba(120,96,68,.25)}
+.rwstats b{display:block;font-size:12px;color:#f0c9a0;font-weight:600}
+.rwstats small{font-size:10px;color:rgba(203,184,154,.55)}
+/* 领取动画：缩略图放大到屏幕中央停一下再回原位（fixed 层，脱离面板滚动） */
+.rwfly{position:fixed;z-index:60;margin:0;opacity:1;pointer-events:none;
+  box-shadow:0 0 0 2px rgba(240,201,160,.7),0 0 28px 8px rgba(240,190,120,.55);transform-origin:center}
+/* 休息开始时的轻提示：底部一行，自己淡掉 */
+.rwtoast{position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 96px);transform:translateX(-50%);
+  z-index:40;max-width:86%;padding:9px 16px;border-radius:18px;font-size:13px;color:#f0c9a0;
+  background:rgba(28,20,14,.78);border:1px solid rgba(232,145,92,.35);pointer-events:none;
+  animation:rwin .5s ease-out;transition:opacity .9s}
+.rwtoast.out{opacity:0}
+@keyframes rwin{from{opacity:0;transform:translate(-50%,8px)}}
 .rw-art{height:44px;line-height:44px;border-radius:9px;font-family:"onsen-brush",serif;font-size:20px;
   color:#3e3226;background:#f4eee0;opacity:.35}
-.rwitem.own .rw-art{opacity:1}
+.rwitem.own .rw-art,.rwitem.placed .rw-art{opacity:1}
 .rwitem .buy{position:absolute;right:4px;top:4px;font:inherit;font-size:10px;padding:2px 6px;border-radius:7px;
   border:1px solid rgba(232,145,92,.6);background:rgba(58,38,22,.9);color:#f0c9a0}
 .slot{margin-top:12px}

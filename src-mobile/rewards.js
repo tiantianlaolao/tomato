@@ -1,4 +1,4 @@
-// P3 奖励载体 · 前端数据层（2026-09-02，定案见 P3奖励载体玩法定义.md）
+// P3 奖励载体 · 前端数据层（2026-09-02；9-25 改商业化 v3：物件不卖、四条线解锁，见 商业化方案说明书v3.md）
 //
 // 只做三件事：①从内核取视图（账本/状态/目录）②把解锁/摆放/挂巾转发给内核 ③给完成卡片一句进度。
 // 浏览器验收（无桥）走 DEMO：从同一份 rewards_catalog.json 读目录，账本和状态是编的，
@@ -44,7 +44,7 @@ const RW = window.RW = {
     theme = theme || this.theme;
     if (HAS_BRIDGE) return this._set(await inv('reward_purchase', { theme, kind, id, tx: tx || '' }));
     if (kind === 'theme') { if (!this.view.owned_themes.includes(id)) this.view.owned_themes.push(id); return this._set(this.view); }
-    if (kind === 'towelset') {   // 整套：八条逐条按 buy 落账，已有的跳过（与内核同语义）
+    if (kind === 'towelset') {   // 老的整套购买（9-25 起不再卖，恢复购买仍认）：八条逐条按 buy 落账，已有的跳过（与内核同语义）
       (this.view.catalog.towels || []).forEach(t => { try { demoUnlock(this.view, 'towel', t.id, 'buy'); } catch (e) {} });
       return this._set(this.view);
     }
@@ -75,16 +75,54 @@ const RW = window.RW = {
   },
   placedAt(slot) { const s = this.view && this.view.state; return (s && s.placed && s.placed[slot]) || ''; },
 
-  // 完成卡片那一句：下一条手拭巾还差多少；全拿到了就说小物。没有目录就不说话（别许愿）。
+  // ── 9-25 商业化 v3：四条线解锁（与内核 rewards.rs gap() 同口径；这里给暗色物件显示"还差什么"用）──
+  //   gift 见面礼 / focus 累计专注分钟 / rest 累计实际休息分钟 / days 来访天数 / long 单场专注≥60 分钟的次数
+  gap(item) {
+    const L = (this.view && this.view.ledger) || {}, n = item.n || 0;
+    const hm = (m) => m >= 60 ? (Math.floor(m / 60) + ' 小时' + (m % 60 ? ' ' + (m % 60) + ' 分' : '')) : (m + ' 分钟');
+    switch (item.line) {
+      case 'gift': return '';
+      case 'focus': return (L.total_min || 0) >= n ? '' : '再专注 ' + hm(n - (L.total_min || 0));
+      case 'rest': return (L.rest_min || 0) >= n ? '' : '再好好休息 ' + hm(n - (L.rest_min || 0));
+      case 'days': return (L.visit_days || 0) >= n ? '' : '再来 ' + (n - (L.visit_days || 0)) + ' 天';
+      case 'long': return (L.long_count || 0) >= n ? '' : '再来 ' + (n - (L.long_count || 0)) + ' 次 60 分钟以上的长专注';
+      default: return '还没到解锁条件';
+    }
+  },
+  // 物件的四种状态：placed 摆着/挂着 · own 已领 · ready 能领 · locked 还没到
+  stateOf(kind, item) {
+    const s = (this.view && this.view.state) || {};
+    if (kind === 'towel' ? s.hung === item.id : Object.values(s.placed || {}).includes(item.id)) return 'placed';
+    if (this.owned(kind, item.id)) return 'own';
+    return this.gap(item) ? 'locked' : 'ready';
+  },
+  // 能领还没领的（手拭巾 + 小物）
+  claimable() {
+    const c = (this.view && this.view.catalog) || {};
+    return [...(c.towels || []).map(x => ['towel', x]), ...(c.props || []).map(x => ['prop', x])]
+      .filter(([k, x]) => this.stateOf(k, x) === 'ready').map(([k, x]) => ({ kind: k, item: x }));
+  },
+  // 休息开始时的轻提示：同一批只提示一次（按主题记已提示过的 id；本机便利，读写失败就当没提示过）
+  unnoticed() {
+    let seen = [];
+    try { seen = JSON.parse(localStorage.getItem('capy_rw_noticed_' + this.theme) || '[]'); } catch (e) {}
+    return this.claimable().filter(c => !seen.includes(c.item.id));
+  },
+  markNoticed(list) {
+    try {
+      const k = 'capy_rw_noticed_' + this.theme, seen = JSON.parse(localStorage.getItem(k) || '[]');
+      list.forEach(c => { if (!seen.includes(c.item.id)) seen.push(c.item.id); });
+      localStorage.setItem(k, JSON.stringify(seen));
+    } catch (e) {}
+  },
+
+  // 完成卡片那一句：有能领的就说"新到"；没有就说离下一条手拭巾还差多少。没有目录就不说话（别许愿）。
   progressLine() {
     const v = this.view; if (!v || !v.catalog) return '';
-    const L = v.ledger;
-    const next = (v.catalog.towels || []).find(t => !this.owned('towel', t.id));
-    if (next) {
-      const gap = next.min - L.total_min;
-      return gap > 0 ? ('手拭巾·' + next.name + ' 还差 ' + gap + ' 分钟') : ('手拭巾·' + next.name + ' 可以领了');
-    }
-    return '可用 ' + L.avail_min + ' 分钟';
+    const ready = this.claimable();
+    if (ready.length) return '新到：' + ready.slice(0, 3).map(c => c.item.name).join('、') + (ready.length > 3 ? ' 等 ' + ready.length + ' 件' : '');
+    const next = (v.catalog.towels || []).find(t => this.stateOf('towel', t) === 'locked');
+    return next ? ('手拭巾·' + next.name + ' ' + this.gap(next)) : '';
   },
 };
 
@@ -111,8 +149,8 @@ async function demoView(theme) {
   const q = new URLSearchParams(location.search);
   const empty = q.get('rw') === 'empty';
   const ledger = empty
-    ? { total_min: 0, spent_min: 0, avail_min: 0, sessions_done: 0, visit_days: 0, month: '2026-09', month_days: [] }
-    : { total_min: 400, spent_min: 120, avail_min: 280, sessions_done: 17, visit_days: 9, month: '2026-09', month_days: [1, 2, 3, 5, 8, 9, 12, 15, 16], days: demoDays() };
+    ? { total_min: 0, spent_min: 0, avail_min: 0, sessions_done: 0, visit_days: 0, rest_min: 0, long_count: 0, month: '2026-09', month_days: [] }
+    : { total_min: 400, spent_min: 0, avail_min: 400, sessions_done: 17, visit_days: 9, rest_min: 45, long_count: 1, month: '2026-09', month_days: [1, 2, 3, 5, 8, 9, 12, 15, 16], days: demoDays() };
   const full = q.get('rw') === 'full';   // 五个槽位全摆满，看位置用
   const full2 = q.get('rw') === 'full2'; // 另一组（茶盘/蒲团/锦鲤/梅枝巾），每个槽位两件轮着看
   const state = empty
@@ -123,7 +161,7 @@ async function demoView(theme) {
     : full2
     ? { towels: ['t06', 't08'], hung: 't06', props: ['windbell', 'stool', 'teatray', 'censer', 'koi', 'tibi'],
         placed: { willow: 'windbell', lamp_side: 'stool', floor_mid: 'teatray', pool_edge: 'censer', water_near: 'koi', wall: 'tibi' }, visitors: [], purchases: [] }
-    : { towels: ['t01', 't02'], hung: 't02', props: ['windbell', 'orchid'], placed: { willow: 'windbell' }, visitors: [], purchases: [] };
+    : { towels: ['t01', 't02'], hung: 't02', props: ['windbell', 'teatray'], placed: { willow: 'windbell', floor_mid: 'teatray' }, visitors: [], purchases: [] };   // 默认：还有几件"能领"（兰/题壁字/荷花/缠枝莲/鱼戏）
   return { ledger, state, catalog: cat, owned_themes: q.get('rw') === 'owned' ? ['onsen'] : [], themes: all.themes || [] };
 }
 function demoUnlock(v, kind, id, via) {
@@ -132,15 +170,11 @@ function demoUnlock(v, kind, id, via) {
   if (list.includes(id)) throw new Error('已经有了');
   const item = RW.cat(kind === 'towel' ? 'towels' : kind === 'prop' ? 'props' : 'visitors', id);
   if (via === 'earn') {
-    if (kind === 'towel' && L.total_min < item.min) throw new Error('还差 ' + (item.min - L.total_min) + ' 分钟');
-    if (kind === 'prop') {
-      if (L.avail_min < item.cost_min) throw new Error('可用分钟不够，还差 ' + (item.cost_min - L.avail_min) + ' 分钟');
-      L.spent_min += item.cost_min; L.avail_min -= item.cost_min;
-    }
-    if (kind === 'visitor' && L.visit_days < item.days) throw new Error('再来 ' + (item.days - L.visit_days) + ' 天它就会来');
+    const g = RW.gap(item); if (g) throw new Error(g);   // 与内核 gap() 同口径
   } else s.purchases.push({ sku: kind + '.' + id, at: Date.now() });
   list.push(id);
   if (kind === 'towel' && !s.hung) s.hung = id;
+  if (kind === 'prop' && item.slot && !s.placed[item.slot]) s.placed[item.slot] = id;   // 槽位空着→自动摆上
   return v;
 }
 function demoPlace(v, slot, id) {

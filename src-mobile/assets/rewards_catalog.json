@@ -1,5 +1,5 @@
 {
- "_doc": "P3 奖励载体目录（每主题一份）。min=累计专注分钟里程碑；cost_min=用可用分钟换；price_cny=直接买（P4 接 IAP 前隐藏）。改数不改代码。",
+ "_doc": "奖励目录（每主题一份）。2026-09-25 商业化 v3：物件/手拭巾不卖，按四条线解锁——line: gift 见面礼(无条件) / focus 累计专注分钟 / rest 累计实际休息分钟 / days 来访天数 / long 单场专注≥60分钟的次数；n=门槛（focus/rest 单位分钟，days 天，long 次）。themes 里只有主题包带 sku/价格。改数不改代码。",
  "ink": {
   "slots": [
    {
@@ -31,50 +31,50 @@
    {
     "id": "t01",
     "name": "素帕",
-    "min": 60,
-    "sku": "com.tybbtech.capyroom.ink.towel.t01"
+    "line": "gift",
+    "n": 0
    },
    {
     "id": "t02",
     "name": "云纹",
-    "min": 180,
-    "sku": "com.tybbtech.capyroom.ink.towel.t02"
+    "line": "focus",
+    "n": 60
    },
    {
     "id": "t03",
     "name": "缠枝莲",
-    "min": 360,
-    "sku": "com.tybbtech.capyroom.ink.towel.t03"
+    "line": "focus",
+    "n": 180
    },
    {
     "id": "t04",
     "name": "鱼戏",
-    "min": 600,
-    "sku": "com.tybbtech.capyroom.ink.towel.t04"
+    "line": "focus",
+    "n": 360
    },
    {
     "id": "t05",
     "name": "竹影",
-    "min": 900,
-    "sku": "com.tybbtech.capyroom.ink.towel.t05"
+    "line": "focus",
+    "n": 600
    },
    {
     "id": "t06",
     "name": "梅枝",
-    "min": 1320,
-    "sku": "com.tybbtech.capyroom.ink.towel.t06"
+    "line": "focus",
+    "n": 960
    },
    {
     "id": "t07",
     "name": "山水",
-    "min": 1800,
-    "sku": "com.tybbtech.capyroom.ink.towel.t07"
+    "line": "focus",
+    "n": 1500
    },
    {
     "id": "t08",
     "name": "金鳞",
-    "min": 2400,
-    "sku": "com.tybbtech.capyroom.ink.towel.t08"
+    "line": "focus",
+    "n": 2400
    }
   ],
   "props": [
@@ -82,81 +82,62 @@
     "id": "windbell",
     "name": "风铃",
     "slot": "willow",
-    "cost_min": 120,
-    "price_cny": 6,
-    "sku": "com.tybbtech.capyroom.ink.prop.windbell"
+    "line": "days",
+    "n": 2
    },
    {
     "id": "censer",
     "name": "香炉",
     "slot": "pool_edge",
-    "cost_min": 180,
-    "price_cny": 6,
-    "sku": "com.tybbtech.capyroom.ink.prop.censer"
+    "line": "rest",
+    "n": 90
    },
    {
     "id": "orchid",
     "name": "一盆兰",
     "slot": "lamp_side",
-    "cost_min": 150,
-    "price_cny": 6,
-    "sku": "com.tybbtech.capyroom.ink.prop.orchid"
+    "line": "days",
+    "n": 4
    },
    {
     "id": "lotus",
     "name": "荷花",
     "slot": "water_near",
-    "cost_min": 240,
-    "price_cny": 6,
-    "sku": "com.tybbtech.capyroom.ink.prop.lotus"
+    "line": "long",
+    "n": 1
    },
    {
     "id": "koi",
     "name": "锦鲤",
     "slot": "water_near",
-    "cost_min": 300,
-    "price_cny": 8,
-    "sku": "com.tybbtech.capyroom.ink.prop.koi"
+    "line": "long",
+    "n": 5
    },
    {
     "id": "tibi",
     "name": "题壁字",
     "slot": "wall",
-    "cost_min": 360,
-    "price_cny": 8,
-    "sku": "com.tybbtech.capyroom.ink.prop.tibi"
+    "line": "days",
+    "n": 7
    },
    {
     "id": "stool",
     "name": "石凳",
     "slot": "lamp_side",
-    "cost_min": 200,
-    "price_cny": 6,
-    "sku": "com.tybbtech.capyroom.ink.prop.stool"
+    "line": "rest",
+    "n": 180
    },
    {
     "id": "teatray",
     "name": "茶盘",
     "slot": "floor_mid",
-    "cost_min": 260,
-    "price_cny": 6,
-    "sku": "com.tybbtech.capyroom.ink.prop.teatray"
+    "line": "rest",
+    "n": 30
    }
   ],
-  "visitors": [
-   {
-    "id": "v01",
-    "name": "常客·阿沐",
-    "days": 7,
-    "price_cny": 12,
-    "sku": "com.tybbtech.capyroom.ink.visitor.v01"
-   }
-  ],
-  "towel_set": {
-   "name": "整套手拭巾",
-   "sku": "com.tybbtech.capyroom.ink.towelset",
-   "price_cny": 18,
-   "price_usd": 2.99
+  "visitors": [],
+  "rack": {
+   "name": "晾杆"
   }
  },
  "onsen": {

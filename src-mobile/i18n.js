@@ -28,6 +28,16 @@ const D = {
   // 商店提示行（9-4）：带名字的整句必须排在 '还差 {n} 分钟' / '可用分钟不够，还差 {n} 分钟' 这类泛句前面
   '「{s}」还差 {n} 分钟就能领': '"{s}": {n} min to go', '「{s}」可用分钟还差 {n} 分钟': '"{s}": {n} more minutes needed',
   '「{s}」再来 {n} 天它就会来': '"{s}" will come after {n} more days',
+  // ── 9-25 商业化 v3：庭院四条线 ──（带前缀的整句在前，泛句 '{n} 天' '{n} 次' '{n} 小时' 在最后）
+  '「{s}」{g}': '"{s}": {g}',
+  '手拭巾·{s} {g}': 'Towel · {s}: {g}', '新到：{s}': 'New: {s}',
+  '再专注 {t}': '{t} more focus', '再好好休息 {t}': '{t} more rest',
+  '再来 {n} 次 {m} 分钟以上的长专注': '{n} more focus sessions of {m}+ min',
+  '还没到解锁条件': 'Not unlocked yet', '未解锁': 'Locked', '晾杆': 'Towel rail',
+  '来访': 'Visits', '长专注': 'Long focus', '专注': 'Focus', '{s} 等 {n} 件': '{s} ({n} in all)',
+  '专注、休息、常来、长专注，各自会带来不同的东西。领到的永远是你的，只增不减。': 'Focus, rest, coming back and long sessions each bring different things. What you claim stays yours.',
+  '庭院里有一份见面礼，去沐录看看': 'A welcome gift is waiting in the Garden — open Log',
+  '庭院里有新东西可以领了': 'Something new is waiting in the Garden',
   '买下 {p}': 'Buy {p}', '知道了': 'Got it', '敬请期待': 'Coming soon',
   '商店': 'Store', '重连': 'Reconnect', '连接中…': 'Connecting…', '苹果没有回应（{n} 秒超时）': 'No response from Apple ({n}s timeout)', '已连接 · 商品 {n}/{m}': 'Connected · {n}/{m} products', '还没探测': 'not probed yet',
   '未连接 · {s}（要了 {n} 件，拿到 {m} 件）': 'Not connected · {s} (asked {n}, got {m})', '未连接 · {s}': 'Not connected · {s}',
@@ -122,6 +132,7 @@ const D = {
   // 内核拒绝理由
   '现在没有在计时': 'Nothing is running', '现在不是暂停状态': 'Not paused', '现在没有会话': 'No session', '强制休息中，好好歇一会儿': 'Forced rest — take a real break',
   '现在不在段间等待': 'Not between blocks', '序列是空的，先加一段': 'Sequence is empty — add a block', '阶段时长要在 5 秒到 4 小时之间': 'Block length must be 5 s to 4 h',
+  '{n} 小时': '{n} h', '{n} 天': '{n} d', '{n} 次': '{n}×',
 };
 
 // 编译：纯文本键 → Map；含 {x} 的键 → 正则
