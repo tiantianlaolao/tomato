@@ -211,6 +211,11 @@ jobs:
           $PB -c "Add :UIDeviceFamily array" "$PL"; $PB -c "Add :UIDeviceFamily:0 integer 1" "$PL"
           $PB -c "Print :UIDeviceFamily" "$PL"
 
+          # 9-26：CFBundleVersion 必须写成 git 提交数（与 build-appstore.yml 同口径）。tauri 默认写 1.0.0，
+          # 手机上装着商店版（CFBundleVersion=提交数，如 75）时 1.0.0 算"更旧"，OTA 装完打开的仍是商店版。
+          $PB -c "Set :CFBundleVersion $(git rev-list --count HEAD)" "$PL"
+          echo "CFBundleVersion = $($PB -c 'Print :CFBundleVersion' "$PL")"
+
           PROF=$RUNNER_TEMP/capyroom.mobileprovision
           cp "$PROF" "$APP/embedded.mobileprovision"
 
