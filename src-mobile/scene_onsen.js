@@ -6,6 +6,7 @@
 // 🔴 关键帧体系（_design\anchor\kf_*.jpg）：K0 空场景母版（=done）/K1 闭眼泡（idle）/
 //    K1b 睁眼泡（work）/K1.5 爬沿（过场①的尾锚）/K2 岸上吃瓜（长休）/
 //    K3 晒太阳（短休）/K4 水中招手（awaiting）。产线规矩=K0+添加，永不挪主体。
+//    （9-26 v2 起关键帧改为 _design/video/_onsen3/v4/kf_*.png：桌面端姿态程序合成，K3 换喝茶）
 // 🔴 过场规则：铃响下水段（池内状态→休息）先播 t_a_swim（游到池边，后半身在水
 //    ＝无尾可画），随后**雾吞吐遮蔽上岸瞬间**；其余一切切换（含回程/打断）一律雾转场。
 //    "爬上岸"实拍两引擎判死（3.0 长尾×5、Pro 变浣熊），别再试。
@@ -30,15 +31,18 @@ window.SCENES.onsen = {
   frame: [1152, 2048],          // 槽位坐标的参照画幅
   poster: 'assets/poster.webp',
   hint: '牌上三行都能点：入浴＝开始 · 汤加减＝设置 · 汤帐＝记录',
-  assets: { base: 'v1', dir: 'assets/video',
-            names: ['loop_soak','loop_work','loop_sunbathe','loop_eat',
+  // 9-26 v2＝日系重设计：水豚统一成桌面端定妆那一只（_design/poses），满月背景 A；
+  //   晒太阳（趴姿画坏）换成岸上喝茶；过场只剩游泳（各 5s），上岸/下水一律雾遮。
+  //   🔴 同名覆盖不刷新 IDB 缓存，换素材必须升 base。产线在 _design/video/_onsen3/v4/。
+  assets: { base: 'v2', dir: 'assets/video',
+            names: ['loop_soak','loop_work','loop_tea','loop_eat',
                     'loop_urge','loop_empty','t_a_swim','t_b_swim'] },
 
   // 状态 → 循环段（都在 assets/video/，首=尾原生无缝循环）
   loops: {
     idle:  'loop_soak',         // 闭眼泡着打盹（拜访概念：你没来它也在过日子）
     work:  'loop_work',         // 睁眼安静陪你泡
-    shortBreak: 'loop_sunbathe',
+    shortBreak: 'loop_tea',     // 岸上捧茶小口抿
     longBreak:  'loop_eat',
     awaiting:   'loop_urge',    // 在水里朝你招手
     done:  'loop_empty',        // 人去汤空

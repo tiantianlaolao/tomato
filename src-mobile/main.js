@@ -449,7 +449,8 @@ function renderSettings() {
   // 日系修好后把目录里的 hidden 去掉就回来。⛔ 别删 ASC 里的 theme.onsen 商品（product ID 删了永久作废），只是不附到版本上。
   // 🔴 付费主题在"没有商店"的正式包里（国内安卓官网包 / 没接结算的 Play 包）整个不露，而不是免费（9-23 两端核对）：
   //    enforce() 在这些包里恒 false，只靠锁会把付费主题白送；内测包 / 开发开关（showBuy）照旧露，方便看效果。
-  const themeList = [['ink','水墨庭院'],['onsen','野天风吕']].filter(([v]) => { const i = RW.themeInfo(v); return !(i && i.hidden) && !(HAS_BRIDGE && i && i.paid && !Store.enforce() && !RW.internal && !RW.ownsTheme(v)); });
+  // 9-26：hidden 的主题内测包照露（日系 v2 重设计要真机验），商店包/官网正式包仍不露
+  const themeList = [['ink','水墨庭院'],['onsen','野天风吕']].filter(([v]) => { const i = RW.themeInfo(v); return !(i && i.hidden && !RW.internal) && !(HAS_BRIDGE && i && i.paid && !Store.enforce() && !RW.internal && !RW.ownsTheme(v)); });
   if (themeList.length > 1) {
     const th = rowEl('主题', '换一个院子陪你（切换即生效）');
     const tseg = document.createElement('div'); tseg.className = 'seg';
@@ -1066,7 +1067,7 @@ if (!HAS_BRIDGE) {
       RW.load(Scene.scene ? Scene.scene.id : 'ink').then(() => Store.init()).then(() => {
         const cur = Scene.scene && Scene.scene.id, info = cur && RW.themeInfo(cur);
         // 付费没买、或目录里标了 hidden（9-4 日系暂时下掉）→ 退回中国风
-        if (cur && ((!RW.ownsTheme(cur) && (Store.enforce() || (HAS_BRIDGE && !RW.internal))) || (info && info.hidden))) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
+        if (cur && ((!RW.ownsTheme(cur) && (Store.enforce() || (HAS_BRIDGE && !RW.internal))) || (info && info.hidden && !RW.internal))) { Scene.setScene('ink'); applyHint(); RW.load('ink').catch(() => {}); }
         // 9-25：见面礼（无条件）——空闲时打开 App 提示一次；跑着的会话里不说
         if (!view || view.status === 'idle' || view.status === 'done') setTimeout(() => rwNotice(true), 1500);
       }).catch(() => {});
