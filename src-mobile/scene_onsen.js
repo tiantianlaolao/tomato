@@ -34,7 +34,9 @@ window.SCENES.onsen = {
   // 9-26 v2＝日系重设计：水豚统一成桌面端定妆那一只（_design/poses），满月背景 A；
   //   晒太阳（趴姿画坏）换成岸上喝茶；过场只剩游泳（各 5s），上岸/下水一律雾遮。
   //   🔴 同名覆盖不刷新 IDB 缓存，换素材必须升 base。产线在 _design/video/_onsen3/v4/。
-  assets: { base: 'v2', dir: 'assets/video',
+  // 9-26 晚 v3：视频同 v2，只换了游泳两段 + 招手的角色通道（原来 41/21/28 帧是空的，樱花压在水豚上；_matte.py LOOSE 修）。
+  //   通道和视频一样进 IDB 缓存，同名覆盖手机不刷新 → 升 base。
+  assets: { base: 'v3', dir: 'assets/video',
             names: ['loop_soak','loop_work','loop_tea','loop_eat',
                     'loop_urge','loop_empty','t_a_swim','t_b_swim'] },
 
