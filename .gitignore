@@ -15,3 +15,6 @@ _signing_info/
 _credentials_card.md
 # 账号服务本地测试库
 server/data/
+
+# 9-26 内测包标记文件：只由 iOS adhoc workflow 编译前生成，永不进仓（进了仓商店包就带内测开关）
+src-tauri/.capy_internal

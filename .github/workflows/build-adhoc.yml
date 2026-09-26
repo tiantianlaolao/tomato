@@ -177,9 +177,22 @@ jobs:
       #    → 于是拆开：**Tauri 只负责编译（--no-sign，已验证可跑），
       #      Profile 我们用 ASC API 自己建，签名和打包我们自己做**。
       #      每一步都是确定的，没有"参数转不转"这种赌博。
+      # 🔴 9-26：env 里的 CAPY_INTERNAL 传不到 Xcode 转手的 Rust 编译（build 42~81 实际都不是内测包）
+      #    → 编译前放标记文件，src-tauri/build.rs 读到后注入 rustc；编译后机械核对。
       - name: '编译（不签名）'
         if: ${{ inputs.sign }}
-        run: npx tauri ios build --ci -v --no-sign --archive-only
+        run: |
+          touch src-tauri/.capy_internal
+          npx tauri ios build --ci -v --no-sign --archive-only
+
+      - name: '核对内测开关确实编进去了'
+        if: ${{ inputs.sign }}
+        run: |
+          APP=$(find src-tauri/gen/apple/build -path "*/Products/Applications/*.app" -maxdepth 6 -type d | head -1)
+          BIN="$APP/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
+          # lib.rs 里 "不是内测包" 只在 option_env!("CAPY_INTERNAL").is_none() 分支里；编进了开关，这个分支被优化掉，字符串就不在二进制里
+          if grep -q "不是内测包" "$BIN"; then echo "❌ 二进制里还有「不是内测包」= 内测开关没编进去"; exit 1; fi
+          echo "✅ 内测开关已编进 $BIN"
 
       - name: '准备 python 环境'
         if: ${{ inputs.sign }}
