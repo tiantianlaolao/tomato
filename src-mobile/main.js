@@ -846,7 +846,8 @@ function renderGarden(body) {
       const st = RW.stateOf(kind, it);
       const el = document.createElement('div');
       el.className = 'rwitem small ' + st;
-      const label = { placed: kind === 'towel' ? '挂着' : '摆着', own: kind === 'towel' ? '点一下挂上' : '点一下摆上', ready: '可以领了', locked: '未解锁' }[st];
+      const fold = kind === 'towel' && RW.theme === 'onsen';   // 9-26 日系手拭巾叠放在池沿上，不挂
+      const label = { placed: kind === 'towel' ? (fold ? '放着' : '挂着') : '摆着', own: kind === 'towel' ? (fold ? '点一下放上' : '点一下挂上') : '点一下摆上', ready: '可以领了', locked: '未解锁' }[st];
       el.innerHTML = rwArt(it.id, it.name.slice(0, 2)) + '<b>' + it.name + '</b><span>' + label + '</span>';
       el.onclick = async () => {
         try {

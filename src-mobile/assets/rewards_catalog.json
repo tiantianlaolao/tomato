@@ -141,10 +141,133 @@
   }
  },
  "onsen": {
-  "slots": [],
-  "towels": [],
-  "props": [],
-  "visitors": []
+  "slots": [
+   {
+    "id": "rock",
+    "name": "左下石头"
+   },
+   {
+    "id": "lamp_base",
+    "name": "灯笼脚边"
+   },
+   {
+    "id": "wall_top",
+    "name": "墙头"
+   },
+   {
+    "id": "water_near",
+    "name": "近处水面"
+   },
+   {
+    "id": "sakura",
+    "name": "樱花"
+   }
+  ],
+  "towels": [
+   {
+    "id": "ot_white",
+    "name": "白巾",
+    "line": "gift",
+    "n": 0
+   },
+   {
+    "id": "ot_asanoha",
+    "name": "麻叶",
+    "line": "focus",
+    "n": 60
+   },
+   {
+    "id": "ot_seigaiha",
+    "name": "青海波",
+    "line": "focus",
+    "n": 180
+   },
+   {
+    "id": "ot_ichimatsu",
+    "name": "市松",
+    "line": "focus",
+    "n": 360
+   },
+   {
+    "id": "ot_yagasuri",
+    "name": "矢絣",
+    "line": "focus",
+    "n": 600
+   },
+   {
+    "id": "ot_shippo",
+    "name": "七宝",
+    "line": "focus",
+    "n": 960
+   },
+   {
+    "id": "ot_tai",
+    "name": "鲷鱼",
+    "line": "focus",
+    "n": 1500
+   },
+   {
+    "id": "ot_fuji",
+    "name": "富士",
+    "line": "focus",
+    "n": 2400
+   }
+  ],
+  "props": [
+   {
+    "id": "oke",
+    "name": "汤桶",
+    "slot": "rock",
+    "line": "rest",
+    "n": 30
+   },
+   {
+    "id": "milk",
+    "name": "牛奶瓶",
+    "slot": "rock",
+    "line": "rest",
+    "n": 90
+   },
+   {
+    "id": "geta",
+    "name": "木屐",
+    "slot": "lamp_base",
+    "line": "rest",
+    "n": 180
+   },
+   {
+    "id": "kokedama",
+    "name": "苔玉",
+    "slot": "wall_top",
+    "line": "days",
+    "n": 2
+   },
+   {
+    "id": "usagi",
+    "name": "小石兔",
+    "slot": "wall_top",
+    "line": "days",
+    "n": 5
+   },
+   {
+    "id": "float",
+    "name": "浮盘",
+    "slot": "water_near",
+    "line": "long",
+    "n": 1
+   },
+   {
+    "id": "sakura",
+    "name": "樱花",
+    "slot": "sakura",
+    "line": "long",
+    "n": 5
+   }
+  ],
+  "visitors": [],
+  "rack": {
+   "name": "池沿"
+  }
  },
  "themes": [
   {

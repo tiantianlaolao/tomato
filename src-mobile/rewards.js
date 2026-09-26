@@ -153,8 +153,18 @@ async function demoView(theme) {
     : { total_min: 400, spent_min: 0, avail_min: 400, sessions_done: 17, visit_days: 9, rest_min: 45, long_count: 1, month: '2026-09', month_days: [1, 2, 3, 5, 8, 9, 12, 15, 16], days: demoDays() };
   const full = q.get('rw') === 'full';   // 五个槽位全摆满，看位置用
   const full2 = q.get('rw') === 'full2'; // 另一组（茶盘/蒲团/锦鲤/梅枝巾），每个槽位两件轮着看
+  // 9-26 日系：同样三组（full=浮盘+樱花+汤桶+苔玉+木屐 / full2=牛奶瓶+小石兔+富士巾 / 默认=几件能领）
+  const ON = theme === 'onsen';
   const state = empty
     ? { towels: [], hung: '', props: [], placed: {}, visitors: [], purchases: [] }
+    : ON && full
+    ? { towels: ['ot_white', 'ot_asanoha', 'ot_seigaiha'], hung: 'ot_seigaiha', props: ['oke', 'kokedama', 'geta', 'float', 'sakura'],
+        placed: { rock: 'oke', wall_top: 'kokedama', lamp_base: 'geta', water_near: 'float', sakura: 'sakura' }, visitors: [], purchases: [] }
+    : ON && full2
+    ? { towels: ['ot_white', 'ot_fuji'], hung: 'ot_fuji', props: ['milk', 'usagi', 'geta', 'float', 'sakura'],
+        placed: { rock: 'milk', wall_top: 'usagi', lamp_base: 'geta', water_near: 'float', sakura: 'sakura' }, visitors: [], purchases: [] }
+    : ON
+    ? { towels: ['ot_white'], hung: 'ot_white', props: ['oke'], placed: { rock: 'oke' }, visitors: [], purchases: [] }
     : full
     ? { towels: ['t01', 't02', 't03'], hung: 't03', props: ['windbell', 'orchid', 'censer', 'lotus', 'tibi'],
         placed: { willow: 'windbell', lamp_side: 'orchid', pool_edge: 'censer', water_near: 'lotus', wall: 'tibi' }, visitors: ['v01'], purchases: [] }

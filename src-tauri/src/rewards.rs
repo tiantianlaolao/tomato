@@ -566,4 +566,34 @@ mod tests {
         let v3 = revoke_internal(&d2, "ink", now).unwrap();
         assert_eq!(v3.state.towels, vec!["t01".to_string()]);
     }
+
+    #[test]
+    fn onsen_catalog_matches_spec_v3_s8() {
+        // 说明书 v3 §8 门槛表（9-26 接入）：逐件核对线/门槛，差 1 给出"还差"、到了就能领；槽位都在目录里
+        let cat = catalog_theme("onsen");
+        let spec: &[(&str, &str, &str, u64)] = &[
+            ("towels", "ot_white", "gift", 0), ("towels", "ot_asanoha", "focus", 60), ("towels", "ot_seigaiha", "focus", 180),
+            ("towels", "ot_ichimatsu", "focus", 360), ("towels", "ot_yagasuri", "focus", 600), ("towels", "ot_shippo", "focus", 960),
+            ("towels", "ot_tai", "focus", 1500), ("towels", "ot_fuji", "focus", 2400),
+            ("props", "oke", "rest", 30), ("props", "milk", "rest", 90), ("props", "geta", "rest", 180),
+            ("props", "kokedama", "days", 2), ("props", "usagi", "days", 5),
+            ("props", "float", "long", 1), ("props", "sakura", "long", 5),
+        ];
+        assert_eq!(cat["towels"].as_array().unwrap().len(), 8);
+        assert_eq!(cat["props"].as_array().unwrap().len(), 7);
+        let slots: Vec<&str> = cat["slots"].as_array().unwrap().iter().map(|x| x["id"].as_str().unwrap()).collect();
+        for &(list, id, line, n) in spec {
+            let it = find(&cat, list, id).unwrap_or_else(|| panic!("目录里没有 {id}"));
+            assert_eq!(it["line"].as_str(), Some(line), "{id} 的线");
+            assert_eq!(it["n"].as_u64(), Some(n), "{id} 的门槛");
+            if list == "props" { assert!(slots.contains(&it["slot"].as_str().unwrap()), "{id} 的槽位不在目录里"); }
+            let mut l = Ledger::default();
+            let set = |l: &mut Ledger, v: u64| match line {
+                "focus" => l.total_min = v, "rest" => l.rest_min = v,
+                "days" => l.visit_days = v as u32, "long" => l.long_count = v as u32, _ => {},
+            };
+            if n > 0 { set(&mut l, n - 1); assert!(gap(it, &l).is_some(), "{id} 差 1 不该能领"); }
+            set(&mut l, n); assert!(gap(it, &l).is_none(), "{id} 到门槛该能领");
+        }
+    }
 }

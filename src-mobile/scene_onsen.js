@@ -68,9 +68,110 @@ window.SCENES.onsen = {
   // 状态调光（视频自带黄昏光，这里只做轻叠加）：paused 最暗，work 微暗
   dim: { idle:0, work:0.10, break:0, awaiting:0, done:0, paused:0.34 },
 
+  // ── P3 庭院（9-26，说明书 v3 §8）：静物 + 浮盘 + 樱花；素材 assets/p3/onsen/（_design/p3_onsen/_export_app.py 产，
+  //    已按各自槽位预调黄昏光）。坐标＝视频画幅归一化（量 _onsen3/base_a.png）。
+  // 🔴 整层先画离屏，再按角色通道挖掉水豚（E.matteCut）——樱花漂满池面，不挖就压在水豚身上。
+  // 🔴 花瓣漂移只能来回摆（样片是 5 秒的线性漂移，App 常开会漂出池子）。
+  drawGarden(E, cx) {
+    const S = this, RW = window.RW, rv = RW && RW.view;
+    if (!rv || !rv.state || !rv.catalog) return;
+    const DIR = 'assets/p3/onsen/';
+    const img = (n) => {
+      const c = S._imgs || (S._imgs = {});
+      if (!(n in c)) { const im = new Image(); c[n] = im; im.ok = false;
+        im.onload = () => { im.ok = true; E.draw && E.draw(); }; im.onerror = () => { im.failed = true; }; im.src = DIR + n + '.png'; }
+      return c[n];
+    };
+    if (!S._sak && !S._sakLoading) {
+      S._sakLoading = true;
+      fetch(DIR + 'sakura.json').then((r) => r.json()).then((j) => { S._sak = j; E.draw && E.draw(); }).catch(() => {});
+    }
+    const placed = rv.state.placed || {};
+    const hung = rv.state.hung && RW.cat('towels', rv.state.hung);
+    // 🔴 手机 cover 左右各裁 ~9%（横向安全区 0.10~0.90）：巾子原放 0.115 只露一半、木屐 0.93 整个被裁 → 挪进安全区
+    const SPOT = { towel: [0.205, 0.629, 0.125, -4], rock: [0.215, 0.868, 0], lamp_base: [0.862, 0.612, 0.075], wall_top: [0.505, 0.432, 0] };
+    const W_OF = { oke: 0.115, milk: 0.042, geta: 0.095, kokedama: 0.058, usagi: 0.056 };
+    const statics = [];
+    if (hung) statics.push({ id: hung.id, at: SPOT.towel, fw: SPOT.towel[2], tilt: SPOT.towel[3] });
+    ['rock', 'lamp_base', 'wall_top'].forEach((sl) => { if (placed[sl]) statics.push({ id: placed[sl], at: SPOT[sl], fw: W_OF[placed[sl]] || 0.06 }); });
+    const hasFloat = placed.water_near === 'float', hasSak = placed.sakura === 'sakura' && S._sak;
+    const need = statics.map((s) => img(s.id));
+    if (hasFloat) need.push(img('float'), img('float_reflect'));
+    const PN = (S._sak && S._sak.petals) || 0;
+    if (hasSak) for (let i = 0; i < PN; i++) need.push(img('petal_water_' + i), img('petal_land_' + i));
+    if (!need.length || need.some((im) => !im.ok && !im.failed)) return;     // 冷启不许一件件蹦
+    const FW = E.map(1, 0)[0] - E.map(0, 0)[0], kk = FW / 1088;                // 素材像素量自 1088 宽画幅
+    const t = performance.now() / 1000;
+    const pc = E.hasMatte() ? (S._pc || (S._pc = document.createElement('canvas'))) : null;
+    if (pc && (pc.width !== E.W || pc.height !== E.H)) { pc.width = E.W; pc.height = E.H; }
+    const c = pc ? pc.getContext('2d') : cx;
+    if (pc) c.clearRect(0, 0, E.W, E.H);
+    const persp = (y) => Math.max(0.45, Math.min(1.15, 0.45 + (y - 0.55) / 0.38 * 0.7));   // 远小近大
+    const LAMPX = 0.82;
+    // ① 岸上花瓣（静）：躺平＝按地面透视压扁
+    if (hasSak) for (const [x, y, r0, sd] of S._sak.land) {
+      const im = img('petal_land_' + (sd % PN)); if (!im.ok) continue;
+      const [px, py] = E.map(x, y), k = persp(y) * 1.05 * kk;
+      c.save(); c.translate(px, py); c.scale(k, k * 0.5); c.rotate(r0 * Math.PI / 180);
+      c.drawImage(im, -im.width / 2, -im.height / 2); c.restore();
+    }
+    // ② 静物：落影背离灯笼 + 贴地接触线，按底边 y 排序（近的盖远的）
+    statics.sort((a, b) => a.at[1] - b.at[1]);
+    for (const s of statics) {
+      const im = img(s.id); if (!im.ok) continue;
+      const [px, py] = E.map(s.at[0], s.at[1]), w = s.fw * FW, h = w * im.height / im.width;
+      const lx = s.at[0] < LAMPX ? -w * 0.2 : w * 0.2;
+      const shadow = (cxm, cym, rx, ry, a) => {
+        const g = c.createRadialGradient(cxm, cym, 0, cxm, cym, rx);
+        g.addColorStop(0, 'rgba(22,16,20,' + a + ')'); g.addColorStop(0.6, 'rgba(22,16,20,' + (a * 0.45) + ')'); g.addColorStop(1, 'rgba(22,16,20,0)');
+        c.save(); c.translate(cxm, cym); c.scale(1, ry / rx); c.translate(-cxm, -cym);
+        c.fillStyle = g; c.beginPath(); c.arc(cxm, cym, rx, 0, Math.PI * 2); c.fill(); c.restore();
+      };
+      if (s.id !== 'geta') {             // 木屐的影子烘在图里（两只各自贴鞋底，_design/p3_onsen/_geta.py）
+        shadow(px + lx * 0.5, py - h * 0.015, w * 0.62, Math.max(3, h * 0.09), 0.5);
+        shadow(px, py - h * 0.008, w * 0.44, Math.max(2, h * 0.03), 0.6);
+      }
+      c.save(); c.translate(px, py - h / 2); if (s.tilt) c.rotate(s.tilt * Math.PI / 180);
+      c.drawImage(im, -w / 2, -h / 2, w, h); c.restore();
+    }
+    // ③ 水面花瓣（漂）：各自慢漂慢转、不同步；湿的效果已预做进 petal_water_*
+    if (hasSak) for (const [x, y, r0, sd] of S._sak.water) {
+      const im = img('petal_water_' + (sd % PN)); if (!im.ok) continue;
+      const per = 7 + sd % 6, k = persp(y) * 1.3 * kk;
+      const [bx, by] = E.map(x, y);
+      const px = bx + kk * (5 * Math.sin(2 * Math.PI * t / (8 + sd % 5) + sd) + 12 * Math.sin(2 * Math.PI * t / (40 + sd % 20) + sd * 0.7));
+      const py = by + kk * 1.5 * Math.sin(2 * Math.PI * t / (5 + sd % 4) + sd);
+      c.save(); c.translate(px, py); c.scale(k * (sd % 2 ? -1 : 1), k * 0.45);
+      c.rotate((r0 + 20 * Math.sin(2 * Math.PI * t / per + sd)) * Math.PI / 180);
+      c.drawImage(im, -im.width / 2, -im.height / 2); c.restore();
+    }
+    // ④ 浮盘：慢起伏 + 微晃 + 慢漂；倒影、断续涟漪、水汽（参数同 9-25 认可的样片）
+    if (hasFloat) {
+      const im = img('float'), rf = img('float_reflect');
+      const [fx, fy, fwid] = (S._sak && S._sak.float) || [0.73, 0.866, 0.22];
+      const [cxp, cyp] = E.map(fx, fy), w = fwid * FW, h = w * im.height / im.width;
+      const dx = 3 * kk * Math.sin(2 * Math.PI * t / 9), dy = 1.6 * kk * Math.sin(2 * Math.PI * t / 3.7), rot = 1.1 * Math.sin(2 * Math.PI * t / 5.3);
+      const bot = cyp + dy + h * 0.43;
+      c.save(); c.strokeStyle = 'rgba(210,228,224,0.31)'; c.lineCap = 'round';
+      const w2 = w * 1.12 / 2, h2 = w * 1.12 * 0.19;
+      [[200, 250, 2], [275, 330, 3], [25, 70, 2], [115, 160, 3]].forEach(([a0, a1, lw]) => {
+        c.lineWidth = lw * kk; c.beginPath();
+        c.ellipse(cxp + dx, bot + h2 * 0.05, w2, h2 * 0.9, 0, a0 * Math.PI / 180, a1 * Math.PI / 180); c.stroke();
+      });
+      c.restore();
+      if (rf.ok) c.drawImage(rf, cxp + dx - w / 2, bot - 4 * kk, w, h * 0.45);
+      c.save(); c.translate(cxp + dx, cyp + dy); c.rotate(rot * Math.PI / 180); c.drawImage(im, -w / 2, -h / 2, w, h); c.restore();
+      const g = c.createRadialGradient(cxp, cyp, 0, cxp, cyp, w * 0.75);
+      g.addColorStop(0, 'rgba(215,228,232,0.12)'); g.addColorStop(1, 'rgba(215,228,232,0)');
+      c.fillStyle = g; c.fillRect(cxp - w, cyp - w, w * 2, w * 2);
+    }
+    if (pc) { E.matteCut(c); cx.drawImage(pc, 0, 0); }
+  },
+
   // ── 叠加层绘制（9-1 从引擎搬回家：日系=功能上牌+当班牌+天空题字框竖排）──
   drawUI(E, cx, v) {
     const S = this, ph = E.phase, BRUSH = E.brush;
+    S.drawGarden(E, cx);
     // 木牌：空闲=功能菜单；运行=当班牌（第几泡/小憩/休止 + 完成刻痕计数）。
     // 🔴 当班牌是纯展示不是按钮——零 UI 原则没破，只是别让牌在过程中空着（8-31 反馈）。
     if (S.board) {

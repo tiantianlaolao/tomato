@@ -111,7 +111,7 @@ const D = {
   '跑完的每一场都会记。中途结束的：满 1 分钟才记（免得误触也留痕），所以拿「调试 · 20 秒 ×2」测的时候，只要没跑完就一条都不会留。': 'Every finished session is logged. Ended early: logged only past 1 minute (so a stray tap leaves no trace).',
   '还没有记录。': 'No records yet.', '{n}月{m}日 ': '{n}/{m} ', '· 专注 {n} 分 · 休息 {m} 分': '· focus {n} min · rest {m} min',
   ' · 中途结束': ' · ended early', ' · 完成': ' · done',
-  '挂着': 'Hanging', '点一下挂上': 'Tap to hang', '可以领了': 'Ready to claim', '泡满 {n} 小时': 'Soak {n} h', '泡满 {n} 小时{m} 分': 'Soak {n} h {m} min',
+  '挂着': 'Hanging', '点一下挂上': 'Tap to hang', '放着': 'In place', '点一下放上': 'Tap to set out', '可以领了': 'Ready to claim', '泡满 {n} 小时': 'Soak {n} h', '泡满 {n} 小时{m} 分': 'Soak {n} h {m} min',
   '累计泡够就能领，顺序固定。已累计 {n} 分钟。': 'Claim each one as your soak time adds up, in a fixed order. {n} min so far.',
   '可用 {n} 分钟（累计 {m}，已用 {k}）': '{n} min available ({m} total, {k} spent)',
   '空着': 'Empty', '摆着': 'Placed', '点一下摆上': 'Tap to place', '{n} 分钟换': '{n} min',
@@ -122,6 +122,10 @@ const D = {
   // 目录里的名字
   '素帕': 'Plain', '云纹': 'Clouds', '缠枝莲': 'Lotus Vine', '鱼戏': 'Two Fish', '竹影': 'Bamboo', '梅枝': 'Plum', '山水': 'Landscape', '金鳞': 'Gold Scales',
   '风铃': 'Wind Bell', '香炉': 'Incense Burner', '一盆兰': 'Orchid', '荷花': 'Lotus', '锦鲤': 'Koi', '题壁字': 'Wall Script', '石凳': 'Stone Stool', '茶盘': 'Tea Tray',
+  // 9-26 日系（野天风吕）庭院
+  '白巾': 'White', '麻叶': 'Hemp Leaf', '青海波': 'Blue Waves', '市松': 'Checkers', '矢絣': 'Arrow Feathers', '七宝': 'Seven Treasures', '鲷鱼': 'Sea Bream', '富士': 'Mt. Fuji',
+  '汤桶': 'Bath Pail', '牛奶瓶': 'Milk Bottle', '木屐': 'Geta', '苔玉': 'Moss Ball', '小石兔': 'Stone Rabbit', '浮盘': 'Floating Tray', '樱花': 'Cherry Blossoms',
+  '左下石头': 'Front rock', '灯笼脚边': 'By the lantern', '墙头': 'Wall top', '池沿': 'Pool edge',
   '檐下': 'Under the eaves', '白墙': 'White wall', '太湖石旁': 'By the rock', '石台左侧': 'Left ledge', '地砖中央': 'Center floor', '近处水面': 'Near water', '常客·阿沐': 'Regular · Mu',
   // 商店（P4）
   '恢复购买': 'Restore purchases', '在这台设备换了 Apple ID 或重装后，把买过的找回来': 'Bring back what you bought after reinstalling or switching Apple ID',
