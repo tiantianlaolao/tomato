@@ -42,7 +42,15 @@ const RETURN_URL = process.env.LS_PAY_RETURN_URL || 'https://www.tybbtech.com/ca
 const TEST_PRODUCT = process.env.LS_PAY_TEST_PRODUCT === '1';
 
 // ---- 目录里的主题包 → 商品（按 mtime 缓存）-------------------------------------
-const CATALOG_PATH = process.env.LS_CATALOG || path.join(__dirname, '..', 'src-mobile', 'assets', 'rewards_catalog.json');
+// 🔴 服务器上只部署 server/ 这一层，没有 ../src-mobile：部署脚本必须把 rewards_catalog.json 一并拷到 server/ 旁边
+//    （或 pm2 里配 LS_CATALOG 指到它）。找不到目录 = 价目表为空 = 什么都卖不了（建单 400），启动时会告警一行。
+const CATALOG_CANDIDATES = [
+  process.env.LS_CATALOG,
+  path.join(__dirname, 'rewards_catalog.json'),                               // 部署形态：拷在 server/ 旁边
+  path.join(__dirname, '..', 'src-mobile', 'assets', 'rewards_catalog.json'),  // 仓库形态：本机 / test.js
+].filter(Boolean);
+const CATALOG_PATH = CATALOG_CANDIDATES.find(p => { try { return fs.statSync(p).isFile(); } catch (_) { return false; } }) || CATALOG_CANDIDATES[0];
+if (!fs.existsSync(CATALOG_PATH)) console.warn('[pay] 找不到 rewards_catalog.json（试过 ' + CATALOG_CANDIDATES.join(' , ') + '）—— 价目表为空，建单一律 400');
 const THEME_ID = /^[a-z][a-z0-9_]{1,31}$/;
 let _cat = { mtime: -1, doc: null };
 function readCatalog() {

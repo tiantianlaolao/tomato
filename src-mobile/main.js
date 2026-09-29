@@ -714,7 +714,9 @@ function rwBar(body, cls) {
 function rwBuy(body, kind, item, theme, after) {
   const bar = rwBar(body, 'ask');
   const price = Store.price(item);
-  bar.innerHTML = '<span>' + '买下「' + (item.name || item.id) + '」' + (price ? '，' + price : '') + '？' + '</span>';
+  // 支付宝（国内安卓）：付款前把"付了不退"说清楚（数字商品，戳了么 9-10 合规同一句）；商店线由苹果/Google 自己的面板说
+  const note = Store.lane() === 'alipay' ? '<br><small>数字商品，付款即交付，不支持无理由退款。</small>' : '';
+  bar.innerHTML = '<span>' + '买下「' + (item.name || item.id) + '」' + (price ? '，' + price : '') + '？' + note + '</span>';
   const ok = document.createElement('button'); ok.className = 'btn'; ok.textContent = '买下';
   const no = document.createElement('button'); no.className = 'btn ghost'; no.textContent = '算了';
   ok.onclick = async () => {
@@ -722,13 +724,30 @@ function rwBuy(body, kind, item, theme, after) {
     ok.disabled = true; ok.textContent = '…';
     try {
       const r = await Store.buy(kind, item, theme); bar.remove();
-      // 支付宝（国内安卓）：收银台在系统浏览器里，付完回来自动到账（store.js checkPending → onPaid）
-      if (r && r.pending) { rwHint(body, '已打开支付宝，付完回到这里就会自动开通'); return; }
+      // 支付宝（国内安卓）：收银台在系统浏览器里，付完回来自动到账（store.js checkPending → onPaid）；回来没动静就点「我已付款」再查一次
+      if (r && r.pending) { rwPending(body); return; }
       after && after();
     } catch (e) { rwErr(body, e); }
   };
   no.onclick = () => bar.remove();
   bar.appendChild(ok); bar.appendChild(no);
+}
+// 支付宝挂着的单：一行提示 + 「我已付款」（手动再查；查到就由 Store.onPaid 收尾）
+function rwPending(body) {
+  const bar = rwBar(body, 'info');
+  const s = document.createElement('span'); s.textContent = '已打开支付宝，付完回到这里就会自动开通'; bar.appendChild(s);
+  const chk = document.createElement('button'); chk.className = 'btn'; chk.textContent = '我已付款';
+  chk.onclick = async () => {
+    if (chk.disabled) return;
+    chk.disabled = true; chk.textContent = '查询中…';
+    const ok = await Store.checkPending().catch(() => false);
+    if (ok) { bar.remove(); return; }
+    chk.disabled = false; chk.textContent = '我已付款';
+    s.textContent = Store.hasPending() ? '还没查到付款，稍等几秒再点一次' : '这一单已经关闭了，要买再点一次「买下」';
+  };
+  const no = document.createElement('button'); no.className = 'btn ghost'; no.textContent = '知道了';
+  no.onclick = () => bar.remove();
+  bar.appendChild(chk); bar.appendChild(no);
 }
 // 进度提示：一句"还差什么"（9-25 起物件不卖，提示行不再带购买按钮）
 function rwHint(body, msg) {
@@ -1071,8 +1090,14 @@ if (!HAS_BRIDGE) {
       Account.onChange = () => { if (sheetKind === 'set') renderSettings(); if (Store.lane() === 'alipay' && Account.isLoggedIn()) { Store.refreshEntitlements().catch(() => {}); Store.checkPending().catch(() => {}); } };
       // 商店探测有结果（启动重试 / 回前台重探 / 买成后补价）→ 开着的面板刷一遍，价格换成商店的本地化价
       Store.onChange = () => { if (sheetKind === 'set') renderSettings(); else if (sheetKind === 'hist') renderHistory(); };
-      // 支付宝到账（回前台轮询到 PAID）：提示一句，面板刷一遍
-      Store.onPaid = (p) => { if (sheetKind === 'set') renderSettings(); if (p && p.kind === 'theme') $('hintTxt').textContent = '付款到了，「' + ((RW.themeInfo(p.id) || {}).name || p.id) + '」已经是你的了'; };
+      // 支付宝到账（回前台轮询到 PAID）：买的是主题就直接切过去（跟调汤里买成后一样），提示一句，面板刷一遍
+      Store.onPaid = (p) => {
+        if (p && p.kind === 'theme') {
+          try { Scene.setScene(p.id); applyHint(); RW.load(p.id).catch(() => {}); } catch (e) {}
+          $('hintTxt').textContent = '付款到了，「' + ((RW.themeInfo(p.id) || {}).name || p.id) + '」已经是你的了';
+        }
+        if (sheetKind === 'set') renderSettings(); else if (sheetKind === 'hist') renderHistory();
+      };
       Account.init();
       feed(b.view);
       // P3 账本 → P4 商店探测 → 主题锁：存的是付费主题又没买（且有真商店/开发开关）就退回中国风

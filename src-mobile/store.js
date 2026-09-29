@@ -142,7 +142,9 @@ const Store = window.Store = {
     const L = lane();
     if (L === 'alipay') {
       if (!window.Account || !Account.isLoggedIn()) throw new Error('先在「账号」里登录，买过的才找得回来');
-      const n = await this.refreshEntitlements();
+      // 先查挂着的单：付了但 notify 还没到、也没人查过的单，只有这一步会让服务端去支付宝反查 → 才有权益
+      await this.checkPending();
+      const n = await this.refreshEntitlements(true);
       if (n === null) throw new Error('网络不通，稍后再试');
       return n;
     }
@@ -176,12 +178,17 @@ const Store = window.Store = {
       return false;
     } finally { this._checking = false; }
   },
-  // 服务端权益 → 逐条落账（幂等）。返回落账条数；网不通返回 null。登录后 / 开机 / 恢复购买都走这条
-  async refreshEntitlements() {
+  // 服务端权益 → 逐条落账（幂等）。返回落账条数；网不通返回 null。登录后 / 开机 / 恢复购买都走这条。
+  // 同一个账号一次会话只自动拉一遍（Account.onChange 每轮同步都会响，别每次都打服务端）；force = 恢复购买 / 刚到账。
+  _entUid: null,
+  async refreshEntitlements(force) {
     if (lane() !== 'alipay' || !window.Account || !Account.isLoggedIn()) return 0;
+    const uid = Account.account.uid;
+    if (!force && this._entUid === uid) return 0;
     const r = await Account.net.entitlements(Account.account.token);
     if (!r) return null;
     if (r.http !== 200) return 0;
+    this._entUid = uid;
     let n = 0;
     for (const it of (r.items && r.items.length ? r.items : (r.products || []).map(p => ({ product: p, orderNo: '' })))) {
       const m = bySku(SKU_PREFIX + it.product);

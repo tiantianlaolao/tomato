@@ -148,10 +148,15 @@ class IapPlugin(private val activity: Activity) : Plugin(activity), PurchasesUpd
 
     // Google 的购买结果（用户付完 / 取消 / 待批准）都从这里回来
     override fun onPurchasesUpdated(r: BillingResult, purchases: MutableList<Purchase>?) {
-        val inv = pending ?: return
+        val c = client
+        val inv = pending
+        if (inv == null) {
+            // 不是我们正在等的那笔（比如上次 PENDING 的购买这会儿批准了）：只做确认收货，落账等下次 entitlements 对账
+            if (r.responseCode == BillingClient.BillingResponseCode.OK && c != null) purchases?.forEach { acknowledge(c, it) }
+            return
+        }
         val sku = pendingSku
         pending = null; pendingSku = null
-        val c = client
         when (r.responseCode) {
             BillingClient.BillingResponseCode.OK -> {
                 val p = purchases?.firstOrNull { sku == null || it.products.contains(sku) } ?: purchases?.firstOrNull()
@@ -195,8 +200,8 @@ class IapPlugin(private val activity: Activity) : Plugin(activity), PurchasesUpd
     }
 
     @Command
-    fun restore(invoke: Invoke) = owned(invoke)
+    fun restore(invoke: Invoke) { owned(invoke) }
 
     @Command
-    fun entitlements(invoke: Invoke) = owned(invoke)
+    fun entitlements(invoke: Invoke) { owned(invoke) }
 }
