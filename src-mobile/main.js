@@ -485,6 +485,13 @@ function renderSettings() {
     const bb = document.createElement('button'); bb.className = 'sw' + (RW.showBuy() ? ' on' : '');
     bb.onclick = () => { RW.setShowBuy(!RW.showBuy()); bb.classList.toggle('on', RW.showBuy()); };
     bd.appendChild(bb);
+    // 9-29 支付宝链路验收：国内安卓内测包开了这个，买主题时建的是 ¥0.01 的测试单（服务端开了 LS_PAY_TEST_PRODUCT 才有）
+    if (Store.lane() === 'alipay') {
+      const pt = rowEl('支付走 ¥0.01 测试商品（开发）', '验支付宝链路用；到账后照样给主题');
+      const pb = document.createElement('button'); pb.className = 'sw' + (Store.payTest() ? ' on' : '');
+      pb.onclick = () => { Store.setPayTest(!Store.payTest()); pb.classList.toggle('on', Store.payTest()); };
+      pt.appendChild(pb);
+    }
   }
   // 恢复购买（苹果 5.1.1：必须独立于登录，且随时可用）。只在能买的包里露；说明按包的支付线写（9-29：Play / 支付宝各一句）
   if (Store.canBuy()) {
@@ -776,8 +783,8 @@ const rwErr = (body, e) => rwHint(body, String(e && e.message || e));
 const LEGAL_VER = '2026-09-29';
 const legalOk = () => { try { return localStorage.getItem('capy_legal_ok') === LEGAL_VER; } catch (e) { return false; } };
 const acceptLegal = () => { try { localStorage.setItem('capy_legal_ok', LEGAL_VER); } catch (e) {} };
-// 协议页地址：跟服务端同一台（国内 www / 美服 stampday），按当前语言跳到页内那一段
-const legalURL = (kind) => (window.Account ? Account.WEB_BASE : 'https://www.tybbtech.com/capyroom/') + kind + '.html#' + (I18N.lang === 'zh' ? 'zh' : 'en');
+// 协议页地址：一律在国内主站（美服 stampday 只反代 /capyroom/api/ 和资产，不放静态页；www 海外也能访问），按当前语言跳到页内那一段
+const legalURL = (kind) => 'https://www.tybbtech.com/capyroom/' + kind + '.html#' + (I18N.lang === 'zh' ? 'zh' : 'en');
 function openLegal(kind) {
   const url = legalURL(kind);
   if (HAS_BRIDGE) T.core.invoke('plugin:opener|open_url', { url }).catch((e) => console.warn('openLegal', e));

@@ -124,7 +124,9 @@ const Store = window.Store = {
     if (L === 'alipay') {
       if (!item || !item.sku) throw new Error('购买没有完成');
       if (!window.Account || !Account.isLoggedIn()) throw new Error('先在「账号」里登录，买过的才找得回来');
-      const r = await Account.net.payCreate(Account.account.token, skuToProduct(item.sku), 'alipay_wap');
+      // 内测包 + 调汤里开了「支付走 ¥0.01 测试商品」→ 建的是 test001 单（服务端 LS_PAY_TEST_PRODUCT=1 才有），验链路不花 ¥18
+      const product = (RW.internal && payTest()) ? 'test001' : skuToProduct(item.sku);
+      const r = await Account.net.payCreate(Account.account.token, product, 'alipay_wap');
       if (!r) throw new Error('网络不通，稍后再试');
       if (r.http === 501) throw new Error('支付还没开通，稍后再试');
       if (r.http === 401) throw new Error('登录过期了，重新登录再试');
@@ -233,6 +235,10 @@ function allSkus() {
 }
 // 服务端商品 id = sku 去掉前缀（theme.onsen）
 const skuToProduct = sku => String(sku || '').startsWith(SKU_PREFIX) ? sku.slice(SKU_PREFIX.length) : sku;
+// 内测：支付宝建单走 ¥0.01 的 test001（只在 RW.internal 的包里有效；调汤「内测」段有开关）
+const payTest = () => { try { return localStorage.getItem('capy_pay_test') === '1'; } catch (e) { return false; } };
+Store.payTest = payTest;
+Store.setPayTest = (on) => { try { localStorage.setItem('capy_pay_test', on ? '1' : '0'); } catch (e) {} };
 function bySku(sku) {
   // com.tybbtech.capyroom.theme.<id> / com.tybbtech.capyroom.<theme>.towelset / com.tybbtech.capyroom.<theme>.<kind>.<id>
   let m;
