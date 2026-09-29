@@ -592,6 +592,11 @@ function renderSettings() {
     icp.textContent = 'App 备案号：京ICP备2022025009号-4A';
     box.appendChild(icp);
   }
+  // 服务协议 / 隐私政策（9-29）：所有包都露，外开浏览器到跟服务端同一台的页面
+  const lg = document.createElement('div'); lg.className = 'tip'; lg.style.textAlign = 'center';
+  lg.innerHTML = '<a href="#" data-legal="terms">服务协议</a> · <a href="#" data-legal="privacy">隐私政策</a>';
+  legalLinks(lg);
+  box.appendChild(lg);
 }
 async function pushSettings() {
   if (!HAS_BRIDGE) return;
@@ -611,6 +616,7 @@ function renderAccount(box, rowEl) {
     rowEl('登录后跨设备同步', '流水、序列、定时计划、奖励和偏好会跟着账号走；不登录一切照用');
     const row = document.createElement('div'); row.className = 'btns';
     const doLogin = async (prov) => {
+      if (!requireLegal(box, () => doLogin(prov))) return;   // 9-29：登录会把数据传上服务器，先同意协议
       say('登录中…');
       const r = await A.login(prov);
       if (r.ok) { say('已登录，正在同步'); renderSettings(); return; }
@@ -650,6 +656,7 @@ function renderAccount(box, rowEl) {
           const phone = ph.value.trim(), c = code.value.trim();
           if (!/^1[3-9]\d{9}$/.test(phone)) { say('手机号不像'); return; }
           if (!/^\d{6}$/.test(c)) { say('验证码是 6 位数字'); return; }
+          if (!requireLegal(box)) { say('同意协议后再点一次「手机号登录」'); return; }
           say('登录中…');
           const r = await A.loginPhone(phone, c);
           if (r.ok) { say('已登录，正在同步'); renderSettings(); return; }
@@ -712,11 +719,14 @@ function rwBar(body, cls) {
 }
 // 买之前问一句（自绘，不用 confirm）：真商店会再弹苹果的付款面板，这里只挡误触
 function rwBuy(body, kind, item, theme, after) {
+  // 9-29：没同意协议先弹协议行，同意后自动回到这一步（跟戳了么 9-10 同一套）
+  if (!requireLegal(body, () => rwBuy(body, kind, item, theme, after))) return;
   const bar = rwBar(body, 'ask');
   const price = Store.price(item);
-  // 支付宝（国内安卓）：付款前把"付了不退"说清楚（数字商品，戳了么 9-10 合规同一句）；商店线由苹果/Google 自己的面板说
-  const note = Store.lane() === 'alipay' ? '<br><small>数字商品，付款即交付，不支持无理由退款。</small>' : '';
+  // 支付宝（国内安卓）：付款前把"付了不退"说清楚（数字商品，戳了么 9-10 合规同一句），链到服务协议；商店线由苹果/Google 自己的面板说
+  const note = Store.lane() === 'alipay' ? '<br><small>数字商品，付款即交付，不支持无理由退款。详见<a href="#" data-legal="terms">《服务协议》</a>。</small>' : '';
   bar.innerHTML = '<span>' + '买下「' + (item.name || item.id) + '」' + (price ? '，' + price : '') + '？' + note + '</span>';
+  legalLinks(bar);
   const ok = document.createElement('button'); ok.className = 'btn'; ok.textContent = '买下';
   const no = document.createElement('button'); no.className = 'btn ghost'; no.textContent = '算了';
   ok.onclick = async () => {
@@ -757,6 +767,40 @@ function rwHint(body, msg) {
   no.onclick = () => bar.remove(); bar.appendChild(no);
 }
 const rwErr = (body, e) => rwHint(body, String(e && e.message || e));
+
+// ── 服务协议 / 隐私政策的同意（9-29，照戳了么 legal.js）──
+// 为什么：国内法规要求收集个人信息前先告知并取得同意；商店要求 App 内能找到隐私政策；支付宝向国内用户收钱要把退款规则说清。
+// 规则：不同意也能用（计时全在本机）；只有**登录、购买**这两件事要先同意——requireLegal 挡在它们前面。
+// 同意的是哪一版记在本机 localStorage（不同步：同意是这台设备上的事）；条款实质更新时改 LEGAL_VER，所有人会再弹一次。
+// 🔴 LEGAL_VER 跟 site/terms.html、site/privacy.html 页首的「生效日期」保持一致。
+const LEGAL_VER = '2026-09-29';
+const legalOk = () => { try { return localStorage.getItem('capy_legal_ok') === LEGAL_VER; } catch (e) { return false; } };
+const acceptLegal = () => { try { localStorage.setItem('capy_legal_ok', LEGAL_VER); } catch (e) {} };
+// 协议页地址：跟服务端同一台（国内 www / 美服 stampday），按当前语言跳到页内那一段
+const legalURL = (kind) => (window.Account ? Account.WEB_BASE : 'https://www.tybbtech.com/capyroom/') + kind + '.html#' + (I18N.lang === 'zh' ? 'zh' : 'en');
+function openLegal(kind) {
+  const url = legalURL(kind);
+  if (HAS_BRIDGE) T.core.invoke('plugin:opener|open_url', { url }).catch((e) => console.warn('openLegal', e));
+  else window.open(url, '_blank');
+}
+// 把一段文案里的《服务协议》《隐私政策》变成可点的链接（外开浏览器）
+function legalLinks(el) {
+  el.querySelectorAll('[data-legal]').forEach((a) => { a.onclick = (e) => { e.preventDefault(); openLegal(a.dataset.legal); }; });
+  return el;
+}
+const LEGAL_HTML = '<a href="#" data-legal="terms">《服务协议》</a>和<a href="#" data-legal="privacy">《隐私政策》</a>';
+/** 已同意 → true；没同意 → 在面板顶上弹一行协议确认，同意后跑 then，本次返回 false */
+function requireLegal(body, then) {
+  if (legalOk()) return true;
+  const bar = rwBar(body, 'ask');
+  const s = document.createElement('span'); s.innerHTML = '登录、购买前，请先阅读并同意' + LEGAL_HTML; legalLinks(s); bar.appendChild(s);
+  const ok = document.createElement('button'); ok.className = 'btn'; ok.textContent = '同意';
+  const no = document.createElement('button'); no.className = 'btn ghost'; no.textContent = '暂不';
+  ok.onclick = () => { acceptLegal(); bar.remove(); then && then(); };
+  no.onclick = () => bar.remove();
+  bar.appendChild(ok); bar.appendChild(no);
+  return false;
+}
 // 汤札（9-3 用户三次把关后的定案）：**一天一块牌**——
 //   ① 本周 7 个挂钩（一～日）：来过的那天挂一块牌（tag.png 当底：日期 / 朱印「汤」/ 当天分钟），没来的只剩空钩；
 //      今天没泡＝空钩+一句"泡一场，挂上今天的牌"；点一块牌→下面流水只看那天；只看本周不翻页

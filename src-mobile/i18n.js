@@ -49,6 +49,10 @@ const D = {
   '购买没拉起来：{s}': 'Could not start the purchase: {s}', '上一笔购买还没结束': 'The previous purchase is still in progress',
   'Google 返回 0 件（商品在 Play Console 没生效 / 这台机不是许可测试账号 / 没装 Play 商店）': 'Google returned 0 products (not live in Play Console / not a license tester / no Play Store)',
   '没有商店': 'no store', '付款到了，「{s}」已经是你的了': 'Payment received — "{s}" is yours now',
+  // 协议（9-29）
+  '登录、购买前，请先阅读并同意': 'Before signing in or buying, please read and agree to ', '《服务协议》': 'the Terms of Service', '和': ' and ', '《隐私政策》': 'the Privacy Policy',
+  '服务协议': 'Terms of Service', '隐私政策': 'Privacy Policy', '同意': 'Agree', '暂不': 'Not now', '详见': 'See ', '。': '.',
+  '同意协议后再点一次「手机号登录」': 'Agree to the terms, then tap "Sign in with phone" again',
   '我已付款': 'I have paid', '查询中…': 'Checking…', '还没查到付款，稍等几秒再点一次': 'Payment not found yet — wait a few seconds and tap again',
   '这一单已经关闭了，要买再点一次「买下」': 'That order has closed — tap "Buy" again to retry', '数字商品，付款即交付，不支持无理由退款。': 'Digital goods are delivered on payment and are non-refundable.',
   '网络不通，稍后再试': 'No network, try later', '没有可恢复的购买': 'Nothing to restore', '已取消': 'Cancelled', '购买没有完成': 'Purchase not completed',

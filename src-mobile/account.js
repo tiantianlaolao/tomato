@@ -120,7 +120,7 @@ const DEBOUNCE_MS = 3000;
 const KINDS = ['session', 'plan', 'schedule', 'rewards', 'settings'];
 
 window.Account = {
-  net, IS_OVERSEAS, HAS_BRIDGE,
+  net, IS_OVERSEAS, HAS_BRIDGE, WEB_BASE,   // WEB_BASE：协议/隐私页跟服务端同一台（main.js legalURL）
   account: load('account', null),      // {token, uid, provider, email} | null
   cursor: load('cursor', {}),          // uid -> seq
   meta: load('meta', {}),              // `${kind}|${id}` -> 已知 mtime（本地=服务端一致时的值）
