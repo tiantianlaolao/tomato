@@ -36,6 +36,9 @@ time = "0.3"
 # 原生登录（9-3 账号线）：Apple（iOS 原生面板）+ Google（iOS/Android 原生 SDK），拿 idToken 交服务端验签。
 # 桌面端不拉：桌面版没有账号线，且它内部依赖 GoogleSignIn/AppAuth 的 Swift 包。
 tauri-plugin-social-auth = "1.1"
+# 外开系统浏览器（9-29 支付宝手机网站支付：国内安卓包把收银台 URL 交给系统浏览器 → 拉起支付宝 App）。
+# capabilities/mobile.json 放行 opener:default（默认 scope 只许 http/https/mailto/tel）。
+tauri-plugin-opener = "2"
 
 # iOS 专属：屏幕常亮要调 UIApplication.isIdleTimerDisabled，Tauri 没有这个 API，
 # 只能自己发一条 objc 消息。objc2 本来就在 tauri 的 iOS 依赖树里（Cargo.lock 已有 0.6.4），

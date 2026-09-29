@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F3EBDD">
+<title>Capyroom</title>
+<meta name="robots" content="noindex">
+<!-- 支付宝付完（或中途退出）跳回来的落点：return_url / quit_url 都指这里（server/pay.js）。
+     部署位置：1.13 /var/www/capyroom/pay/index.html（与 privacy.html 同一套 sudo cp 路子，见 _deploy_capyroom_privacy.py）。
+     🔴 这一页**只给人看**，不做任何到账判断——支付宝带回来的 out_trade_no / total_amount 等参数一个字不信。
+        到账是 App 里 Store.checkPending 去问服务端（notify 验签 / 主动反查）的事。
+     国内安卓官网包：付款发生在系统浏览器里，用户看完这页自己切回 App（按返回 / 最近任务）。 -->
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{min-height:100dvh;background:#F3EBDD;color:#3e3226;font-family:"PingFang SC","Microsoft YaHei",sans-serif;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 26px;text-align:center}
+h1{font-size:24px;letter-spacing:.1em;font-weight:500;margin-top:16px}
+.sub{font-size:15px;color:#6f6152;line-height:1.9;margin-top:12px;max-width:19em}
+.mark{width:72px;height:72px}
+.note{font-size:12.5px;color:#9a8d7d;margin-top:26px;line-height:1.8}
+</style>
+</head>
+<body>
+<svg class="mark" viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="42" fill="none" stroke="#b2382a" stroke-width="5"/><path d="M32,52 L45,64 L70,36" fill="none" stroke="#b2382a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<h1>付款完成后，回到 Capyroom 就好</h1>
+<p class="sub">新主题会在你回到 App 的时候打开。<br>要是没马上出现，在「调汤」里点一下「恢复购买」。</p>
+<p class="note" id="n"></p>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var no = q.get('out_trade_no') || '';
+  if (no) document.getElementById('n').textContent = '订单 ' + no;
+})();
+</script>
+</body>
+</html>

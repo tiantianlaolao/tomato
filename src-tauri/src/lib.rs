@@ -1364,6 +1364,9 @@ pub fn run() {
     // 内购桥（P4 9-4，plugins/tauri-plugin-iap，capabilities/mobile.json 放行 iap:default）：只在移动端挂，桌面没有商店
     #[cfg(mobile)]
     let builder = builder.plugin(tauri_plugin_iap::init());
+    // 外开系统浏览器（9-29 支付宝手机网站支付：国内安卓包把收银台 URL 交给系统浏览器 → 拉起支付宝；capabilities/mobile.json 放行 opener:default）
+    #[cfg(mobile)]
+    let builder = builder.plugin(tauri_plugin_opener::init());
 
     let builder = builder
         .setup(|app| {

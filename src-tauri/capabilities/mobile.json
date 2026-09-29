@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "mobile",
-  "description": "移动端专属：原生登录（Apple / Google，tauri-plugin-social-auth）+ 内购桥（plugins/tauri-plugin-iap，StoreKit 2）",
+  "description": "移动端专属：原生登录（Apple / Google，tauri-plugin-social-auth）+ 内购桥（plugins/tauri-plugin-iap，StoreKit 2 / Play Billing）+ 外开浏览器（opener：国内安卓支付宝收银台）",
   "platforms": ["iOS", "android"],
   "windows": ["main"],
   "permissions": [
     "social-auth:default",
-    "iap:default"
+    "iap:default",
+    "opener:default"
   ]
 }

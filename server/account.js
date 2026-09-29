@@ -135,6 +135,8 @@ function mount({ db, send, readBody }) {
     dropUserSessions: db.prepare('DELETE FROM sessions WHERE uid = ?'),
     dropUserInstalls: db.prepare('DELETE FROM installs WHERE uid = ?'),
     dropUserItems: db.prepare('DELETE FROM sync_items WHERE uid = ?'),
+    dropUserOrders: db.prepare('DELETE FROM orders WHERE uid = ?'),           // 9-29 支付：删号连订单/权益一起删
+    dropUserEnts: db.prepare('DELETE FROM entitlements WHERE uid = ?'),
     dropUser: db.prepare('DELETE FROM users WHERE uid = ?'),
     putInstall: db.prepare(
       'INSERT INTO installs (install, uid, created) VALUES (?, ?, ?)'
@@ -357,6 +359,8 @@ function mount({ db, send, readBody }) {
       try {
         q.dropUserItems.run(s.uid);
         q.dropUserInstalls.run(s.uid);
+        q.dropUserOrders.run(s.uid);
+        q.dropUserEnts.run(s.uid);
         q.dropUserSessions.run(s.uid);
         q.dropUser.run(s.uid);
         db.exec('COMMIT');
@@ -380,7 +384,7 @@ function mount({ db, send, readBody }) {
     return null;
   }
 
-  return { route };
+  return { route, sessionOf };   // sessionOf 借给 pay.js（同一套 Bearer 会话）
 }
 
 module.exports = { mount, verifyIdToken };

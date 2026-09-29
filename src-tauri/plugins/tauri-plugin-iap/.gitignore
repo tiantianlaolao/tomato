@@ -1,3 +1,7 @@
 # 构建时由 tauri-plugin 拷进来的 tauri iOS API（Package.swift 引 ../.tauri/tauri-api）
 .tauri/
 ios/.build/
+# 安卓半边：tauri CLI 拷进来的 tauri-android API + gradle 产物
+android/.tauri/
+android/build/
+android/.gradle/

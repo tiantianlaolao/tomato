@@ -486,9 +486,12 @@ function renderSettings() {
     bb.onclick = () => { RW.setShowBuy(!RW.showBuy()); bb.classList.toggle('on', RW.showBuy()); };
     bd.appendChild(bb);
   }
-  // 恢复购买（苹果 5.1.1：必须独立于登录，且随时可用）。只在能买的包里露（9-23：安卓没接结算，这行写着 Apple ID 还点不动）
+  // 恢复购买（苹果 5.1.1：必须独立于登录，且随时可用）。只在能买的包里露；说明按包的支付线写（9-29：Play / 支付宝各一句）
   if (Store.canBuy()) {
-    const rr = rowEl('恢复购买', '在这台设备换了 Apple ID 或重装后，把买过的找回来');
+    const L = Store.lane();
+    const rr = rowEl('恢复购买', L === 'play' ? '在这台设备换了 Google 账号或重装后，把买过的找回来'
+      : L === 'alipay' ? '登录同一个手机号后，把买过的找回来（买过的记在账号上）'
+      : '在这台设备换了 Apple ID 或重装后，把买过的找回来');
     const rb = document.createElement('button'); rb.className = 'btn'; rb.textContent = '恢复购买';
     rb.onclick = async () => {
       try { const n = await Store.restore(); rb.textContent = '已恢复 ' + n + ' 项'; RW.load().catch(() => {}); }
@@ -717,7 +720,12 @@ function rwBuy(body, kind, item, theme, after) {
   ok.onclick = async () => {
     if (ok.disabled) return;
     ok.disabled = true; ok.textContent = '…';
-    try { await Store.buy(kind, item, theme); bar.remove(); after && after(); } catch (e) { rwErr(body, e); }
+    try {
+      const r = await Store.buy(kind, item, theme); bar.remove();
+      // 支付宝（国内安卓）：收银台在系统浏览器里，付完回来自动到账（store.js checkPending → onPaid）
+      if (r && r.pending) { rwHint(body, '已打开支付宝，付完回到这里就会自动开通'); return; }
+      after && after();
+    } catch (e) { rwErr(body, e); }
   };
   no.onclick = () => bar.remove();
   bar.appendChild(ok); bar.appendChild(no);
@@ -1059,9 +1067,12 @@ if (!HAS_BRIDGE) {
         if (res.report && (res.report.rewards_changed || res.report.sessions_added)) RW.load().catch(() => {});
         if (sheetKind === 'hist') renderHistory();
       };
-      Account.onChange = () => { if (sheetKind === 'set') renderSettings(); };
-      // 商店探测有结果（启动重试 / 回前台重探 / 买成后补价）→ 开着的面板刷一遍，价格换成苹果的本地化价
+      // 账号态变了：刷设置页；国内安卓登录后顺手把服务端权益对一遍（支付宝买的记在账号上，换机靠这个），有挂着的单也查一下
+      Account.onChange = () => { if (sheetKind === 'set') renderSettings(); if (Store.lane() === 'alipay' && Account.isLoggedIn()) { Store.refreshEntitlements().catch(() => {}); Store.checkPending().catch(() => {}); } };
+      // 商店探测有结果（启动重试 / 回前台重探 / 买成后补价）→ 开着的面板刷一遍，价格换成商店的本地化价
       Store.onChange = () => { if (sheetKind === 'set') renderSettings(); else if (sheetKind === 'hist') renderHistory(); };
+      // 支付宝到账（回前台轮询到 PAID）：提示一句，面板刷一遍
+      Store.onPaid = (p) => { if (sheetKind === 'set') renderSettings(); if (p && p.kind === 'theme') $('hintTxt').textContent = '付款到了，「' + ((RW.themeInfo(p.id) || {}).name || p.id) + '」已经是你的了'; };
       Account.init();
       feed(b.view);
       // P3 账本 → P4 商店探测 → 主题锁：存的是付费主题又没买（且有真商店/开发开关）就退回中国风

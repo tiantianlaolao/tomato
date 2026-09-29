@@ -168,6 +168,14 @@ jobs:
           M=src-tauri/gen/android/app/src/main/AndroidManifest.xml
           sed -i 's#android:name=".MainActivity"#android:name=".MainActivity"\n            android:screenOrientation="portrait"#' $M
           grep -q 'android:screenOrientation="portrait"' $M
+          # 🔴 广告 ID（9-29 接了 Play 结算库 7）：结算库会把 com.google.android.gms.permission.AD_ID 合并进主 manifest，
+          #    我们无广告、无分析 SDK，留着它 Play Console 会要求申报"使用广告 ID"——照戳了么用 tools:node=remove 摘掉（两条安卓线都摘）
+          grep -q 'xmlns:tools' $M || sed -i 's#<manifest #<manifest xmlns:tools="http://schemas.android.com/tools" #' $M
+          grep -q 'xmlns:tools' $M
+          if ! grep -q 'permission.AD_ID' $M; then
+            sed -i 's#<application#<uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove" />\n    <application#' $M
+          fi
+          grep -q 'tools:node="remove"' $M
           BUILD_NUM=$(git rev-list --count HEAD)
           echo "BUILD_NUM=$BUILD_NUM" >> $GITHUB_ENV
           VERSION=$(node -p "require('./src-tauri/tauri.android.conf.json').version")

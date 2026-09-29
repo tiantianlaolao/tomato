@@ -31,6 +31,13 @@ const account = require('./account.js').mount({
   send: (...a) => send(...a),
   readBody: (...a) => readBody(...a),
 });
+// 支付（9-29）：支付宝订单 / 回调 / 反查 / 权益。密钥没配 → /api/pay/* 一律 501，别的接口照常
+const pay = require('./pay.js').mount({
+  db,
+  send: (...a) => send(...a),
+  readBody: (...a) => readBody(...a),
+  sessionOf: (req) => account.sessionOf(req),
+});
 
 // ---- 跨域 ------------------------------------------------------------------
 // Tauri 壳的 origin：iOS 是 tauri://localhost，Android 是 http://tauri.localhost（v2 默认）。
@@ -90,6 +97,10 @@ async function route(req, res, pathname) {
   }
   {
     const hit = await account.route(req, res, pathname);
+    if (hit !== null) return hit;
+  }
+  {
+    const hit = await pay.route(req, res, pathname);
     if (hit !== null) return hit;
   }
   if (m === 'GET' && pathname === '/api/health') {

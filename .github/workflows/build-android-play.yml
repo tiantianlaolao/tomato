@@ -159,6 +159,14 @@ jobs:
           M=src-tauri/gen/android/app/src/main/AndroidManifest.xml
           sed -i 's#android:name=".MainActivity"#android:name=".MainActivity"\n            android:screenOrientation="portrait"#' $M
           grep -q 'android:screenOrientation="portrait"' $M
+          # 🔴 广告 ID（9-29 接了 Play 结算库 7）：结算库会把 com.google.android.gms.permission.AD_ID 合并进主 manifest，
+          #    我们无广告、无分析 SDK，留着它 Play Console 会要求申报"使用广告 ID"——照戳了么用 tools:node=remove 摘掉
+          grep -q 'xmlns:tools' $M || sed -i 's#<manifest #<manifest xmlns:tools="http://schemas.android.com/tools" #' $M
+          grep -q 'xmlns:tools' $M
+          if ! grep -q 'permission.AD_ID' $M; then
+            sed -i 's#<application#<uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove" />\n    <application#' $M
+          fi
+          grep -q 'tools:node="remove"' $M
           BUILD_NUM=$(git rev-list --count HEAD)
           echo "BUILD_NUM=$BUILD_NUM" >> $GITHUB_ENV
           VERSION=$(node -p "require('./src-tauri/tauri.android.conf.json').version")
@@ -210,9 +218,12 @@ jobs:
           "$AAPT" dump badging "$APK" | grep -q "sdkVersion:'26'"
           "$AAPT" dump badging "$APK" | grep "native-code" | grep -q "arm64-v8a"
           "$AAPT" dump badging "$APK" | grep "native-code" | grep -q "armeabi-v7a"
-          # 广告 ID：现在没接 Play 结算库，成品里不该有；将来接了 Billing 要照戳了么加 tools:node=remove
+          # 广告 ID：结算库合并进来的 AD_ID 在上面那步用 tools:node=remove 摘了，成品里不该有
           if "$AAPT" dump permissions "$APK" | grep -q "com.google.android.gms.permission.AD_ID"; then
             echo "::error title=AD_ID::成品含广告 ID 权限，隐私申报会打架"; exit 1; fi
+          # 🔴 Play 结算（9-29）：结算库自己的 manifest 会带进 com.android.vending.BILLING；没有它 Play Console 建不了商品、购买面板拉不起来
+          "$AAPT" dump permissions "$APK" | grep -q "com.android.vending.BILLING" || { echo "::error title=BILLING::成品没有 com.android.vending.BILLING 权限——结算库没编进来？"; exit 1; }
+          echo "BILLING 权限在，AD_ID 已摘"
           # 🔴 Tauri 的 generate_context! 把 frontendDist 压缩后嵌进 .so —— JS 正文（WEB_BASE 域名）grep 必然一无所获，
           #    只有资源的**路径键**是明文（build-adhoc.yml 早记过这条，Play 线首跑又按域名 grep 栽了一次）。
           #    域名替换的闸门在上面「指向海外实例」那步的源码 grep 断言；这里只核"打进去的是移动端前端"。

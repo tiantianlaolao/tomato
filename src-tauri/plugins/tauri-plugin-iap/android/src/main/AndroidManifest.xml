@@ -1,0 +1,3 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- com.android.vending.BILLING 由 billing 库自己的 manifest 合并进来，这里不重复声明 -->
+</manifest>

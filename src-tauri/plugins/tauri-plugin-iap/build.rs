@@ -5,6 +5,7 @@ const COMMANDS: &[&str] = &["products", "purchase", "restore", "entitlements"];
 
 fn main() {
     // ios_path：目标是 iOS 时由 swift-rs 把 ios/ 这个 Swift 包编成静态库链进来（tauri-plugin 的 mobile::setup）；
-    // 桌面/Windows 上这一步是空操作，只生成权限文件——所以本机 cargo check 能验 Rust 半边，Swift 半边只有 CI 能验。
-    tauri_plugin::Builder::new(COMMANDS).ios_path("ios").build();
+    // android_path（9-29）：目标是安卓时 tauri CLI 把 android/ 这个 Kotlin 库模块挂进 gen/android 工程（Play 结算半边）。
+    // 桌面/Windows 上两步都是空操作，只生成权限文件——所以本机 cargo check 能验 Rust 半边，Swift/Kotlin 半边只有 CI 能验。
+    tauri_plugin::Builder::new(COMMANDS).ios_path("ios").android_path("android").build();
 }

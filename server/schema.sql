@@ -41,6 +41,30 @@ CREATE TABLE IF NOT EXISTS sync_items (
 CREATE INDEX IF NOT EXISTS idx_sync_uid_seq ON sync_items(uid, seq);
 CREATE INDEX IF NOT EXISTS idx_sessions_uid ON sessions(uid);
 
+-- 支付（9-29，从戳了么搬来）：订单 + 权益。只有中国区实例配支付宝；美服这两张表空着。
+CREATE TABLE IF NOT EXISTS orders (
+  out_trade_no TEXT PRIMARY KEY,       -- 我们的订单号（CP + base36 时间 + 随机）
+  uid          TEXT NOT NULL,          -- 买的人（必须登录才能买：权益要有归属，换机才找得回）
+  product      TEXT NOT NULL,          -- 'theme.onsen' …（价目表从 rewards_catalog.json 读，见 pay.js）
+  amount_fen   INTEGER NOT NULL,       -- 服务端定的金额（分）；notify/反查回来的金额必须和它一致
+  channel      TEXT NOT NULL,          -- 'alipay_wap' | 'alipay_app'
+  status       TEXT NOT NULL,          -- CREATED | PAID | CLOSED
+  trade_no     TEXT UNIQUE,            -- 支付宝交易号。UNIQUE = 同一笔交易只能落一单
+  created      INTEGER NOT NULL,
+  paid_at      INTEGER,
+  queried_at   INTEGER,                -- 上次主动反查支付宝的时间（限频）
+  raw          TEXT                    -- 到账那条 notify / 反查响应原文（对账用）
+);
+CREATE INDEX IF NOT EXISTS idx_orders_uid ON orders(uid, created);
+
+CREATE TABLE IF NOT EXISTS entitlements (
+  uid        TEXT NOT NULL,
+  product    TEXT NOT NULL,            -- 与 orders.product 同口径
+  granted_at INTEGER NOT NULL,
+  order_no   TEXT,                     -- 哪一单发的
+  PRIMARY KEY (uid, product)
+);
+
 -- 手机号登录验证码（中国区专用；海外实例不配短信凭据 = 这条路 501）
 CREATE TABLE IF NOT EXISTS sms_codes (
   phone    TEXT PRIMARY KEY,

@@ -77,6 +77,24 @@ const net = {
     if (!data || !Number.isFinite(data.cursor)) return null;
     return { status, cursor: data.cursor, more: !!data.more, changes: data.changes || [] };
   },
+  // ---- 支付（9-29，配 server/pay.js；只有国内安卓包走）----
+  // 三个都要 Bearer。返回 { http, ...服务端字段 } / null（网不通）。
+  // ⚠️ 字段名叫 http 不叫 status：订单本身有个 status（CREATED/PAID/CLOSED），别撞。
+  async payCreate(token, product, channel) {
+    const { status, data } = await jsonPost('pay/create', { product, channel: channel || 'alipay_wap' }, token);
+    if (status === 0) return null;
+    return { http: status, ...(data || {}) };
+  },
+  async payOrder(token, no) {
+    const { status, data } = await call('pay/order?no=' + encodeURIComponent(no), { headers: { authorization: 'Bearer ' + token } });
+    if (status === 0) return null;
+    return { http: status, ...(data || {}) };
+  },
+  async entitlements(token) {
+    const { status, data } = await call('entitlements', { headers: { authorization: 'Bearer ' + token } });
+    if (status === 0) return null;
+    return { http: status, products: (data && data.products) || [], items: (data && data.items) || [] };
+  },
   // 原生登录：拉系统面板，回 {token} 或 {err, canceled}。
   // 🔴 9-3 真机：Apple 键"闪一下"＝插件 reject 被我当成用户取消静音了——错误原文必须交给界面显示，
   //    只有插件明说的 *_CANCELED 两种码才算取消。
