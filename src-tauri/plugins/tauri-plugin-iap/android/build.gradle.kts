@@ -36,7 +36,8 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.9.0")
     implementation("androidx.appcompat:appcompat:1.6.0")
-    // Play 结算库 7.x（Play 2025-08 起新包最低 7）。⚠️ 8.x 改了 queryProductDetailsAsync 的回调签名，别顺手升
-    implementation("com.android.billingclient:billing-ktx:7.1.1")
+    // Play 结算库 8.x（10-01：Play 自 2026-08-31 起新包/更新最低 8，7 传不上去；下一道坎 = 2027-08-31 要 ≥9）。
+    // 用不带 -ktx 的那份：我们只用回调接口，不用协程扩展，少一层 Kotlin 元数据版本的麻烦
+    implementation("com.android.billingclient:billing:8.0.0")
     implementation(project(":tauri-android"))
 }

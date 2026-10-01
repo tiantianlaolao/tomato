@@ -1,4 +1,4 @@
-// capyroom 内购桥 · Google Play Billing 7（2026-09-29）
+// capyroom 内购桥 · Google Play Billing 8（2026-09-29 按 7 写；10-01 升 8：Play 自 2026-08-31 起新包/更新必须 ≥8）
 //
 // 与 ios/Sources/IapPlugin.swift 同一份契约，JS 一行不改就能在 Play 包上跑（plugin:iap|<cmd>）：
 //   products     {ids:[sku]}  → {products:[{id, displayPrice, price, name}]}
@@ -76,7 +76,9 @@ class IapPlugin(private val activity: Activity) : Plugin(activity), PurchasesUpd
         val list = ids.map {
             QueryProductDetailsParams.Product.newBuilder().setProductId(it).setProductType(BillingClient.ProductType.INAPP).build()
         }
-        c.queryProductDetailsAsync(QueryProductDetailsParams.newBuilder().setProductList(list).build()) { r, pds ->
+        // 结算库 8：回调第二个参数从 List<ProductDetails> 换成 QueryProductDetailsResult（没查到的在 unfetchedProductList，这里不用）
+        c.queryProductDetailsAsync(QueryProductDetailsParams.newBuilder().setProductList(list).build()) { r, res ->
+            val pds = res.productDetailsList
             for (pd in pds) details[pd.productId] = pd
             cb(r, pds)
         }
