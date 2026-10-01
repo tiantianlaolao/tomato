@@ -89,6 +89,7 @@ jobs:
           # 美服实例真在线才继续（health + 资产镜像各探一发）
           curl -sf -m 15 "${OVERSEAS_BASE}api/health" | grep -q '"ok":true'
           curl -sfI -m 15 "${OVERSEAS_BASE}assets/cn-v3/loop_work.mp4" | grep -qi "^HTTP.* 200"
+          curl -sfI -m 15 "${OVERSEAS_BASE}assets/v3/loop_work.mp4" | grep -qi "^HTTP.* 200"   # 日系野天风吕（10-01 镜像；换 base 要先镜像到美服）
           echo "美服 health + 资产镜像在线"
 
       - name: 'tauri android init'
@@ -254,7 +255,7 @@ jobs:
           Allow "install from unknown sources" the first time.<br>
           Same package and signature as the store build — installs over the test build, keeps local data.<br>
           Connects to the overseas server (stampday); Google sign-in only.<br>
-          Purchases are not wired yet (Play Billing comes later).<br>
+          Purchases go through Google Play Billing (license-tester accounts only when sideloaded).<br>
           国内测试包在 <a href="android.html">android.html</a></div>
           HTML
 
