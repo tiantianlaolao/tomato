@@ -259,7 +259,7 @@ jobs:
           第一次会要求允许"安装未知来源应用"<br>
           包名 ${PACKAGE}，与正式版同一签名，装上会直接覆盖<br>
           Google 登录要等 Google Cloud 里登记了签名 SHA-1 才通；Apple 登录安卓没有<br>
-          购买在这版是模拟的（Play 结算还没接）<br>
+          本次包含雪山温泉与雨夜花房，进入设置可使用「内测：全部解锁」查看<br>
           iOS 测试包在 <a href="install.html">install.html</a></div>
           HTML
           ls -l $RUNNER_TEMP/out/android.html
