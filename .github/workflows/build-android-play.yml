@@ -116,8 +116,8 @@ jobs:
         run: |
           R=src-tauri/gen/android/build.gradle.kts
           grep -q "mavenCentral()" "$R"
-          sed -i 's#^\(\s*\)mavenCentral()#\1mavenCentral()\n\1maven { url = uri("https://artifactory-external.vkpartner.ru/artifactory/vkid-sdk-android/") }   // capyroom CI 追加：登录插件依赖的 VK ID SDK 只在 VK 自家 artifactory#' "$R"
-          grep -q "vkpartner.ru" "$R"
+          sed -i 's#^\(\s*\)mavenCentral()#\1mavenCentral()\n\1maven { url = uri("https://nexus-external.vkteam.ru/repository/maven/") }   // capyroom CI 追加：登录插件依赖的 VK ID SDK 只在 VK 官方 Maven 仓库（2026-10-11 已迁移到 Nexus，SDK 版本不变）#' "$R"
+          grep -q "nexus-external.vkteam.ru" "$R"
 
       - name: '追加 Gradle 配置（登录插件安卓半边）'
         env:
