@@ -1,0 +1,175 @@
+{
+  "frame": [
+    941,
+    1672
+  ],
+  "source": "accepted snow v9 masks; existing eight towel layers",
+  "items": [
+    {
+      "id": "snow-catcher",
+      "name": "雪晶捕手",
+      "line": "days",
+      "n": 7,
+      "bounds": [
+        628,
+        507,
+        782,
+        705
+      ],
+      "sha256": "29a2b5bbbc1fd2c6b037421bce83823a0ac37a718493215ae1c53f2da3a7b4a5"
+    },
+    {
+      "id": "moon-stone",
+      "name": "月光石",
+      "line": "long",
+      "n": 5,
+      "bounds": [
+        384,
+        766,
+        556,
+        848
+      ],
+      "sha256": "9f0a22959b530d4cc7aa1885201418ad29a53ff297438c21961c34ed3a128254"
+    },
+    {
+      "id": "frost-glass",
+      "name": "霜花玻璃片",
+      "line": "rest",
+      "n": 30,
+      "bounds": [
+        130,
+        1338,
+        265,
+        1450
+      ],
+      "sha256": "e4190e42122149a0d018eae1c2767eeb8dad4a5b396ad2df46904cd18c353888"
+    },
+    {
+      "id": "frozen-leaf",
+      "name": "冰封秋叶",
+      "line": "days",
+      "n": 2,
+      "bounds": [
+        670,
+        1380,
+        803,
+        1477
+      ],
+      "sha256": "d355817c1bcb1db8c34d601433a305231d2591badbe569aa63b40f1103b9226c"
+    },
+    {
+      "id": "seed-case",
+      "name": "冬眠种子匣",
+      "line": "rest",
+      "n": 90,
+      "bounds": [
+        135,
+        644,
+        312,
+        747
+      ],
+      "sha256": "72dc9bdae9f3acc29e4c821a070468a4204880524456a2ee69f3a87f1542eee1"
+    },
+    {
+      "id": "echo-shell",
+      "name": "雪山回声螺",
+      "line": "long",
+      "n": 1,
+      "bounds": [
+        730,
+        1167,
+        872,
+        1286
+      ],
+      "sha256": "a4aafbf7dd384862bf6b860e361ce252dc42e5df5c399b2983c8f74a2056ba88"
+    },
+    {
+      "id": "st01",
+      "variant": "plain",
+      "bounds": [
+        434,
+        1368,
+        618,
+        1464
+      ],
+      "sha256": "8cad1aaaac480b678af82267e445b506f1b1ceaba28ab665f79dca43ea327267"
+    },
+    {
+      "id": "st02",
+      "variant": "pine",
+      "bounds": [
+        434,
+        1368,
+        618,
+        1464
+      ],
+      "sha256": "4e5cd9795a55df86c95a7353a3acee337f8c7a93211edc173e3a3caca3ba62dc"
+    },
+    {
+      "id": "st03",
+      "variant": "snow",
+      "bounds": [
+        434,
+        1368,
+        618,
+        1464
+      ],
+      "sha256": "ec4d8bf0cca5aaf432aa3464eebc0117d44959773bccedfdf8e3c546a8189128"
+    },
+    {
+      "id": "st04",
+      "variant": "moon",
+      "bounds": [
+        434,
+        1368,
+        618,
+        1464
+      ],
+      "sha256": "490e11879535fc65f3d4465e21dd2cc7cc5cec131a7f94388fe9de2ea190a0f2"
+    },
+    {
+      "id": "st05",
+      "variant": "mountain",
+      "bounds": [
+        434,
+        1368,
+        618,
+        1464
+      ],
+      "sha256": "fb975b83d26c8036859fbb38167b9531dcc93c45b62e14af856eb8858849f195"
+    },
+    {
+      "id": "st06",
+      "variant": "lantern",
+      "bounds": [
+        434,
+        1368,
+        618,
+        1464
+      ],
+      "sha256": "9418c5c1e8af3d00b93175377b6eec757f4abb3718436674e2f1c21bd543dd69"
+    },
+    {
+      "id": "st07",
+      "variant": "cabin",
+      "bounds": [
+        434,
+        1368,
+        618,
+        1464
+      ],
+      "sha256": "071c576bf6dfd63429c8e3e1c3713f50138258ef6b10d90ee2b507c57fd28ac5"
+    },
+    {
+      "id": "st08",
+      "variant": "starlight",
+      "bounds": [
+        434,
+        1368,
+        618,
+        1464
+      ],
+      "sha256": "19738f51768c355447fe764c1b7efee6c4ca6134b599407a1e14f07949fddf0f"
+    }
+  ]
+}

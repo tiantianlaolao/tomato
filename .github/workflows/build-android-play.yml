@@ -91,6 +91,9 @@ jobs:
           curl -sfI -m 15 "${OVERSEAS_BASE}assets/cn-v3/loop_work.mp4" | grep -qi "^HTTP.* 200"
           curl -sfI -m 15 "${OVERSEAS_BASE}assets/v3/loop_work.mp4" | grep -qi "^HTTP.* 200"   # 日系野天风吕（10-01 镜像；换 base 要先镜像到美服）
           echo "美服 health + 资产镜像在线"
+          for clip in snow-v1/idle-web glasshouse-v1/idle-loop; do
+            curl -sfI -m 15 "${OVERSEAS_BASE}assets/${clip}.mp4" | grep -qi "^HTTP.* 200"
+          done
 
       - name: 'tauri android init'
         run: npx tauri android init --ci --skip-targets-install

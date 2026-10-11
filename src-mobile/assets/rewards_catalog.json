@@ -269,6 +269,260 @@
    "name": "池沿"
   }
  },
+ "snow": {
+  "slots": [
+    {
+      "id": "snow-catcher",
+      "name": "木牌小钉"
+    },
+    {
+      "id": "moon-stone",
+      "name": "池中石台"
+    },
+    {
+      "id": "frost-glass",
+      "name": "左岸石面"
+    },
+    {
+      "id": "frozen-leaf",
+      "name": "右岸石面"
+    },
+    {
+      "id": "seed-case",
+      "name": "左侧石窝"
+    },
+    {
+      "id": "echo-shell",
+      "name": "右侧池沿"
+    }
+  ],
+  "towels": [
+    {
+      "id": "st01",
+      "name": "素织",
+      "line": "gift",
+      "n": 0
+    },
+    {
+      "id": "st02",
+      "name": "松针",
+      "line": "focus",
+      "n": 60
+    },
+    {
+      "id": "st03",
+      "name": "雪花",
+      "line": "focus",
+      "n": 180
+    },
+    {
+      "id": "st04",
+      "name": "山月",
+      "line": "focus",
+      "n": 360
+    },
+    {
+      "id": "st05",
+      "name": "山纹",
+      "line": "focus",
+      "n": 600
+    },
+    {
+      "id": "st06",
+      "name": "灯影",
+      "line": "focus",
+      "n": 960
+    },
+    {
+      "id": "st07",
+      "name": "木屋",
+      "line": "focus",
+      "n": 1500
+    },
+    {
+      "id": "st08",
+      "name": "星雪",
+      "line": "focus",
+      "n": 2400
+    }
+  ],
+  "props": [
+    {
+      "id": "snow-catcher",
+      "name": "雪晶捕手",
+      "slot": "snow-catcher",
+      "line": "days",
+      "n": 7
+    },
+    {
+      "id": "moon-stone",
+      "name": "月光石",
+      "slot": "moon-stone",
+      "line": "long",
+      "n": 5
+    },
+    {
+      "id": "frost-glass",
+      "name": "霜花玻璃片",
+      "slot": "frost-glass",
+      "line": "rest",
+      "n": 30
+    },
+    {
+      "id": "frozen-leaf",
+      "name": "冰封秋叶",
+      "slot": "frozen-leaf",
+      "line": "days",
+      "n": 2
+    },
+    {
+      "id": "seed-case",
+      "name": "冬眠种子匣",
+      "slot": "seed-case",
+      "line": "rest",
+      "n": 90
+    },
+    {
+      "id": "echo-shell",
+      "name": "雪山回声螺",
+      "slot": "echo-shell",
+      "line": "long",
+      "n": 1
+    }
+  ],
+  "visitors": [],
+  "rack": {
+    "name": "木凳",
+    "mode": "fold"
+  }
+},
+ "glasshouse": {
+  "slots": [
+    {
+      "id": "hook",
+      "name": "画内横梁"
+    },
+    {
+      "id": "plant_floor",
+      "name": "前景绿植旁"
+    },
+    {
+      "id": "snail_floor",
+      "name": "绿植旁地面"
+    },
+    {
+      "id": "table_cup",
+      "name": "茶杯位"
+    },
+    {
+      "id": "table_fruit",
+      "name": "果盘位"
+    },
+    {
+      "id": "chair",
+      "name": "椅扶手"
+    }
+  ],
+  "props": [
+    {
+      "id": "chime",
+      "name": "叶铃",
+      "slot": "hook",
+      "line": "days",
+      "n": 2
+    },
+    {
+      "id": "plant",
+      "name": "陶盆绿植",
+      "slot": "plant_floor",
+      "line": "days",
+      "n": 4
+    },
+    {
+      "id": "snail",
+      "name": "陶瓷蜗牛",
+      "slot": "snail_floor",
+      "line": "long",
+      "n": 1
+    },
+    {
+      "id": "mug",
+      "name": "枝叶茶杯",
+      "slot": "table_cup",
+      "line": "rest",
+      "n": 90
+    },
+    {
+      "id": "fruit",
+      "name": "橙子果盘",
+      "slot": "table_fruit",
+      "line": "rest",
+      "n": 30
+    },
+    {
+      "id": "throw",
+      "name": "椅边披巾",
+      "slot": "chair",
+      "line": "rest",
+      "n": 180
+    }
+  ],
+  "towels": [
+    {
+      "id": "t01",
+      "name": "素麻",
+      "line": "gift",
+      "n": 0
+    },
+    {
+      "id": "t02",
+      "name": "枝叶",
+      "line": "focus",
+      "n": 60
+    },
+    {
+      "id": "t03",
+      "name": "雨点",
+      "line": "focus",
+      "n": 180
+    },
+    {
+      "id": "t04",
+      "name": "青格",
+      "line": "focus",
+      "n": 360
+    },
+    {
+      "id": "t05",
+      "name": "柑橘",
+      "line": "focus",
+      "n": 600
+    },
+    {
+      "id": "t06",
+      "name": "小花",
+      "line": "focus",
+      "n": 960
+    },
+    {
+      "id": "t07",
+      "name": "月夜",
+      "line": "focus",
+      "n": 1500
+    },
+    {
+      "id": "t08",
+      "name": "金叶",
+      "line": "focus",
+      "n": 2400
+    }
+  ],
+  "visitors": [],
+  "rack": {
+    "name": "桌上布艺",
+    "mode": "fold"
+  }
+},
  "themes": [
   {
    "id": "ink",
@@ -282,6 +536,8 @@
    "price_cny": 18,
    "price_usd": 2.99,
    "sku": "com.tybbtech.capyroom.theme.onsen"
-  }
+  },
+  {"id": "snow", "name": "雪山温泉", "paid": true, "hidden": true},
+  {"id":"glasshouse","name":"雨夜花房","paid":true,"hidden":true}
  ]
 }

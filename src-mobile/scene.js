@@ -44,6 +44,7 @@ const Scene = {
   setScene(id) {
     try { localStorage.setItem('capy_scene', id); } catch (e) {}
     this.swapToken++;
+    if (this.resetMotion) this.resetMotion();
     this.use(id);
     this.seg = null; this.frozen = false; this.phase = 'idle';
     for (const el of this.vids) { el.pause(); el.classList.remove('on'); el.removeAttribute('src'); el.load(); }
@@ -110,15 +111,17 @@ const Scene = {
   //    帧同步用 requestVideoFrameCallback 的 mediaTime（iOS 15.4+），没有就退回 currentTime。
   matte: {}, vt: -1,
   matteLoad(names) {
-    this.matte = {};
+    const target = this.matte = {};
+    const assets = this.scene && this.scene.assets;
     if (!window.AS) return;
     for (const n of names) {
-      const url = AS.matteUrl(n + '.json'); if (!url) continue;
+      const url = AS.matteUrl(n + '.json', assets); if (!url) continue;
       fetch(url).then((r) => (r.ok ? r.json() : null)).then((meta) => {
-        if (!meta || !meta.frames) { this.matte[n] = null; return; }
-        const sheets = (meta.sheets || []).map((f) => { const im = new Image(); im.src = AS.matteUrl(f); return im; });
-        this.matte[n] = { meta, sheets };
-      }).catch(() => { this.matte[n] = null; });
+        if (this.matte !== target) return;
+        if (!meta || !meta.frames) { target[n] = null; return; }
+        const sheets = (meta.sheets || []).map((f) => { const im = new Image(); im.src = AS.matteUrl(f, assets); return im; });
+        target[n] = { meta, sheets };
+      }).catch(() => { if (this.matte === target) target[n] = null; });
     }
   },
   hasMatte() { return !!(this.seg && this.matte[this.seg]); },
@@ -127,7 +130,7 @@ const Scene = {
   // 循环段水豚只是呼吸，差一帧不到 1px，仍走"只挖洞"的省电路。
   sameFrame() {
     const S = this.scene;
-    return this.hasMatte() && (this.seg === S.swimOut || this.seg === S.swimIn);
+    return (S.pixelOverlay && S.pixelOverlay(this.seg)) || (this.hasMatte() && (this.seg === S.swimOut || this.seg === S.swimIn));
   },
   coverRect(el) {
     const vw = el.videoWidth || 1088, vh = el.videoHeight || 1920, s = Math.max(this.W / vw, this.H / vh);
@@ -210,9 +213,12 @@ const Scene = {
     const old = this.cur();
     this.hardCut = !!hard;
     el.loop = !!loop;
+    if (this.scene.readVideoPixels) el.crossOrigin = 'anonymous';
+    else el.removeAttribute('crossorigin');
     el.src = this.src(seg);
     el.currentTime = 0;
     el.play().catch((e) => { this.noteErr('play', e); });
+    if (this.scene.motion && (this.frozen || !this.running)) el.pause();
     let revealed = false;
     const reveal = () => {
       if (revealed || this.cur() !== el) return;
@@ -236,7 +242,7 @@ const Scene = {
         this.vt = md.mediaTime;
         this.vfcTicks = (this.vfcTicks || 0) + 1;   // 诊断：视频真的在出帧（安卓 9-5"水波没有"排查）
         if (hard) reveal();                    // 硬切：第一帧真的呈现了才换类
-        if (this.hasMatte()) this.draw();      // 有角色通道的段每帧重画（过渡段连视频帧一起画，同帧）
+        if (this.hasMatte() || this.scene.pixelOverlay?.(this.seg)) this.draw(); // Match overlay to decoded frame.
         el.requestVideoFrameCallback(tick);
       };
       el.requestVideoFrameCallback(tick);
@@ -256,8 +262,10 @@ const Scene = {
 
   update(view) {
     if (!view || !this.scene) return;
+    if (this.scene.motion && this.updateMotion) return this.updateMotion(view);
     const ph = this.phaseOf(view);
     const wasPh = this.phase;
+    const previous = this.view;
     this.view = view;
     // 首次喂数据：直接上段不走雾（放最前，避免和切换逻辑双路都去 playOn）
     if (!this.seg) {
@@ -272,7 +280,11 @@ const Scene = {
       return;
     }
     if (ph === wasPh) {
-      // break 中场（长短休不会中途互换）——不动
+      // 相邻休息段也可能由短休变长休；同一段的每秒投影不重复触发过场。
+      if (ph === 'break' && previous && previous.idx !== view.idx) {
+        const seg = this.segFor(ph, view);
+        if (seg && seg !== this.seg) this.fogSwap(seg, true);
+      }
     } else {
       // 暂停/恢复＝停格与解冻，不换段不进雾
       if (ph === 'paused') { this.frozen = true; this.cur().pause(); }
@@ -432,7 +444,8 @@ const Scene = {
   start() {
     if (this.running) return;
     this.running = true; this.lastTs = 0; this.nextFrameAt = 0;
-    if (this.seg && !this.frozen) this.cur().play().catch((e) => { this.noteErr('start', e); });
+    if (this.seg && !this.frozen && !(this.scene?.motion && this.motionNeedsSync))
+      this.cur().play().catch((e) => { this.noteErr('start', e); });
     this.raf = requestAnimationFrame((t) => this.frame(t));
   },
   stop() {

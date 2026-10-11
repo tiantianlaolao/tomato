@@ -28,7 +28,7 @@ let view = null, plans = [], opsTimer = 0, settings = null;
 
 if (qs.get('boxes')) window.__SHOWBOXES = true;   // 验收用：画出入口命中区
 if (qs.get('matte')) window.__SHOWMATTE = true;   // 验收用：角色通道当前帧红色叠上来看对不对位
-if (!HAS_BRIDGE) window.__feedDemo = (k) => feed(fixture(k));   // 验收用（只在浏览器 DEMO）：切状态看"进入休息"提示
+if (!HAS_BRIDGE) window.__feedDemo = (k) => feed(typeof k === 'string' ? fixture(k) : k); // Browser-only snapshot checks use the same feed/UI path.
 Scene.mount($('stage'));
 Scene.start();
 // 底部提示跟主题走（每个场景包自带 hint 文案）
@@ -450,7 +450,7 @@ function renderSettings() {
   // 🔴 付费主题在"没有商店"的正式包里（国内安卓官网包 / 没接结算的 Play 包）整个不露，而不是免费（9-23 两端核对）：
   //    enforce() 在这些包里恒 false，只靠锁会把付费主题白送；内测包 / 开发开关（showBuy）照旧露，方便看效果。
   // 9-26：hidden 的主题内测包照露（日系 v2 重设计要真机验），商店包/官网正式包仍不露
-  const themeList = [['ink','水墨庭院'],['onsen','野天风吕']].filter(([v]) => { const i = RW.themeInfo(v); return !(i && i.hidden && !RW.internal) && !(HAS_BRIDGE && i && i.paid && !Store.enforce() && !RW.internal && !RW.ownsTheme(v)); });
+  const themeList = (RW.view?.themes || []).filter(t => window.SCENES[t.id]).map(t => [t.id,t.name]).filter(([v]) => { const i = RW.themeInfo(v); return !(i && i.hidden && !RW.internal) && !(HAS_BRIDGE && i && i.paid && !Store.enforce() && !RW.internal && !RW.ownsTheme(v)); });
   if (themeList.length > 1) {
     const th = rowEl('主题', '换一个院子陪你（切换即生效）');
     const tseg = document.createElement('div'); tseg.className = 'seg';
@@ -924,7 +924,7 @@ function renderGarden(body) {
       const st = RW.stateOf(kind, it);
       const el = document.createElement('div');
       el.className = 'rwitem small ' + st;
-      const fold = kind === 'towel' && RW.theme === 'onsen';   // 9-26 日系手拭巾叠放在池沿上，不挂
+      const fold = kind === 'towel' && (RW.theme === 'onsen' || RW.view?.catalog?.rack?.mode === 'fold');
       const label = { placed: kind === 'towel' ? (fold ? '放着' : '挂着') : '摆着', own: kind === 'towel' ? (fold ? '点一下放上' : '点一下挂上') : '点一下摆上', ready: '可以领了', locked: '未解锁' }[st];
       el.innerHTML = rwArt(it.id, it.name.slice(0, 2)) + '<b>' + it.name + '</b><span>' + label + '</span>';
       el.onclick = async () => {
@@ -1005,9 +1005,11 @@ async function start(plan) {
   }
 }
 async function cmd(c) {
+  if (Scene.scene && Scene.scene.motion) Scene.motionCommand = c;
   if (!HAS_BRIDGE) return feed(fixture(c === 'stop' ? 'done' : 'running'));
   try { feed(await T.core.invoke('session_cmd', { cmd: c })); }
   catch (e) { console.error('session_cmd ' + c, e); }
+  finally { if (Scene.motionCommand === c) Scene.motionCommand = null; }
 }
 
 // ═══════════════ 轻触唤出操作条（3 秒自动收起）═══════════════

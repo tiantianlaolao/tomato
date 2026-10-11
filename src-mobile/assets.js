@@ -41,10 +41,10 @@ window.AS = {
   },
   // 角色通道（9-3）：<base>/matte/<seg>.json + <seg>_<k>.webp，与视频同版本同目录（_design/video/_cmp/_matte.py 产）。
   // 有缓存给 blob，没缓存直接走服务器；ensure() 在视频之后顺手缓进 IDB。
-  matteUrl(file) {
-    if (!cur) return null;
-    if (DEV) return cur.dir + '/matte/' + file;
-    return map[cur.base + '/matte/' + file] || HOST + cur.base + '/matte/' + file;
+  matteUrl(file, assets = cur) {
+    if (!assets) return null;
+    if (DEV) return assets.dir + '/matte/' + file;
+    return map[assets.base + '/matte/' + file] || HOST + assets.base + '/matte/' + file;
   },
   // 诊断一行（调汤「画面」行用）：dev 还是正式、资产源、当前主题几段已缓进 IDB（其余走网播）
   diag() {
@@ -104,7 +104,6 @@ async function ensure(a) {
     if (rec && rec.blob) map[k] = URL.createObjectURL(rec.blob);
     else miss.push(n);
   }
-  if (!miss.length) return;
   // 逐段拉（并发 1：省内存；国内链路一个主题 ~35MB 二十几秒）
   let done = a.names.length - miss.length;
   for (const n of miss) {
@@ -119,6 +118,7 @@ async function ensure(a) {
       done++;
     } catch (e) { /* 这段留网播，下次再补 */ }
   }
+  if (cur !== a) return;
   note(null);
   // 角色通道：json + 精灵图逐个缓（小文件，静默；缓不上就一直走网）
   for (const n of a.names) {
@@ -130,6 +130,8 @@ async function ensure(a) {
         const r = await fetch(HOST + jk); if (!r.ok) continue;
         meta = await r.json(); await put(db, jk, meta);
       }
+      if (cur !== a) return;
+      if (!map[jk]) map[jk] = URL.createObjectURL(new Blob([JSON.stringify(meta)], {type:'application/json'}));
       for (const sh of (meta.sheets || [])) {
         const k = a.base + '/matte/' + sh;
         if (map[k]) continue;

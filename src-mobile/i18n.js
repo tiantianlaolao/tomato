@@ -19,6 +19,24 @@ try {
 
 // ── 字典：中文原句 → 英文。{n} 为数字占位；键里的 {n} 会编译成 (\d+) ──
 const D = {
+  '木牌上：入浴＝开始 · 调汤＝设置 · 沐录＝记录': 'On the sign: Soak · Tune · Log',
+  '木牌上：开始 · 设置 · 记录': 'On the sign: Start · Settings · Log',
+  '雪山温泉': 'Snow Mountain Onsen', '雨夜花房': 'Rainy Conservatory',
+  '雪晶捕手': 'Snow Crystal Chime', '月光石': 'Moonstone',
+  '霜花玻璃片': 'Frosted Glass', '冰封秋叶': 'Frozen Autumn Leaf',
+  '冬眠种子匣': 'Winter Seed Box', '雪山回声螺': 'Mountain Echo Shell',
+  '木牌小钉': 'Sign Hook', '池中石台': 'Pool Stone', '左岸石面': 'Left Bank',
+  '右岸石面': 'Right Bank', '左侧石窝': 'Left Stone Nook', '右侧池沿': 'Right Pool Edge',
+  '木凳': 'Wooden Bench', '素织': 'Plain Weave', '松针': 'Pine Needles',
+  '雪花': 'Snowflakes', '山月': 'Mountain Moon', '山纹': 'Mountain Pattern',
+  '灯影': 'Lantern Glow', '木屋': 'Cabin', '星雪': 'Stars and Snow',
+  '叶铃': 'Leaf Chime', '陶盆绿植': 'Potted Plant', '陶瓷蜗牛': 'Ceramic Snail',
+  '枝叶茶杯': 'Leaf Mug', '橙子果盘': 'Orange Bowl', '椅边披巾': 'Chair Throw',
+  '画内横梁': 'Overhead Beam', '前景绿植旁': 'By the Foreground Plants',
+  '绿植旁地面': 'Floor by the Plants', '茶杯位': 'Mug Spot', '果盘位': 'Fruit Bowl Spot',
+  '椅扶手': 'Chair Arm', '桌上布艺': 'Table Linen', '素麻': 'Plain Linen',
+  '枝叶': 'Leaves', '雨点': 'Raindrops', '青格': 'Green Checks', '柑橘': 'Citrus',
+  '小花': 'Small Flowers', '月夜': 'Moonlit Night', '金叶': 'Golden Leaves',
   // 🔴 字典按插入顺序匹配、占位宽匹配：带前缀的整句必须排在 '{n} 分钟' 这类泛句**前面**，
   //    否则 '本周 100 分钟' 会被 '{n} 分钟' 先吃掉（n='本周 100'）翻成"本周 100 min"半中半英（9-3 撞过）
   '这周来了 {n} 天 · 泡了 {m} 小时 {k} 分': '{n} days this week · soaked {m} h {k} min',
