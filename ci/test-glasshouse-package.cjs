@@ -6,7 +6,7 @@ test('glasshouse has approved six reward thresholds, eight cloths and isolated s
  for(const p of catalog.glasshouse.props){assert.deepEqual([p.line,p.n],expected[p.id]);assert(catalog.glasshouse.slots.some(s=>s.id===p.slot));}
  assert.deepEqual(catalog.glasshouse.towels.map(t=>t.n),[0,60,180,360,600,960,1500,2400]);
  for(const p of [...catalog.glasshouse.props,...catalog.glasshouse.towels])assert(fs.statSync(path.join(root,'assets/p3/glasshouse',p.id+'.png')).size>0);
- const t=catalog.themes.find(t=>t.id==='glasshouse');assert.equal(t.hidden,true);assert.equal(t.paid,true);assert.equal(t.sku,undefined);
+ const t=catalog.themes.find(t=>t.id==='glasshouse');assert.notEqual(t.hidden,true);assert.equal(t.paid,true);assert.equal(t.sku,"com.tybbtech.capyroom.theme.glasshouse");assert.equal(t.price_cny,18);assert.equal(t.price_usd,2.99);
 });
 test('short rest includes leaving chair and nibbling; returning waits on chair',()=>{
  assert.deepEqual(Array.from(S.motion.route('work','shortBreak'),x=>x.seg),['shortbreak-out','orange-nibble']);

@@ -26,6 +26,10 @@ on:
         description: '国内官网正式包（不带内测按钮，落 /capyroom/dl/ + android.json，官网 /apps 卡自动读版本）；勾了自动签名'
         type: boolean
         default: false
+      internal:
+        description: '启用开发功能（默认关闭，正式发布始终关闭）'
+        type: boolean
+        default: false
 
 env:
   # 内测包标记 CAPY_INTERNAL 不在这里设：release=false 时由编译那一步 export（option_env! 只看有没有，设成空串也算有）
@@ -186,7 +190,9 @@ jobs:
       - name: '编译 release APK（未签名）'
         run: |
           # 测试包带内测按钮（全部解锁），官网正式包不带
-          if [ "${{ inputs.release }}" != "true" ]; then export CAPY_INTERNAL=1; echo "内测包"; else echo "官网正式包：不设 CAPY_INTERNAL"; fi
+          unset CAPY_INTERNAL
+          rm -f src-tauri/.capy_internal
+          if [ "${{ inputs.internal }}" = "true" ] && [ "${{ inputs.release }}" != "true" ]; then export CAPY_INTERNAL=1; echo "开发功能开启"; else echo "正式功能：无开发开关"; fi
           npx tauri android build --apk --target aarch64 --ci \
             --config "{\"bundle\":{\"android\":{\"versionCode\":${BUILD_NUM}}}}"
           find src-tauri/gen/android/app/build/outputs -name "*.apk" | head
@@ -212,6 +218,7 @@ jobs:
           # 七跑教训：APK 里还有 androidx 的小 .so，`head -1` 抓错对象 → 点名 libtomato_lib.so
           SO=$(find $RUNNER_TEMP/so -name "libtomato_lib.so" | head -1); [ -n "$SO" ] || { echo "❌ APK 里没有 libtomato_lib.so"; find $RUNNER_TEMP/so -name "*.so"; exit 1; }
           echo "so = $SO ($(wc -c < "$SO") 字节)"
+          python3 ci/check_build_mode.py "$SO" "${{ inputs.internal && !inputs.release && 'internal' || 'public' }}"
           echo "  移动端标记 _mobile_marker_capyroom : $(grep -a -c _mobile_marker_capyroom "$SO" || true)（应 ≥1）"
           for f in pet.html companion.js rest.html viz.js; do echo "  桌面端独有 $f : $(grep -a -c "$f" "$SO" || true)（应 0）"; done
           ls -l "$UNSIGNED"
@@ -259,7 +266,7 @@ jobs:
           第一次会要求允许"安装未知来源应用"<br>
           包名 ${PACKAGE}，与正式版同一签名，装上会直接覆盖<br>
           Google 登录要等 Google Cloud 里登记了签名 SHA-1 才通；Apple 登录安卓没有<br>
-          本次包含雪山温泉与雨夜花房，进入设置可使用「内测：全部解锁」查看<br>
+          本次包含雪山温泉与雨夜花房，主题分别一次买断，物件靠积累解锁<br>
           iOS 测试包在 <a href="install.html">install.html</a></div>
           HTML
           ls -l $RUNNER_TEMP/out/android.html

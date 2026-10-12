@@ -26,10 +26,13 @@ on:
         description: '签名并出 IPA + 上架 OTA（false = 只跑不签名的编译冒烟）'
         type: boolean
         default: false
+      internal:
+        description: '启用开发功能（默认关闭，验证包按正式功能运行）'
+        type: boolean
+        default: false
 
 env:
   # 内测包标记（9-2）：Rust 用 option_env! 编进二进制 → 调汤里露出「内测：全部解锁」。商店包的 workflow 不设这个。
-  CAPY_INTERNAL: "1"
   XCPROJ: src-tauri/gen/apple/tomato.xcodeproj
   SCHEME: tomato_iOS
   BUNDLE_ID: com.tybbtech.capyroom
@@ -42,6 +45,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0        # build 号用 git 提交数，浅克隆会恒等于 1
+
+      - name: '配置构建模式（分发签名与开发功能分开）'
+        run: |
+          rm -f src-tauri/.capy_internal
+          if [ "${{ inputs.internal }}" = "true" ]; then touch src-tauri/.capy_internal; fi
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -182,17 +190,15 @@ jobs:
       - name: '编译（不签名）'
         if: ${{ inputs.sign }}
         run: |
-          touch src-tauri/.capy_internal
           npx tauri ios build --ci -v --no-sign --archive-only
 
-      - name: '核对内测开关确实编进去了'
+      - name: '核对实际编译模式'
         if: ${{ inputs.sign }}
         run: |
           APP=$(find src-tauri/gen/apple/build -path "*/Products/Applications/*.app" -maxdepth 6 -type d | head -1)
           BIN="$APP/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
           # lib.rs 里 "不是内测包" 只在 option_env!("CAPY_INTERNAL").is_none() 分支里；编进了开关，这个分支被优化掉，字符串就不在二进制里
-          if grep -q "不是内测包" "$BIN"; then echo "❌ 二进制里还有「不是内测包」= 内测开关没编进去"; exit 1; fi
-          echo "✅ 内测开关已编进 $BIN"
+          python3 ci/check_build_mode.py "$BIN" "${{ inputs.internal && 'internal' || 'public' }}"
 
       - name: '准备 python 环境'
         if: ${{ inputs.sign }}
@@ -293,7 +299,7 @@ jobs:
           .n{margin-top:34px;font-size:12px;color:#6f6047;line-height:1.9}</style>
           <h1>capyroom</h1>
           <p>测试包 build ${BUILD_NUM}</p>
-          <p style="color:#6f6047">本次包含雪山温泉与雨夜花房，进入设置可使用「内测：全部解锁」查看</p>
+          <p style="color:#6f6047">本次包含雪山温泉与雨夜花房，主题分别一次买断，物件靠积累解锁</p>
           <p><a class="install" href="itms-services://?action=download-manifest&amp;url=${OTA_BASE}/manifest.plist">安装</a></p>
           <div class="n">用 iPhone 的 Safari 打开这一页才能装<br>
           只能装进已注册的设备<br>装完若提示「未受信任」：设置 → 通用 → VPN 与设备管理 → 信任</div>

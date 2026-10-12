@@ -537,7 +537,8 @@
    "price_usd": 2.99,
    "sku": "com.tybbtech.capyroom.theme.onsen"
   },
-  {"id": "snow", "name": "雪山温泉", "paid": true, "hidden": true},
-  {"id":"glasshouse","name":"雨夜花房","paid":true,"hidden":true}
+  {"id": "snow", "name": "雪山温泉", "paid": true, "price_cny": 18, "price_usd": 2.99, "sku": "com.tybbtech.capyroom.theme.snow"}
+,
+  {"id": "glasshouse", "name": "雨夜花房", "paid": true, "price_cny": 18, "price_usd": 2.99, "sku": "com.tybbtech.capyroom.theme.glasshouse"}
  ]
 }

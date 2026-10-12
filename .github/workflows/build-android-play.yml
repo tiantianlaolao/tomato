@@ -180,6 +180,8 @@ jobs:
       # 不配签名 → 未签名的 AAB + APK；签名我们自己做
       - name: '编译 release AAB + APK（未签名，arm64 + armv7）'
         run: |
+          unset CAPY_INTERNAL
+          rm -f src-tauri/.capy_internal
           npx tauri android build --aab --apk --target aarch64 armv7 --ci \
             --config "{\"bundle\":{\"android\":{\"versionCode\":${BUILD_NUM}}}}"
           find src-tauri/gen/android/app/build/outputs \( -name "*.aab" -o -name "*.apk" \) | sort
@@ -233,6 +235,7 @@ jobs:
           #    域名替换的闸门在上面「指向海外实例」那步的源码 grep 断言；这里只核"打进去的是移动端前端"。
           mkdir -p $RUNNER_TEMP/so && unzip -o -q "$APK" 'lib/arm64-v8a/libtomato_lib.so' -d $RUNNER_TEMP/so
           SO=$RUNNER_TEMP/so/lib/arm64-v8a/libtomato_lib.so; test -f "$SO"
+          python3 ci/check_build_mode.py "$SO" public
           echo "  移动端标记 _mobile_marker_capyroom : $(grep -a -c "_mobile_marker_capyroom" "$SO" || true)（应 ≥1）"
           grep -a -q "_mobile_marker_capyroom" "$SO"
           for f in pet.html companion.js rest.html viz.js; do echo "  桌面端独有 $f : $(grep -a -c "$f" "$SO" || true)（应 0）"; done

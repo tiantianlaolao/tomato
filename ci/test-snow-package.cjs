@@ -9,8 +9,8 @@ test('snow keeps six original reward thresholds and eight cloth tiers',()=>{
  for(const p of catalog.snow.props){assert.deepEqual([p.line,p.n],expected[p.id]);assert(catalog.snow.slots.some(s=>s.id===p.slot));}
  for(const p of [...catalog.snow.props,...catalog.snow.towels])assert(fs.statSync(path.join(root,'assets/p3/snow',p.id+'.png')).size>0);
 });
-test('snow stays hidden and paid without inventing a price or SKU',()=>{
- const t=catalog.themes.find(t=>t.id==='snow');assert.equal(t.hidden,true);assert.equal(t.paid,true);assert.equal(t.sku,undefined);assert.equal(t.price_cny,undefined);
+test('snow uses the approved separate one-time theme purchase',()=>{
+ const t=catalog.themes.find(t=>t.id==='snow');assert.notEqual(t.hidden,true);assert.equal(t.paid,true);assert.equal(t.sku,"com.tybbtech.capyroom.theme.snow");assert.equal(t.price_cny,18);assert.equal(t.price_usd,2.99);
 });
 test('snow routes only cross the pool boundary and preserve approved durations',()=>{
  for(const a of ['idle','work','awaiting'])for(const b of ['shortBreak','longBreak']){assert.equal(S.motion.route(a,b)[0].seg,'exit-web');assert.equal(S.motion.route(b,a)[0].seg,'enter-web');assert.equal(S.motion.route(a,b)[0].ms,6000);}

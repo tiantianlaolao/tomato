@@ -89,7 +89,10 @@ jobs:
           grep -E "PRODUCT_NAME|PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|deploymentTarget|iOS:|TARGETED_DEVICE_FAMILY" src-tauri/gen/apple/project.yml
 
       - name: '编译（不签名）'
-        run: npx tauri ios build --ci -v --no-sign --archive-only
+        run: |
+          unset CAPY_INTERNAL
+          rm -f src-tauri/.capy_internal
+          npx tauri ios build --ci -v --no-sign --archive-only
 
       - name: '确认包里没有内测开关'
         run: |
@@ -97,6 +100,7 @@ jobs:
           BIN="$APP/$(basename "$APP" .app)"
           # CAPY_INTERNAL 没设 → option_env! 编成 None；这里只是双保险地确认前端标记进了包
           echo "移动端标记: $(strings "$BIN" | grep -c _mobile_marker_capyroom)"
+          python3 ci/check_build_mode.py "$BIN" public
 
       - name: '导入签名证书'
         env:
