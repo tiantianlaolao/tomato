@@ -7,5 +7,12 @@ test('new theme names, props, cloths, slots and hints have English translations'
  for(const id of ['snow','glasshouse']){
   const cat=all[id],items=[all.themes.find(t=>t.id===id),...cat.props,...cat.towels,...cat.slots,cat.rack];
   for(const item of items)assert(!/[一-鿿]/.test(c.window.I18N.t(item.name)),item.name);
+  const theme=all.themes.find(t=>t.id===id);
+  for(const label of [theme.name+' 🔒 $2.99',theme.name+' 🔒']) {
+   const translated=c.window.I18N.t(label);
+   assert(!/[一-鿿]/.test(translated),label);
+   assert(translated.includes('🔒'));
+   if(label.includes('$2.99'))assert(translated.includes('$2.99'));
+  }
  }
 });

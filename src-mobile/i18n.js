@@ -166,6 +166,7 @@ const D = {
   '恢复购买': 'Restore purchases', '在这台设备换了 Apple ID 或重装后，把买过的找回来': 'Bring back what you bought after reinstalling or switching Apple ID',
   '已恢复 {n} 项': 'Restored {n} item(s)', '没有可恢复的购买': 'Nothing to restore', '已取消': 'Cancelled', '购买没有完成': 'Purchase didn\'t complete',
   '买下「{s}」，{p}？': 'Buy "{s}" for {p}?', '买下「{s}」？': 'Buy "{s}"?', '买下': 'Buy', '买下整套': 'Buy the set', '已拥有': 'Owned', '主题包': 'Theme pack',
+  '{s} 🔒 {p}': '{s} 🔒 {p}', '{s} 🔒': '{s} 🔒',
   '内测': 'Internal build', '内测：全部解锁': 'Internal: unlock everything', '主题包和本主题全部单件一键拥有，只为看效果；商店包没有这个按钮': 'Own every theme pack and item of this theme at once, for testing only; store builds don\'t have this',
   '全部解锁': 'Unlock all', '已解锁': 'Unlocked', '清除内测解锁': 'Clear internal unlocks', '只撤回内测解锁的，攒来的和真买的原样保留': 'Removes only internal unlocks; earned and purchased items stay', '清除': 'Clear', '已清除': 'Cleared', '不是内测包': 'Not an internal build',
   // 内核拒绝理由
