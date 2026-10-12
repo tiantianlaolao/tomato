@@ -34,7 +34,7 @@ const Scene = {
     // 主题资产与首屏海报都归场景包管（9-1 双主题起）
     if (window.AS && s.assets) AS.configure(s.assets);
     if (s.assets) this.matteLoad(s.assets.names); else this.matte = {};
-    const poster = s.poster || 'assets/poster.webp';
+    const poster = s.poster || 'assets/poster_cn.webp';
     if (this.vids) for (const el of this.vids) el.poster = poster;
     // 海报层：视频还没喂/还没出帧时舞台就是它（不然是 #stage 的深色底）；换了海报就重新等它 load
     if (this.poster && this.poster.getAttribute('src') !== poster) { this.ready = false; this.poster.src = poster; }
@@ -61,7 +61,7 @@ const Scene = {
       '<div id="fog"></div>' +
       '<canvas class="layer" id="ovc"></canvas>';
     this.vids = [root.querySelector('#sv0'), root.querySelector('#sv1')];
-    for (const v of this.vids) { v.setAttribute('playsinline', ''); v.poster = 'assets/poster.webp'; }
+    for (const v of this.vids) v.setAttribute('playsinline', '');
     this.fog = root.querySelector('#fog');
     this.cv = root.querySelector('#ovc');
     this.cx = this.cv.getContext('2d');

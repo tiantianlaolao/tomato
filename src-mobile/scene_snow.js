@@ -10,7 +10,7 @@ const S={id:'snow',name:'雪山温泉',frame:[941,1672],poster:'assets/p3/snow/p
  assets:{base:'snow-v1',dir:'assets/video-snow',names:['idle-web','work-web','shortBreak-web','longBreak-web','awaiting-web','environment-web','exit-web','enter-web']},
  loops:{idle:'idle-web',work:'work-web',shortBreak:'shortBreak-web',longBreak:'longBreak-web',awaiting:'awaiting-web',done:'environment-web'},
  swimOut:'exit-web',swimIn:'enter-web',readVideoPixels:true,
- motion:{route(from,to){if(pool.has(from)&&shore.has(to))return [{seg:'exit-web',ms:6000}];if(shore.has(from)&&pool.has(to))return [{seg:'enter-web',ms:6000}];return [];}},
+ motion:{route(from,to){if(pool.has(from)&&shore.has(to))return [{seg:'exit-web',ms:6000,to}];if(shore.has(from)&&pool.has(to))return [{seg:'enter-web',ms:6000,to}];return [];}},
  dim:{idle:0,work:0,break:0,awaiting:0,done:0,paused:.24},
  pixelOverlay(seg){return seg==='enter-web'||seg==='exit-web';},
  image(id,E){const cache=this._images||(this._images={});if(!cache[id]){const im=cache[id]=new Image();im.onload=()=>{im.ok=true;E.draw();};im.onerror=()=>{im.failed=true;};im.src='assets/p3/snow/'+id+'.png';}return cache[id];},

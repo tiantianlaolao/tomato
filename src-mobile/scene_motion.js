@@ -19,7 +19,7 @@ E.updateMotion = function (view) {
   this.frozen = ph === 'paused';
   let state = this.motionState;
   const resync = this.motionNeedsSync; this.motionNeedsSync = false;
-  const interrupted = command && !['pause','resume','start_next'].includes(command);
+  const interrupted = command && !['pause','resume','start_next','skip','prev'].includes(command);
   if (state && key === state.key && !resync && !interrupted) {
     if (this.frozen || !this.running) this.cur().pause();
     else if (state.pendingNext) { state.pendingNext = false; state.next(); }
@@ -28,20 +28,25 @@ E.updateMotion = function (view) {
   }
   const previousTarget = state?.target;
   const wasMoving = !!state?.moving;
+  const active = state?.activeStep;
+  const currentVideo = this.cur();
   if (state) state.epoch++;
   for (const v of this.vids) v.onended = null;
   this.swapToken++; this.fog?.classList.remove('on');
   state = this.motionState = {key, target, epoch:0, moving:false, queue:[], pendingNext:false};
   const sameSession = old && old.started_ms === view.started_ms;
   const natural = sameSession && old.status === 'running' &&
-    ((view.idx === old.idx + 1 && old.remaining_ms <= 1500) ||
-     (view.status === 'awaiting' && view.idx === old.idx && old.remaining_ms <= 1500));
+    ((view.idx === old.idx + 1) ||
+     (view.status === 'awaiting' && view.idx === old.idx));
   const nextConfirmed = sameSession && old.status === 'awaiting' && view.status === 'running' && view.idx === old.idx + 1;
-  let route = !resync && !wasMoving && !interrupted && !this.frozen &&
-    (natural || nextConfirmed) && !['idle','done'].includes(target)
-    ? M.route(previousTarget, target) : [];
+  const manual = sameSession && ['skip','prev'].includes(command) && key !== [old.started_ms || 0, old.idx || 0, previousTarget].join(':');
+  const canRoute = !resync && !interrupted && !this.frozen && this.running &&
+    (natural || nextConfirmed || manual) && !['idle','done'].includes(target);
+  let carry = !!(canRoute && wasMoving && active?.to);
+  let route = canRoute ? M.route(carry ? active.to : previousTarget, target) : [];
+  const carryMs = carry ? Math.max(0, active.ms - (currentVideo.currentTime || 0) * 1000) : 0;
   // A 5-second stage cannot wait behind a 6/16-second story. The clock never waits.
-  if (view.status === 'running' && route.reduce((n, x) => n + x.ms, 0) + 500 > view.remaining_ms) route = [];
+  if (view.status === 'running' && carryMs + route.reduce((n, x) => n + x.ms, 0) + 500 > view.remaining_ms) { route = []; carry = false; }
   state.queue = [...route, {seg:S.loops[target], loop:true}];
   const token = state.epoch;
   state.next = () => {
@@ -49,13 +54,18 @@ E.updateMotion = function (view) {
     if (this.frozen || !this.running) { state.pendingNext = true; return; }
     const step = state.queue.shift(); if (!step) return;
     const hard = state.moving || !step.loop;
-    state.moving = !step.loop; state.clip = step.seg;
+    state.moving = !step.loop; state.clip = step.seg; state.activeStep = step;
     const el = this.seg ? this.spare() : this.cur();
     this.playOn(el, step.seg, !!step.loop, hard);
     el.onended = step.loop ? null : () => state.next();
   };
   // Cold paused snapshots must load the correct stable pose, without advancing it.
-  if (this.frozen || !this.running) {
+  if (carry) {
+    // Keep the decoded movement in place; only replace its destination queue.
+    state.moving = true; state.clip = active.seg; state.activeStep = active;
+    currentVideo.onended = () => state.next();
+    if (currentVideo.paused) currentVideo.play().catch(e => this.noteErr('resume', e));
+  } else if (this.frozen || !this.running) {
     const el = this.seg ? this.spare() : this.cur();
     state.queue = []; state.clip = S.loops[target];
     this.playOn(el, state.clip, true); el.pause();

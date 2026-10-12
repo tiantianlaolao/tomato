@@ -3,7 +3,7 @@
 'use strict';
 const box=(x,y,x2,y2)=>({x:x/941,y:y/1672,x2:x2/941,y2:y2/1672});
 const clips={idle:'idle-loop',work:'reading-loop',shortBreak:'orange-loop',longBreak:'bath-loop',awaiting:'awaiting-loop',done:'empty-loop-candidate'};
-const step=(seg,ms)=>({seg,ms});
+const step=(seg,ms,to)=>({seg,ms,to});
 const S={
  id:'glasshouse',name:'雨夜花房',frame:[941,1672],poster:'assets/p3/glasshouse/poster.jpg',
  hint:'木牌上：开始 · 设置 · 记录',
@@ -14,10 +14,10 @@ const S={
  motion:{route(from,to){
   if(from===to)return [];
   const route=[];
-  if(from==='shortBreak')route.push(step('shortbreak-return',8250));
-  if(from==='longBreak')route.push(step('longbreak-return',16000));
-  if(to==='shortBreak')route.push(step('shortbreak-out',8000),step('orange-nibble',1750));
-  if(to==='longBreak')route.push(step('longbreak-out',16000));
+  if(from==='shortBreak')route.push(step('shortbreak-return',8250,'work'));
+  if(from==='longBreak')route.push(step('longbreak-return',16000,'work'));
+  if(to==='shortBreak')route.push(step('shortbreak-out',8000,'shortBreak'),step('orange-nibble',1750,'shortBreak'));
+  if(to==='longBreak')route.push(step('longbreak-out',16000,'longBreak'));
   return route;
  }},
  roomAt(seg,t){return seg==='longbreak-out'?t<8:seg==='longbreak-return'?t>=8:seg!=='bath-loop';},

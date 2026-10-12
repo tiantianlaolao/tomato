@@ -29,7 +29,7 @@ window.SCENES.onsen = {
   id: 'onsen',
   name: '山中野天风吕',
   frame: [1152, 2048],          // 槽位坐标的参照画幅
-  poster: 'assets/poster.webp',
+  poster: 'assets/p3/onsen/poster-v3.webp',
   hint: '牌上三行都能点：入浴＝开始 · 汤加减＝设置 · 汤帐＝记录',
   // 9-26 v2＝日系重设计：水豚统一成桌面端定妆那一只（_design/poses），满月背景 A；
   //   晒太阳（趴姿画坏）换成岸上喝茶；过场只剩游泳（各 5s），上岸/下水一律雾遮。
