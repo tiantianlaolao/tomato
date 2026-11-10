@@ -18,6 +18,10 @@ name: build-android
 on:
   workflow_dispatch:
     inputs:
+      deploy:
+        description: 'Publish signed output to the website after building'
+        type: boolean
+        default: true
       sign:
         description: '签名并出 APK + 上架旁装页（false = 只跑不签名的编译冒烟）'
         type: boolean
@@ -278,7 +282,7 @@ jobs:
           $RUNNER_TEMP/venv/bin/python -m pip install --quiet paramiko
 
       - name: '上架 OTA'
-        if: ${{ inputs.sign && !inputs.release }}
+        if: ${{ inputs.deploy && inputs.sign && !inputs.release }}
         env:
           OTA_SSH_HOST: ${{ secrets.OTA_SSH_HOST }}
           OTA_SSH_PORT: ${{ secrets.OTA_SSH_PORT }}
@@ -294,7 +298,7 @@ jobs:
       # ═══════════ release=true：国内官网正式线（9-23）═══════════
       # 落 /var/www/capyroom/dl/：capyroom.apk（永远最新）+ 带版本号的存档 + android.json（官网 /apps 卡按它显示版本/大小）
       - name: '官网正式线：上架 dl/'
-        if: ${{ inputs.release }}
+        if: ${{ inputs.deploy && inputs.release }}
         env:
           OTA_SSH_HOST: ${{ secrets.OTA_SSH_HOST }}
           OTA_SSH_PORT: ${{ secrets.OTA_SSH_PORT }}

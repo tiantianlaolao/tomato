@@ -159,7 +159,7 @@ function syncUI() {
 // ═══════════════ 预设 ═══════════════
 function renderPlans() {
   const box = $('planlist');
-  if (!box) return;          // 预设列表现在只活在"今天泡多久"那个面板里
+  if (!box) { if (sheetKind === 'start') renderStart(); return; }
   box.innerHTML = '';
   for (const p of plans) {
     const work = p.stages.filter(s => s.kind === 'work').reduce((a,s) => a + s.secs, 0);
@@ -223,11 +223,21 @@ function closeSheet() {
 }
 function openSheet(kind, title) {
   sheetKind = kind;
+  $('sheet').dataset.page = kind;
+  document.querySelectorAll('#panelNav button').forEach(b => b.setAttribute('aria-current', String(b.dataset.page === kind)));
   $('sheetTitle').textContent = title;
   $('sheet').classList.remove('hide');
   document.body.classList.add('sheeton');
   renderSheet();
 }
+const panelNav = document.createElement('nav');
+panelNav.id = 'panelNav'; panelNav.setAttribute('aria-label', '页面');
+[['start','开始'],['set','设置'],['hist','记录']].forEach(([k,t]) => {
+  const b=document.createElement('button'); b.textContent=t; b.dataset.page=k;
+  b.onclick=()=>openSheet(k,t); panelNav.appendChild(b);
+});
+$('sheet').appendChild(panelNav);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeSheet();});
 $('sheetClose').onclick = closeSheet;
 
 function renderSheet() {
@@ -238,22 +248,33 @@ function renderSheet() {
 }
 
 // ── 木牌：今天泡多久（预设列表 + 去编排）──────────────
+let selectedStart = '';
 function renderStart() {
-  const box = $('sheetBody');
-  box.innerHTML = '';
-  const list = document.createElement('div');
-  list.id = 'planlist';
-  box.appendChild(list);
-  renderPlans();
-  const go = document.createElement('button');
-  go.className = 'btn wide'; go.style.marginTop = '14px';
-  go.textContent = '自己编排一支';
-  go.onclick = () => openSheet('edit', '编排');
-  box.appendChild(go);
-  const tip = document.createElement('div');
-  tip.className = 'tip';
-  tip.textContent = '长按一支自定义的可以删掉；长按内置的会载进编排器当底子改。';
-  box.appendChild(tip);
+  const box=$('sheetBody'); box.innerHTML='';
+  const hero=document.createElement('div'); hero.className='panel-intro';
+  hero.innerHTML='<small>CAPYROOM · 慢慢来</small><h1>给自己，一段安静。</h1><p>选一段节奏，让水豚陪你专注。</p>'; box.appendChild(hero);
+  const chosen=plans.find(p=>p.id===selectedStart)||plans[0];
+  const list=document.createElement('div'); list.className='rhythm-options';box.appendChild(list);
+  plans.forEach(p=>{
+    const b=document.createElement('button');b.className='rhythm-option';
+    b.setAttribute('aria-pressed',String(p===chosen));
+    const w=p.stages.filter(s=>s.kind==='work').reduce((a,s)=>a+s.secs,0);
+    const label=document.createElement('b');label.textContent=p.name;
+    const time=document.createElement('span');time.textContent=Math.round(w/60)+' 分专注';
+    b.append(label,time);b.onclick=()=>{selectedStart=p.id;renderStart();};list.appendChild(b);
+  });
+  if(chosen){
+    const t=planTotals(chosen.stages), card=document.createElement('section');card.className='rhythm-card';
+    card.innerHTML='<small>这一场 · 总时长</small><div class="duration"><strong>'+Math.round((t.w+t.r)/60)+'</strong><span>分钟</span></div><p>专注 '+Math.round(t.w/60)+' 分 · 休息 '+Math.round(t.r/60)+' 分</p>';
+    const track=document.createElement('div');track.className='rhythm-track';
+    chosen.stages.forEach(s=>{const seg=document.createElement('span');seg.className=s.kind;seg.style.flex=String(s.secs);seg.title=(s.kind==='work'?'专注':'休息')+' '+Math.round(s.secs/60)+' 分';track.appendChild(seg);});card.appendChild(track);
+    const detail=document.createElement('details');detail.className='rhythm-detail';
+    const sum=document.createElement('summary');sum.textContent='查看 '+chosen.stages.length+' 段安排';detail.appendChild(sum);
+    chosen.stages.forEach((s,i)=>{const row=document.createElement('p');row.textContent=(i+1)+' · '+(s.kind==='work'?'专注':'休息')+' '+Math.round(s.secs/60)+' 分钟';detail.appendChild(row);});card.appendChild(detail);
+    const go=document.createElement('button');go.className='btn pri wide start-session';go.textContent='开始这一场  →';go.onclick=()=>start(chosen);card.appendChild(go);box.appendChild(card);
+    const edit=document.createElement('button');edit.className='btn wide';edit.textContent='调整这段节奏';edit.onclick=()=>{draft={name:chosen.builtin?'':chosen.name,stages:chosen.stages.map(s=>({...s}))};openSheet('edit','编排');};box.appendChild(edit);
+    if(!chosen.builtin){const del=document.createElement('button');del.className='btn ghost wide';del.textContent='删除这个预设';del.onclick=()=>askConfirm('删除预设「'+chosen.name+'」？',()=>pushPlans(plans.filter(p=>!p.builtin&&p.id!==chosen.id)));box.appendChild(del);}
+  }
 }
 
 // ── 编排：序列编辑器 + 快捷生成 + 存为预设 ──────────────
@@ -300,13 +321,15 @@ function renderEditor() {
     kind.textContent = s.kind === 'work' ? '工作' : '休息';
     kind.onclick = () => { s.kind = s.kind === 'work' ? 'break' : 'work'; renderEditor(); };
     const dec = document.createElement('button'); dec.className = 'mini'; dec.textContent = '−';
-    const mm  = document.createElement('div');    mm.className = 'mm';
+    const mm  = document.createElement('button'); mm.type='button'; mm.className = 'mm time-trigger';
+    mm.setAttribute('aria-label', '调整第 '+(i+1)+' 段时长');
+    mm.onclick=()=>TimeWheel.open({value:Math.round(s.secs/60),title:'第 '+(i+1)+' 段 · '+(s.kind==='work'?'专注':'休息'),onChange:m=>{s.secs=m*60;paint();}});
     const paint = () => { mm.textContent = (s.secs >= 60 ? Math.round(s.secs/60) + ' 分' : s.secs + ' 秒'); paintTotals(); };
     paint();
     const inc = document.createElement('button'); inc.className = 'mini'; inc.textContent = '+';
     // 长按连加：手机上点 25 下调不动一小时（桌面端也有步进加速）。
     // 🔴 只重画这一行的数字和总览，绝不整表重绘 —— 重绘会把正在被按的按钮销毁
-    const step = (d) => { s.secs = Math.max(60, s.secs + d * 60); paint(); };
+    const step = (d) => { s.secs = Math.min(14400,Math.max(60, s.secs + d * 60)); paint(); };
     bindRepeat(dec, () => step(-1)); bindRepeat(inc, () => step(1));
     const up = document.createElement('button'); up.className = 'mini'; up.textContent = '↑';
     up.onclick = () => { if (i > 0) { const t = draft.stages[i-1]; draft.stages[i-1] = s; draft.stages[i] = t; renderEditor(); } };
@@ -368,7 +391,7 @@ function renderEditor() {
     start({ id:'custom', name: draft.name || '临时编排', stages: draft.stages, builtin:false });
   };
   acts.appendChild(save); acts.appendChild(go);
-  add('<div class="tip">列表里长按一支自定义预设可以删掉它（内置的删不了）</div>');
+  add('<div class="tip">在开始页选中自定义预设，可以删除；内置预设会保留。</div>');
 }
 
 // 按住不放连续调整（桌面端的步进长按加速，手机上更需要）
@@ -423,13 +446,15 @@ function renderSettings() {
     const l = document.createElement('div'); l.className = 'lb';
     l.textContent = label;
     if (sub) { const s = document.createElement('div'); s.className = 'sub'; s.textContent = sub; l.appendChild(s); }
-    r.appendChild(l); box.appendChild(r); return r;
+    r.appendChild(l); settingsGroup.appendChild(r); return r;
   };
-  const sec = (t) => { const d = document.createElement('div'); d.className = 'sec'; d.textContent = t; box.appendChild(d); };
+  let settingsGroup = box;
+  const sec = (t) => { const group=document.createElement('section');group.className='settings-group';group.dataset.section=t;group.dataset.section=t;group.dataset.section=t;const d=document.createElement('h2');d.className='sec';d.textContent=t;group.appendChild(d);box.appendChild(group);settingsGroup=group; };
   const sw = (r, key) => {
     const b = document.createElement('button');
     b.className = 'sw' + (settings[key] ? ' on' : '');
-    b.onclick = () => { settings[key] = !settings[key]; b.classList.toggle('on', settings[key]); pushSettings(); };
+    b.setAttribute('role','switch');b.setAttribute('aria-label',r.querySelector('.lb').firstChild.textContent);b.setAttribute('aria-checked',String(!!settings[key]));
+    b.onclick = () => { settings[key] = !settings[key]; b.classList.toggle('on', settings[key]); b.setAttribute('aria-checked',String(!!settings[key])); pushSettings(); };
     r.appendChild(b);
   };
   const num = (r, key, min, max, unit) => {
@@ -444,6 +469,7 @@ function renderSettings() {
     if (unit) { const u = document.createElement('span'); u.className = 'sub'; u.textContent = unit; r.appendChild(u); }
   };
 
+  box.insertAdjacentHTML('afterbegin','<div class="panel-intro"><small>YOUR LITTLE ROOM</small><h1>舒服，按你的习惯。</h1><p>院子的模样，专注的节奏，都由你来。</p></div>');
   sec('场景');
   // 9-4 商店包收口（用户定"暂时下掉"）：目录里 hidden 的主题（日系动效未同步）整个不露，只剩一个主题时主题行也不显示；
   // 日系修好后把目录里的 hidden 去掉就回来。⛔ 别删 ASC 里的 theme.onsen 商品（product ID 删了永久作废），只是不附到版本上。
@@ -547,7 +573,7 @@ function renderSettings() {
   }
 
   sec('账号');
-  renderAccount(box, rowEl);
+  renderAccount(settingsGroup, rowEl);
 
   sec('衔接');
   sw(rowEl('工作结束自动进休息'), 'auto_work_to_break');
@@ -825,6 +851,7 @@ async function renderStamps(body) {
   const hm = (m) => Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分';
   const WD = (window.I18N && I18N.lang === 'en') ? ['M', 'T', 'W', 'T', 'F', 'S', 'S'] : ['一', '二', '三', '四', '五', '六', '日'];
 
+  const overview=document.createElement('div');overview.className='record-overview';overview.innerHTML='<small>慢慢积累的时光</small><h1>'+Math.floor((L.total_min||0)/60)+'<span> 小时 </span>'+((L.total_min||0)%60)+'<span> 分钟</span></h1><p>累计专注 · 来访 '+(L.visit_days||0)+' 天</p>';body.appendChild(overview);
   // ① 本周挂钩
   const mon = addD(today, -((today.getDay() + 6) % 7));
   const hooks = document.createElement('div'); hooks.className = 'hooks';
@@ -859,7 +886,7 @@ async function renderStamps(body) {
     for (let i = 1; i <= n; i++) {
       const d = new Date(today.getFullYear(), today.getMonth(), i), m = minsOf(d);
       if (m > 0) { days++; mins += m; }
-      h += '<i class="' + lvl(m) + (d.getTime() === today.getTime() ? ' today' : '') + (d > today ? ' fut' : '') + '"></i>';
+      h += '<i title="'+key(d)+' · '+m+' 分钟" class="' + lvl(m) + (d.getTime() === today.getTime() ? ' today' : '') + (d > today ? ' fut' : '') + '">'+i+'</i>';
     }
     card.insertAdjacentHTML('beforeend', '<div class="beads">' + h + '</div><div class="sub center">来了 ' + days + ' 天 · 泡了 ' + hm(mins) + '</div>');
   } else {
@@ -883,7 +910,7 @@ async function renderStamps(body) {
     catch (e) { body.insertAdjacentHTML('beforeend', '<div class="tip">读不到记录：' + e + '</div>'); return; }
   }
   const note = '<div class="tip">跑完的每一场都会记。中途结束的：满 1 分钟才记（免得误触也留痕），'
-             + '所以拿「调试 · 20 秒 ×2」测的时候，只要没跑完就一条都不会留。</div>';
+             + '短暂试用不会留下未完成记录。</div>';
   if (!rows.length) { body.insertAdjacentHTML('beforeend', '<div class="tip">还没有记录。</div>' + note); return; }
   const box = body;
   if (stampDay) rows = rows.filter(r => { const d = new Date(r.started_ms || r.ended_ms || 0); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') === stampDay; });   // 点了某块牌只看那天
@@ -1179,7 +1206,7 @@ if (!HAS_BRIDGE) {
 // 截图验收用：?sheet=edit|set|hist 直接把面板打开（浏览器里跑，不进真机路径）
 if (qs.get('sheet')) {
   const k = qs.get('sheet');
-  setTimeout(() => openSheet(k, k === 'edit' ? '编排' : (k === 'set' ? '设置' : '记录')), 60);
+  setTimeout(() => openSheet(k, k === 'start' ? '开始' : k === 'start' ? '开始' : k === 'start' ? '开始' : k === 'edit' ? '编排' : (k === 'set' ? '设置' : '记录')), 60);
 }
 
 // 页面不可见就停画（省电）

@@ -19,6 +19,32 @@ try {
 
 // ── 字典：中文原句 → 英文。{n} 为数字占位；键里的 {n} 会编译成 (\d+) ──
 const D = {
+  'CAPYROOM · 慢慢来': 'CAPYROOM · TAKE YOUR TIME',
+  '给自己，一段安静。': 'A little time for yourself.',
+  '选一段节奏，让水豚陪你专注。': 'Find your rhythm. Let your capybara keep you company.',
+  '这一场 · 总时长': 'THIS SESSION · TOTAL TIME',
+  '查看 {n} 段安排': 'View {n} blocks',
+  '专注 {n} 分 · 休息 {m} 分': 'Focus {n} min · Rest {m} min',
+  '{n} 分专注': '{n} min focus',
+  '{n} · 专注 {m} 分钟': '{n} · Focus {m} min',
+  '{n} · 休息 {m} 分钟': '{n} · Rest {m} min',
+  '开始这一场  →': 'Start this session  →',
+  '调整这段节奏': 'Adjust this rhythm', '删除这个预设': 'Delete this preset',
+  '舒服，按你的习惯。': 'Make yourself at home.',
+  '院子的模样，专注的节奏，都由你来。': 'Your room, your rhythm. Just the way you like it.',
+  '慢慢积累的时光': 'TIME, GENTLY GATHERED',
+  '累计专注 · 来访 {n} 天': 'Total focus · {n} visit days',
+  '跑完的每一场都会记。中途结束的：满 1 分钟才记（免得误触也留痕），短暂试用不会留下未完成记录。': 'Every completed session is recorded. Sessions ended early are recorded after one minute, so a quick try leaves no unfinished record.',
+  '调整第 {n} 段时长': 'Adjust block {n} duration',
+  '第 {n} 段 · 专注': 'Block {n} · Focus', '第 {n} 段 · 休息': 'Block {n} · Rest',
+  '请输入 {n}–{m} 的整数': 'Enter a whole number from {n} to {m}',
+  '调整时长': 'Adjust duration', '调整节奏': 'FIND YOUR RHYTHM',
+  '上下拨动，松手后自动吸附': 'Swipe up or down. Release to snap into place.',
+  '直接输入分钟': 'Enter minutes', '直接输入': 'Enter a value',
+  '确定': 'Apply', '取消': 'Cancel', '分钟': 'min', '小时': 'h',
+  '开始': 'Start', '页面': 'Pages',
+  '语言 / Language': 'Language', '汤': '♨',
+  '在开始页选中自定义预设，可以删除；内置预设会保留。': 'Select a custom preset on Start to delete it. Built-in presets stay available.',
   '木牌上：入浴＝开始 · 调汤＝设置 · 沐录＝记录': 'On the sign: Soak · Tune · Log',
   '木牌上：开始 · 设置 · 记录': 'On the sign: Start · Settings · Log',
   '雪山温泉': 'Snow Mountain Onsen', '雨夜花房': 'Rainy Conservatory',
@@ -209,6 +235,9 @@ function walk(node) {
   if (node.nodeType === 3) { const v = tr(node.nodeValue); if (v !== node.nodeValue) node.nodeValue = v; return; }
   if (node.nodeType !== 1 || node.tagName === 'SCRIPT' || node.tagName === 'STYLE') return;
   if (node.placeholder) { const v = tr(node.placeholder); if (v !== node.placeholder) node.placeholder = v; }
+  for (const attr of ['aria-label','aria-valuetext','title']) {
+    const text=node.getAttribute && node.getAttribute(attr); if(text){const translated=tr(text);if(translated!==text)node.setAttribute(attr,translated);}
+  }
   for (const c of node.childNodes) walk(c);
 }
 if (lang === 'en') {
@@ -218,12 +247,12 @@ if (lang === 'en') {
   const mo = new MutationObserver((muts) => {
     mo.disconnect();
     for (const m of muts) {
-      if (m.type === 'characterData') walk(m.target);
+      if (m.type === 'characterData' || m.type === 'attributes') walk(m.target);
       else m.addedNodes.forEach(walk);
     }
-    mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+    mo.observe(document.body, { childList: true, subtree: true, characterData: true, attributes:true, attributeFilter:['aria-label','aria-valuetext','title'] });
   });
-  document.addEventListener('DOMContentLoaded', () => mo.observe(document.body, { childList: true, subtree: true, characterData: true }));
-  if (document.body) mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+  document.addEventListener('DOMContentLoaded', () => mo.observe(document.body, { childList: true, subtree: true, characterData: true, attributes:true, attributeFilter:['aria-label','aria-valuetext','title'] }));
+  if (document.body) mo.observe(document.body, { childList: true, subtree: true, characterData: true, attributes:true, attributeFilter:['aria-label','aria-valuetext','title'] });
 }
 })();

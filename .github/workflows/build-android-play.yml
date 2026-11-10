@@ -15,6 +15,11 @@ name: build-android-play
 
 on:
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Publish APK and upload to the Play internal track after building'
+        type: boolean
+        default: true
   push:
     tags:
       - 'android-play-v*'
@@ -271,6 +276,7 @@ jobs:
           $RUNNER_TEMP/venv/bin/python -m pip install --quiet paramiko
 
       - name: '旁装 APK 上架 OTA（_t/）'
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.deploy }}
         env:
           OTA_SSH_HOST: ${{ secrets.OTA_SSH_HOST }}
           OTA_SSH_PORT: ${{ secrets.OTA_SSH_PORT }}
@@ -294,7 +300,7 @@ jobs:
           else echo "HAS_PLAY_SA=false" >> $GITHUB_ENV; echo "::warning::没配 PLAY_SERVICE_ACCOUNT_JSON，AAB 只留 artifact，手动传 Play Console"; fi
 
       - name: '传 Play 内测轨道'
-        if: env.HAS_PLAY_SA == 'true'
+        if: ${{ env.HAS_PLAY_SA == 'true' && (github.event_name != 'workflow_dispatch' || inputs.deploy) }}
         uses: r0adkll/upload-google-play@v1.1.3
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
