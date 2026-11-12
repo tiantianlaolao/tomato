@@ -9,7 +9,9 @@ const poolTest=make().x;const ripples=[],drops=[];const P=new Path2D();
 // Trace the water-facing rock edge, including the foreground protrusions.
 const bank=[[.145,.684],[.18,.665],[.25,.651],[.34,.636],[.43,.624],[.57,.617],[.70,.618],[.82,.625],[.98,.637],[.985,.823],[.91,.816],[.85,.820],[.79,.812],[.74,.814],[.70,.804],[.67,.797],[.60,.795],[.55,.795],[.51,.786],[.46,.777],[.41,.776],[.36,.776],[.32,.764],[.29,.746],[.26,.735],[.22,.732],[.20,.719],[.16,.708]];
 bank.forEach(([x,y],i)=>i?P.lineTo(x*W,y*H):P.moveTo(x*W,y*H));P.closePath();
-function valid(x,y,r=28){if(!env.inView(x,y,W,H,r+8))return false;if(!poolTest.isPointInPath(P,x*W,y*H))return false;for(let i=0;i<24;i++){let angle=i*Math.PI/12,rx=r*1.2+7,ry=r*.62+5;if(!poolTest.isPointInPath(P,x*W+Math.cos(angle)*rx,y*H+Math.sin(angle)*ry))return false}return true}
+// Keep the whole visible fruit (including its upper half/leaf) inside the water,
+// not just the small contact ellipse. Otherwise it can overlap the rear bank.
+function valid(x,y,r=28){if(!env.inView(x,y,W,H,r+8))return false;if(!poolTest.isPointInPath(P,x*W,y*H))return false;for(let i=0;i<24;i++){let angle=i*Math.PI/12,rx=r*1.2+7,ry=r*1.05+5;if(!poolTest.isPointInPath(P,x*W+Math.cos(angle)*rx,y*H-r*.5+Math.sin(angle)*ry))return false}return true}
 function fit(x,y,old,r=28){if(!valid(old.x,old.y,r))old=env.clampPoint(.77,.745,W,H,r+8);if(valid(x,y,r))return {x,y};let a=0,b=1;for(let i=0;i<20;i++){let q=(a+b)/2;if(valid(old.x+(x-old.x)*q,old.y+(y-old.y)*q,r))a=q;else b=q}return{x:old.x+(x-old.x)*a,y:old.y+(y-old.y)*a}}
 function size(a){return a.mode==='held'?drag.radius:a.r*(.80+(a.y-.65)*1.9)}
 function bob(a){return a.mode==='held'?drag.bob:Math.sin(t*1.8+a.phase)*1.0}
@@ -22,7 +24,7 @@ for(let i=0;i<w*h;i++){let k=i*4;seen[i]=(a[k]>a[k+1]*1.18&&a[k]>a[k+2]*1.32&&a[
 for(let i=0;i<w*h;i++){if(seen[i]!==1)continue;let q=[i];seen[i]=2;for(let j=0;j<q.length;j++){let n=q[j],x=n%w;for(let v of [x>0?n-1:-1,x<w-1?n+1:-1,n-w,n+w])if(v>=0&&v<w*h&&seen[v]===1){seen[v]=2;q.push(v)}}if(q.length>best.length)best=q}
 let keep=new Uint8Array(w*h);for(let i of best)keep[i]=1;
 for(let i=0;i<w*h;i++){a[i*4]=a[i*4+1]=a[i*4+2]=0;a[i*4+3]=keep[i]?255:0}mask.x.putImageData(d,0,0)}
-function cut(c){c.save();c.globalCompositeOperation='destination-out';c.drawImage(mask.c,roi.x,roi.y,roi.w,roi.h);c.restore()}
+function cut(c){c.save();c.clip(P);c.globalCompositeOperation='destination-out';c.drawImage(mask.c,roi.x,roi.y,roi.w,roi.h);c.restore()}
 function waterClip(c){c.save();c.globalCompositeOperation='destination-in';c.fillStyle='#fff';c.fill(P);c.restore();cut(c)}
 function drawOrange(c,a,x,y,r,submerged=true){c.save();c.translate(x,y);c.rotate(Math.sin(t*.9+a.phase)*.055);if(submerged){c.beginPath();c.rect(-r*1.3,-r*1.4,r*2.6,r*1.95);c.clip()}
 c.scale(1,.90);let g=c.createRadialGradient(-r*.3,-r*.38,r*.05,r*.07,r*.08,r*1.1);g.addColorStop(0,a.id?'#edb655':'#f1bd62');g.addColorStop(.38,a.id?'#d99035':'#e3a044');g.addColorStop(.76,'#bd702c');g.addColorStop(1,'#755638');c.fillStyle=g;c.beginPath();c.arc(0,0,r,0,Math.PI*2);c.fill();c.save();c.clip();
