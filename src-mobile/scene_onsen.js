@@ -27,6 +27,7 @@ const P = {
 window.SCENES = window.SCENES || {};
 window.SCENES.onsen = {
   id: 'onsen',
+  readVideoPixels: true,
   name: '山中野天风吕',
   frame: [1152, 2048],          // 槽位坐标的参照画幅
   poster: 'assets/p3/onsen/poster-v3.webp',

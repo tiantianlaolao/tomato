@@ -19,6 +19,14 @@ try {
 
 // ── 字典：中文原句 → 英文。{n} 为数字占位；键里的 {n} 会编译成 (\d+) ──
 const D = {
+  '水面小物': 'Water companions', '小鸭子': 'Little duck', '双橘子': 'Two oranges',
+  '不放小物': 'No companion', '小物归位': 'Reset position',
+  '日系温泉泡汤时出现，离池时收起。': 'Appears while soaking in Mountain Onsen; put away when leaving the pool.',
+  '花房长休泡汤时出现，回房间时收起。': 'Appears during a long soaking break in Rainy Conservatory; put away in the room.',
+  '小鸭子适用于日系温泉，双橘子适用于雨夜花房。': 'The duck is for Mountain Onsen; the oranges are for Rainy Conservatory.',
+  '免费使用 · 布置保存在本机；收起面板后可拖动。': 'Free · Saved on this device. Close the panel to drag your companion.',
+  '本机存储不可用，布置暂时无法保存。': 'Device storage is unavailable. This arrangement cannot be saved.',
+  '小物暂时无法加载，请重新打开 App。': 'The companion could not load. Please reopen the app.',
   'CAPYROOM · 慢慢来': 'CAPYROOM · TAKE YOUR TIME',
   '给自己，一段安静。': 'A little time for yourself.',
   '选一段节奏，让水豚陪你专注。': 'Find your rhythm. Let your capybara keep you company.',

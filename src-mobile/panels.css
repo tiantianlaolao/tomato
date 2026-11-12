@@ -69,3 +69,12 @@ html[lang=en] #sheet .stage .mini{padding:5px;min-width:26px}
 .tw-shortcuts{display:flex;gap:8px;margin:18px 0}.tw-shortcuts button{flex:1;background:#e6ecdf;color:#46613d;border:0;border-radius:12px;min-height:40px;font-size:12px}.tw-input-label{display:flex;align-items:center;justify-content:center;gap:12px;font-size:12px;color:#63755a}.tw-input-label input{width:88px;border:1px solid #bcccb2;border-radius:10px;background:#fffef8;text-align:center;padding:9px 5px;font-size:16px;color:#2d5038;user-select:text}.tw-error{font-size:11px;min-height:16px;margin:8px 0;color:#9d4b31;text-align:center}.tw-apply{width:100%;min-height:48px;background:#316759;color:white;border:0;border-radius:15px}.tw-apply:disabled{opacity:.4}.time-wheel-dialog :focus-visible{outline:2px solid #b0784d;outline-offset:3px}.time-wheel-dialog button:active{transform:translateY(1px)}
 @media(min-width:760px){.time-wheel-overlay{align-items:center}}
 @media(prefers-reduced-motion:reduce){.time-wheel-overlay{backdrop-filter:none}}
+/* Optional water decorations remain below scene labels, fog, and application controls. */
+#waterToyCanvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+#stage.water-toy-active{touch-action:none}
+.water-toy-garden{padding:16px;margin:12px 0 20px;border:1px solid #dce3d7;border-radius:18px;background:#f8f8ef}
+.water-toy-garden h3{font-size:16px;margin:0 0 8px;color:#2b594c}
+.water-toy-options{display:flex;gap:10px;margin:12px 0}
+.water-toy-options .btn{flex:1;min-width:0}
+.water-toy-options [aria-pressed=true]{background:#316b5a!important;color:#fff!important;border-color:#316b5a!important}
+.water-toy-reset{font-size:12px!important}

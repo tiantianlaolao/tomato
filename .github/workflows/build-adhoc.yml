@@ -30,6 +30,10 @@ on:
         description: '启用开发功能（默认关闭，验证包按正式功能运行）'
         type: boolean
         default: false
+      deploy:
+        description: '部署既有 OTA 入口（关闭时仅生成测试包 artifact）'
+        type: boolean
+        default: true
 
 env:
   # 内测包标记（9-2）：Rust 用 option_env! 编进二进制 → 调汤里露出「内测：全部解锁」。商店包的 workflow 不设这个。
@@ -307,7 +311,7 @@ jobs:
           ls -l $RUNNER_TEMP/export
 
       - name: '上架 OTA'
-        if: ${{ inputs.sign }}
+        if: ${{ inputs.sign && inputs.deploy }}
         env:
           OTA_SSH_HOST: ${{ secrets.OTA_SSH_HOST }}
           OTA_SSH_PORT: ${{ secrets.OTA_SSH_PORT }}

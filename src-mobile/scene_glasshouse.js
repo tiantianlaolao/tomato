@@ -5,6 +5,7 @@ const box=(x,y,x2,y2)=>({x:x/941,y:y/1672,x2:x2/941,y2:y2/1672});
 const clips={idle:'idle-loop',work:'reading-loop',shortBreak:'orange-loop',longBreak:'bath-loop',awaiting:'awaiting-loop',done:'empty-loop-candidate'};
 const step=(seg,ms,to)=>({seg,ms,to});
 const S={
+ readVideoPixels:true,
  id:'glasshouse',name:'雨夜花房',frame:[941,1672],poster:'assets/p3/glasshouse/poster.jpg',
  hint:'木牌上：开始 · 设置 · 记录',
  menu:[{key:'start',label:'开始'},{key:'settings',label:'设置'},{key:'stats',label:'记录'}],

@@ -1,0 +1,77 @@
+import * as T from './vendor/three.module.js';
+import {GLTFLoader} from './vendor/loaders/GLTFLoader.js';
+import {mergeGeometries} from './vendor/utils/BufferGeometryUtils.js';
+
+// Adapted from the accepted onsen v5; original rendering retained.
+export function create(env){
+const W=1088,H=1920,canvas=env.canvas,cx=canvas.getContext('2d'),hint={textContent:''};let video=env.video();
+const layer=()=>{let c=document.createElement('canvas');return{c,x:c.getContext('2d')};};
+const waterLayer=layer(),duckLayer=layer(),waterPatch=layer(),sourcePatch=layer(),duckSprite=layer();duckSprite.c.width=duckSprite.c.height=192;
+waterPatch.c.width=sourcePatch.c.width=320;waterPatch.c.height=sourcePatch.c.height=128;
+let crop=0,cropH=H,close=false,hidden=false,time=0,last=performance.now(),mediaTime=0,duck,matte,sheets=[],videoReady=false,modelReady=false,maskReady=false,drag=null;
+const actor={x:.74,y:.845,height:0,vh:0,vx:0,vy:0,mode:'float',yaw:.60,target:null,splashes:0};
+let route=[];const bodyMask=layer(),bodyColor=layer();let maskTime=-1;const impacts=[],droplets=[];let waterColor=[71,108,109],lastColorAt=-1;
+const sample=document.createElement('canvas');sample.width=sample.height=8;const sc=sample.getContext('2d',{willReadFrequently:true});
+const renderer=new T.WebGLRenderer({alpha:true,antialias:true,preserveDrawingBuffer:true});renderer.setSize(192,192);renderer.setPixelRatio(1);renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=.82;renderer.localClippingEnabled=true;
+const scene=new T.Scene(),camera=new T.OrthographicCamera(-.57,.57,.77,-.37,.1,20);camera.position.set(1.5,1.25,4);camera.lookAt(0,.22,0);
+scene.add(new T.HemisphereLight('#a7bfd0','#354848',1.8));const moon=new T.DirectionalLight('#b7c7d8',1.8);moon.position.set(-3,5,3);scene.add(moon);const lamp=new T.DirectionalLight('#ffbd72',1.3);lamp.position.set(3,2,2);scene.add(lamp);
+const clip=new T.Plane(new T.Vector3(0,1,0),-.015);
+const waterPath=new Path2D();const p=(x,y)=>[x*W,y*H];
+waterPath.moveTo(...p(.008,.706));waterPath.bezierCurveTo(...p(.015,.678),...p(.11,.66),...p(.25,.656));waterPath.bezierCurveTo(...p(.45,.648),...p(.72,.657),...p(.88,.699));waterPath.bezierCurveTo(...p(1.005,.735),...p(1.012,.807),...p(.93,.871));waterPath.bezierCurveTo(...p(.88,.922),...p(.65,.954),...p(.45,.968));waterPath.bezierCurveTo(...p(.36,.968),...p(.38,.89),...p(.26,.863));waterPath.bezierCurveTo(...p(.21,.845),...p(.14,.835),...p(.07,.827));waterPath.bezierCurveTo(...p(.00,.803),...p(-.03,.747),...p(.008,.706));waterPath.closePath();
+const poolTest=document.createElement('canvas').getContext('2d');
+function valid(x,y){if(!env.inView(x,y,W,H,90))return false;if(x<.04||x>.96||y<.66||y>.96)return false;for(let [dx,dy] of [[0,0],[.037,0],[-.037,0],[0,.016],[0,-.014]])if(!poolTest.isPointInPath(waterPath,(x+dx)*W,(y+dy)*H))return false;return true;}
+function fit(x,y,old={x:actor.x,y:actor.y}){if(!valid(old.x,old.y))old=env.clampPoint(.74,.845,W,H,90);if(valid(x,y))return{x,y};let a=0,b=1;for(let i=0;i<18;i++){let t=(a+b)/2;if(valid(old.x+(x-old.x)*t,old.y+(y-old.y)*t))a=t;else b=t;}return{x:old.x+(x-old.x)*a,y:old.y+(y-old.y)*a};}
+function perspective(y){return Math.max(.65,Math.min(1.15,.64+(y-.68)*2.0));}
+function pose(){const size=actor.mode==='held'?drag.size:178*perspective(actor.y),bob=actor.mode==='held'?drag.bob:Math.sin(time*2.0)*1.7;return{x:actor.x*W,y:actor.y*H,bob,size,lift:actor.height*H};}
+function matteFrame(){if(!matte)return null;let idx=Math.min(matte.frames.length-1,Math.max(0,Math.round(mediaTime*matte.fps))),f=matte.frames[idx];if(!f)return null;let im=sheets[f[0]];if(!im?.complete)return null;return{im,sx:f[1]%matte.cols*matte.cell[0],sy:Math.floor(f[1]/matte.cols)*matte.cell[1],sw:f[4],sh:f[5],x:f[2]*matte.scale,y:f[3]*matte.scale,w:f[4]*matte.scale,h:f[5]*matte.scale};}
+function cutCapy(c){let f=matteFrame();if(!f||!videoReady)return;
+if(maskTime!==mediaTime){maskTime=mediaTime;bodyMask.c.width=bodyColor.c.width=f.sw;bodyMask.c.height=bodyColor.c.height=f.sh;
+bodyColor.x.drawImage(video,f.x,f.y,f.w,f.h,0,0,f.sw,f.sh);let d=bodyColor.x.getImageData(0,0,f.sw,f.sh);
+for(let i=0;i<d.data.length;i+=4){let r=d.data[i],g=d.data[i+1],b=d.data[i+2];d.data[i+3]=Math.round(255*Math.max(0,Math.min(1,(r-Math.max(g,b)-8)/14)));}
+bodyColor.x.putImageData(d,0,0);bodyMask.x.drawImage(f.im,f.sx,f.sy,f.sw,f.sh,0,0,f.sw,f.sh);bodyMask.x.globalCompositeOperation='destination-in';bodyMask.x.drawImage(bodyColor.c,0,0);bodyMask.x.globalCompositeOperation='source-over';}
+c.save();c.globalCompositeOperation='destination-out';c.drawImage(bodyMask.c,f.x,f.y,f.w,f.h);c.restore();}
+function clipWater(c){c.save();c.globalCompositeOperation='destination-in';c.fillStyle='#fff';c.fill(waterPath);c.restore();cutCapy(c);}
+function oldSetup(c){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,canvas.width,canvas.height);c.setTransform(canvas.width/W,0,0,canvas.height/cropH,0,-crop*canvas.height/cropH);}
+function merge(group){group.updateWorldMatrix(true,true);let inv=group.matrixWorld.clone().invert(),by=new Map(),remove=[];group.traverse(m=>{if(!m.isMesh)return;let id=m.material.uuid;if(!by.has(id))by.set(id,{material:m.material,geos:[]});let g=m.geometry.index?m.geometry.toNonIndexed():m.geometry.clone();g.applyMatrix4(new T.Matrix4().multiplyMatrices(inv,m.matrixWorld));for(let k of Object.keys(g.attributes))if(!['position','normal'].includes(k))g.deleteAttribute(k);by.get(id).geos.push(g);remove.push(m);});for(let m of remove)m.removeFromParent();for(let {material,geos} of by.values()){group.add(new T.Mesh(mergeGeometries(geos,false),material));for(let g of geos)g.dispose();}}
+new GLTFLoader().load(new URL('./duck-model.glb',import.meta.url).href,g=>{duck=g.scene.getObjectByName('DUCK');merge(duck);duck.removeFromParent();duck.position.set(0,0,0);duck.rotation.set(0,.6,0);let used=new Set();duck.traverse(m=>{if(!m.isMesh)return;m.material=m.material.clone();m.material.color.convertSRGBToLinear();m.material.roughness=.90;m.material.metalness=0;m.material.clippingPlanes=[clip];used.add(m.material);});scene.add(duck);g.scene.traverse(m=>{if(m.isMesh){m.geometry.dispose();if(!used.has(m.material))m.material.dispose();}});modelReady=true;},undefined,env.error);
+function colorAtDuck(){if(!videoReady||time-lastColorAt<.5)return;lastColorAt=time;let f=matteFrame(),px=actor.x*W,py=actor.y*H+6;if(f&&px>f.x&&px<f.x+f.w&&py>f.y&&py<f.y+f.h)return;sc.drawImage(video,px-12,py,24,18,0,0,8,8);let d=sc.getImageData(0,0,8,8).data,r=0,g=0,b=0;for(let i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2];}waterColor=[r/64,g/64,b/64].map(Math.round);}
+function splash(strength){actor.splashes++;impacts.push({x:actor.x,y:actor.y,t:time,strength});if(impacts.length>8)impacts.shift();for(let i=0;i<12+strength*9;i++){let a=Math.random()*Math.PI*2;droplets.push({x:actor.x*W,y:actor.y*H,z:0,vx:Math.cos(a)*(25+Math.random()*90),vy:Math.sin(a)*(8+Math.random()*28),vz:85+Math.random()*110*strength,life:.45+Math.random()*.30});}hint.textContent='拖动鸭子，松手落水';}
+function drop(x=.73,y=.84){let q=fit(x,y);Object.assign(actor,q,{height:.105,vh:-.015,vx:.035,vy:-.015,mode:'air',target:null});}
+function ring(c,x,y,rx,ry,alpha,width=1.4,phase=0){c.save();c.strokeStyle=`rgba(190,215,205,${alpha})`;c.lineWidth=width;c.lineCap='round';for(let i=0;i<4;i++){let a=i*Math.PI*.5+.15+phase;c.beginPath();c.ellipse(x,y,rx,ry,0,a,a+.97);c.stroke();}c.restore();}
+function warpWater(c){if(!videoReady)return;let {x,y,size}=pose(),width=size*1.7,height=size*.48;let f=matteFrame();if(f&&x+width/2>f.x&&x-width/2<f.x+f.w&&y+height/2>f.y&&y-height/2<f.y+f.h)return;
+sourcePatch.x.clearRect(0,0,320,128);sourcePatch.x.drawImage(video,x-width/2,y-height/2,width,height,0,0,320,128);waterPatch.x.clearRect(0,0,320,128);
+for(let row=0;row<128;row+=4){let taper=Math.sin(row/128*Math.PI);let dx=Math.sin(row*.20-time*2.4)*1.0*taper;for(let i of impacts){let age=time-i.t;if(age<2.4)dx+=Math.sin(row*.24-age*10)*Math.exp(-age)*2*i.strength*taper;}waterPatch.x.drawImage(sourcePatch.c,0,row,320,4,dx,row,320,4);}
+waterPatch.x.save();waterPatch.x.globalCompositeOperation='destination-in';waterPatch.x.translate(160,64);waterPatch.x.scale(1,.4);let grad=waterPatch.x.createRadialGradient(0,0,28,0,0,156);grad.addColorStop(0,'#fff');grad.addColorStop(.60,'rgba(255,255,255,.75)');grad.addColorStop(1,'rgba(255,255,255,0)');waterPatch.x.fillStyle=grad;waterPatch.x.fillRect(-160,-160,320,320);waterPatch.x.restore();c.drawImage(waterPatch.c,x-width/2,y-height/2,width,height);
+}
+function drawReflection(c,s){if(actor.height>.07)return;c.save();c.globalAlpha=.22*(1-actor.height/.07);c.translate(s.x,s.y+s.bob+3);c.scale(1,-.36);c.filter='blur(1.2px)';for(let row=0;row<192;row+=12){let dx=Math.sin(row*.16+time*1.4)*2.2;c.drawImage(duckSprite.c,0,row,192,12,-s.size/2+dx,-s.size*.85+row/192*s.size,s.size,s.size*12/192);}c.restore();}
+function drawWater(c){let s=pose();warpWater(c);c.save();c.translate(s.x,s.y);c.scale(1,.25);let sh=c.createRadialGradient(0,0,4,0,0,s.size*.29);sh.addColorStop(0,`rgba(16,37,40,${actor.mode==='held'?.12:.28})`);sh.addColorStop(1,'rgba(16,37,40,0)');c.fillStyle=sh;c.beginPath();c.arc(0,0,s.size*.30,0,Math.PI*2);c.fill();c.restore();drawReflection(c,s);
+if(actor.mode==='float'){let t=.5+.5*Math.sin(time*1.2);ring(c,s.x,s.y+s.bob,s.size*(.22+t*.013),s.size*.060,.34,1.35,.15);ring(c,s.x,s.y+3,s.size*.36,s.size*.092,.10,1.0,time*.03);}
+for(let i of impacts){let age=time-i.t;if(age>3.6)continue;let rx=13+age*75;ring(c,i.x*W,i.y*H,rx,rx*.28,(1-age/3.6)*.31*i.strength,1.7,age*.04);ring(c,i.x*W,i.y*H,rx*.75,rx*.21,(1-age/3.6)*.14,1.0);}
+clipWater(c);
+}
+function renderDuck(){if(!duck)return;duck.position.y=actor.mode==='float'?Math.sin(time*2)*.009:0;duck.rotation.set(Math.sin(time*1.5)*.025,actor.yaw,Math.sin(time*1.2)*.035);lamp.intensity=.9+1.1*Math.max(0,1-Math.abs(actor.x-.82)*2);lamp.position.x=(.82-actor.x)*8;duck.traverse(m=>{if(m.isMesh)m.material.clippingPlanes=actor.mode==='float'?[clip]:null;});renderer.render(scene,camera);let d=duckSprite.x;d.clearRect(0,0,192,192);d.drawImage(renderer.domElement,0,0);if(actor.mode==='float'){d.save();d.globalCompositeOperation='source-atop';let wet=d.createLinearGradient(0,149,0,175);wet.addColorStop(0,'rgba(0,0,0,0)');wet.addColorStop(1,`rgba(${waterColor},.45)`);d.fillStyle=wet;d.fillRect(0,145,192,47);d.restore();}}
+function drawDuck(c){let s=pose();c.save();c.translate(s.x,s.y+s.bob-s.lift);c.drawImage(duckSprite.c,-s.size/2,-s.size*.85,s.size,s.size);c.restore();let f=matteFrame(),base=f?(f.y+f.h)/H:.805;if(actor.mode!=='held'&&actor.y<base-.012)cutCapy(c);}
+function drawDrops(c){for(let d of droplets){if(d.life<=0)continue;c.save();c.globalAlpha=Math.min(.8,d.life*1.5);c.translate(d.x,d.y-d.z);c.rotate(Math.atan2(d.vy,d.vx)*.2);c.fillStyle=actor.x>.70?'#e5dfba':'#c6ded8';c.beginPath();c.ellipse(0,0,1.7,3.1,0,0,Math.PI*2);c.fill();c.restore();}let f=matteFrame();if(f&&actor.y<(f.y+f.h)/H)cutCapy(c);}
+function reset(){drag=null;route=[];Object.assign(actor,{x:.74,y:.845,height:0,vh:0,vx:0,vy:0,mode:'float',target:null});hint.textContent='拖动鸭子，松手落水';}
+function screenDuck(){let s=pose();return env.screen(s.x/W,(s.y+s.bob-s.lift-s.size*.43)/H,W,H);}
+env.on('pointerdown',e=>{video.play().catch(()=>{});if(!modelReady||!maskReady||hidden||drag)return;let q=pointer(e),s=screenDuck();if(Math.hypot(e.clientX-s.x,e.clientY-s.y)<36){e.preventDefault();canvas.setPointerCapture(e.pointerId);let z=pose();route=[];drag={id:e.pointerId,offsetX:actor.x-q.x,offsetY:actor.y-q.y,last:{x:actor.x,y:actor.y},t:performance.now(),size:z.size,bob:z.bob};actor.mode='held';actor.target=null;actor.vh=0;actor.vx=actor.vy=0;hint.textContent='松手，看看落水效果';}});
+env.on('pointermove',e=>{if(!drag||e.pointerId!==drag.id)return;e.preventDefault();let q=pointer(e),t=performance.now(),dt=Math.max(.016,(t-drag.t)/1000),f=fit(q.x+drag.offsetX,q.y+drag.offsetY);actor.vx=Math.max(-.10,Math.min(.10,(f.x-drag.last.x)/dt*.18));actor.vy=Math.max(-.06,Math.min(.06,(f.y-drag.last.y)/dt*.18));actor.x=f.x;actor.y=f.y;drag.last=f;drag.t=t;});
+function release(e){if(!drag||drag.id!==e.pointerId)return;let stale=performance.now()-drag.t>100||e.type!=='pointerup';if(stale)actor.vx=actor.vy=0;drag=null;Object.assign(actor,fit(actor.x,actor.y));actor.mode='air';actor.vh=-.08;if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);}
+env.on('pointerup',release);env.on('pointercancel',release);env.on('lostpointercapture',release);
+function frame(now){let dt=Math.min(.035,(now-last)/1000);last=now;time+=dt;if(!video.requestVideoFrameCallback)mediaTime=video.currentTime;
+if(actor.mode==='held'){let wanted=(.045-actor.height)*Math.min(1,dt*12),q=fit(actor.x,actor.y+wanted),lift=q.y-actor.y;actor.height+=lift;actor.y=q.y;drag.offsetY+=lift;drag.last.y+=lift;}
+if(actor.mode==='air'){actor.vh-=.85*dt;actor.height+=actor.vh*dt;if(actor.height<=0){let strength=Math.min(1.4,Math.max(.45,Math.abs(actor.vh)*2.5));splash(strength);actor.mode='float';actor.height=-.004;actor.vh=-actor.vh*.15;}}
+else if(actor.mode==='float'){actor.vh+=(-actor.height*45-actor.vh*8)*dt;actor.height+=actor.vh*dt;if(actor.target){let dx=actor.target.x-actor.x,dy=actor.target.y-actor.y,d=Math.hypot(dx,dy),step=dt*.038;if(d<=step){actor.x=actor.target.x;actor.y=actor.target.y;actor.target=route.shift()||null;actor.vx=actor.vy=0;if(!actor.target)hint.textContent='拖动鸭子，松手落水';}else{actor.vx=dx/d*.038;actor.vy=dy/d*.038;}}else{actor.vx+=Math.sin(time*.7)*dt*.0003;actor.vy+=Math.cos(time*.9)*dt*.00012;}if(!actor.target){actor.vx*=Math.exp(-dt*2.8);actor.vy*=Math.exp(-dt*2.8);}}
+if(actor.mode!=='held'){let q=fit(actor.x+actor.vx*dt,actor.y+actor.vy*dt);actor.x=q.x;actor.y=q.y;if(Math.abs(actor.vx)>.002){let target=actor.vx>0?.75:-.75;actor.yaw+=(target-actor.yaw)*dt*1.4;}}
+for(let d of droplets){if(d.life<=0)continue;d.life-=dt;d.vz-=430*dt;d.z+=d.vz*dt;d.x+=d.vx*dt;d.y+=d.vy*dt;}while(droplets.length>60)droplets.shift();
+setup(cx);if(!modelReady||!maskReady||hidden)return;colorAtDuck();renderDuck();setup(waterLayer.x);drawWater(waterLayer.x);cx.setTransform(1,0,0,1,0,0);cx.drawImage(waterLayer.c,0,0);setup(duckLayer.x);drawDuck(duckLayer.x);drawDrops(duckLayer.x);cx.drawImage(duckLayer.c,0,0);
+}
+
+function setup(c){env.setup(c,W,H);}
+function pointer(e){return env.pointer(e,W,H);}
+function resize(){env.resize();for(let a of [waterLayer,duckLayer])if(a.c.width!==canvas.width||a.c.height!==canvas.height){a.c.width=canvas.width;a.c.height=canvas.height;}}
+function state(){return [actor].map(a=>({x:a.x,y:a.y-(a.mode==='held'?a.height:0)}));}
+function restore(points){drag=null;[actor].forEach((a,i)=>{const p=points?.[i]||a;if(p&&Number.isFinite(p.x)&&Number.isFinite(p.y)){const q=fit(p.x,p.y,{x:.74,y:.845});Object.assign(a,q);}a.height=a.vh=a.vx=a.vy=0;a.mode='float';if(a.route)a.route=[];a.target=null;});}
+return {tick(now){video=env.video();resize();videoReady=video?.readyState>=2;const m=env.engine.matte[env.engine.seg];if(matte!==m?.meta){maskTime=-1;matte=m?.meta;sheets=m?.sheets||[];}mediaTime=env.engine.vt>=0?env.engine.vt:video.currentTime;maskReady=!!matte&&sheets.every(i=>i.complete&&i.naturalWidth);if(!videoReady||!maskReady){env.clear();return;};frame(now);},ready:()=>modelReady&&maskReady&&videoReady,state,restore,reset,screen:()=>[screenDuck()],valid,
+ suspend(){restore(state());route=[];impacts.length=droplets.length=0;last=performance.now();},dispose(){renderer.dispose();}};
+}

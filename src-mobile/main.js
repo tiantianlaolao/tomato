@@ -30,6 +30,7 @@ if (qs.get('boxes')) window.__SHOWBOXES = true;   // 验收用：画出入口命
 if (qs.get('matte')) window.__SHOWMATTE = true;   // 验收用：角色通道当前帧红色叠上来看对不对位
 if (!HAS_BRIDGE) window.__feedDemo = (k) => feed(typeof k === 'string' ? fixture(k) : k); // Browser-only snapshot checks use the same feed/UI path.
 Scene.mount($('stage'));
+window.WaterToys?.mount(Scene);
 Scene.start();
 // 底部提示跟主题走（每个场景包自带 hint 文案）
 function applyHint() {
@@ -935,6 +936,7 @@ async function renderStamps(body) {
 //   locked 暗色（点＝还差什么）/ ready 亮色带光点（点＝领取，放大到中央再回原位）/ own 已领（点＝摆上）/ placed 摆着（点＝撤下）
 //   领到的：槽位空着内核自动摆上（晾杆空着自动挂上）。物件不卖；只卖主题（调汤里）。
 function renderGarden(body) {
+  window.WaterToys?.garden(body);
   const v = RW.view, L = v.ledger, cat = v.catalog;
   const hm = (m) => m >= 60 ? (Math.floor(m / 60) + ' 小时' + (m % 60 ? ' ' + (m % 60) + ' 分' : '')) : (m + ' 分钟');
   const head = document.createElement('div'); head.className = 'rwstats';
