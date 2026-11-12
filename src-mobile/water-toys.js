@@ -46,10 +46,11 @@ function frame(now){
 function mount(E){
  if(started)return;started=true;engine=E;canvas=document.createElement('canvas');canvas.id='waterToyCanvas';canvas.setAttribute('aria-hidden','true');engine.root.insertBefore(canvas,engine.cv);resize();
  for(const name of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture'])engine.root.addEventListener(name,e=>{
-  sync();if(!active||!active.api.ready())return;const record=active;
+  sync();if(!active)return;const record=active,captured=record.pointers.has(e.pointerId);
+  if(!captured&&!record.api.ready())return;
   for(const fn of record.handlers[name]||[])fn(e);
   if(name==='pointerdown'&&e.defaultPrevented)record.pointers.add(e.pointerId);
-  if(record.pointers.has(e.pointerId)){suppressClick=performance.now()+650;e.stopImmediatePropagation();if(name==='pointerup'||name==='pointercancel'||name==='lostpointercapture'){record.pointers.delete(e.pointerId);saveAt=performance.now()+1800;}}
+  if(captured||record.pointers.has(e.pointerId)){suppressClick=performance.now()+650;e.stopImmediatePropagation();if(name==='pointerup'||name==='pointercancel'||name==='lostpointercapture'){record.pointers.delete(e.pointerId);snapshot();saveAt=performance.now()+1800;}}
  },true);
  engine.root.addEventListener('click',e=>{if(performance.now()<suppressClick){e.stopImmediatePropagation();e.preventDefault();}},true);
  document.addEventListener('visibilitychange',()=>{if(document.hidden)suspend();});window.addEventListener('pagehide',suspend);
