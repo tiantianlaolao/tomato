@@ -23,7 +23,7 @@ async function load(id){
  loading[id]=true;const handlers={},pointers=new Set();
  try{
   const module=await import('./water-toys/'+specs[id].file+'.js');
-  const env={canvas,engine,clear,resize,video:()=>engine.cur(),on:(name,fn)=>{(handlers[name]||(handlers[name]=[])).push(fn);},error:e=>{errors[id]=true;console.warn('water toy unavailable',id);},
+  const env={canvas,engine,clear,resize,changed:()=>{saveAt=performance.now()+100;},video:()=>engine.cur(),on:(name,fn)=>{(handlers[name]||(handlers[name]=[])).push(fn);},error:e=>{errors[id]=true;console.warn('water toy unavailable',id);},
    garden(pass,depth,lifted,now){if(id!=='onsen')return;const c=canvas.getContext('2d');c.save();c.setTransform(canvas.width/engine.W,0,0,canvas.height/engine.H,0,0);engine.scene.drawGarden(engine,c,{pass,depth,lifted,now});c.restore();},
    setup(c,W,H){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,c.canvas.width,c.canvas.height);const d=dimensions(W,H);c.setTransform(d.k,0,0,d.k,d.x,d.y);},
    pointer(e,W,H){const d=dimensions(W,H);return{x:((e.clientX-d.r.left)*canvas.width/d.r.width-d.x)/d.k/W,y:((e.clientY-d.r.top)*canvas.height/d.r.height-d.y)/d.k/H};},

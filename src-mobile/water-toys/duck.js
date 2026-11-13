@@ -1,3 +1,4 @@
+import {createMovement} from './movement.js';
 import * as T from './vendor/three.module.js';
 import {GLTFLoader} from './vendor/loaders/GLTFLoader.js';
 import {mergeGeometries} from './vendor/utils/BufferGeometryUtils.js';
@@ -19,8 +20,25 @@ const clip=new T.Plane(new T.Vector3(0,1,0),-.015);
 const waterPath=new Path2D();const p=(x,y)=>[x*W,y*H];
 waterPath.moveTo(...p(.008,.706));waterPath.bezierCurveTo(...p(.015,.678),...p(.11,.66),...p(.25,.656));waterPath.bezierCurveTo(...p(.45,.648),...p(.72,.657),...p(.88,.699));waterPath.bezierCurveTo(...p(1.005,.735),...p(1.012,.807),...p(.93,.871));waterPath.bezierCurveTo(...p(.88,.922),...p(.65,.954),...p(.45,.968));waterPath.bezierCurveTo(...p(.36,.968),...p(.38,.89),...p(.26,.863));waterPath.bezierCurveTo(...p(.21,.845),...p(.14,.835),...p(.07,.827));waterPath.bezierCurveTo(...p(.00,.803),...p(-.03,.747),...p(.008,.706));waterPath.closePath();
 const poolTest=document.createElement('canvas').getContext('2d');
-function valid(x,y){if(!env.inView(x,y,W,H,90))return false;if(x<.04||x>.96||y<.66||y>.96)return false;for(let [dx,dy] of [[0,0],[.037,0],[-.037,0],[0,.016],[0,-.014]])if(!poolTest.isPointInPath(waterPath,(x+dx)*W,(y+dy)*H))return false;return true;}
-function fit(x,y,old={x:actor.x,y:actor.y}){if(!valid(old.x,old.y))old=env.clampPoint(.74,.845,W,H,90);if(valid(x,y))return{x,y};let a=0,b=1;for(let i=0;i<18;i++){let t=(a+b)/2;if(valid(old.x+(x-old.x)*t,old.y+(y-old.y)*t))a=t;else b=t;}return{x:old.x+(x-old.x)*a,y:old.y+(y-old.y)*a};}
+function valid(x,y){if(!env.inView(x,y,W,H,90))return false;if(x<.04||x>.96||y<.66||y>.96)return false;for(let [dx,dy] of [[0,0],[.037,0],[-.037,0],[0,.016],[0,-.014]])if(!poolTest.isPointInPath(waterPath,(x+dx)*W,(y+dy)*H))return false;return !blocked(x,y);}
+// The tray's water footprint includes its whole bobbing range and duck clearance.
+// Placement is read live; taking the tray away immediately restores this water.
+function blocked(x,y){
+ const tray=env.engine.scene.waterObstacle?.();if(!tray)return false;
+ const rx=tray.rx+.055,ry=tray.ry+.018;
+ const inside=py=>Math.pow((x-tray.x)/rx,2)+Math.pow((py-tray.y)/ry,2)<1;
+ return inside(y)||inside(y-Math.max(0,actor.height));
+}
+const movement=createMovement(valid,W,H);
+function fit(x,y,old={x:actor.x,y:actor.y}){return movement.move(old,{x,y});}
+function relocate(){
+ if(valid(actor.x,actor.y))return;
+ const q=movement.nearest(actor),dx=q.x-actor.x,dy=q.y-actor.y;
+ Object.assign(actor,q,{vx:0,vy:0,target:null});route=[];
+ if(drag){drag.offsetX+=dx;drag.offsetY+=dy;drag.last={x:q.x,y:q.y};}
+ env.changed?.();
+}
+
 function perspective(y){return Math.max(.65,Math.min(1.15,.64+(y-.68)*2.0));}
 function pose(){const size=actor.mode==='held'?drag.size:178*perspective(actor.y),bob=actor.mode==='held'?drag.bob:Math.sin(time*2.0)*1.7;return{x:actor.x*W,y:actor.y*H,bob,size,lift:actor.height*H};}
 function matteFrame(){if(!matte)return null;let idx=Math.min(matte.frames.length-1,Math.max(0,Math.round(mediaTime*matte.fps))),f=matte.frames[idx];if(!f)return null;let im=sheets[f[0]];if(!im?.complete)return null;return{im,sx:f[1]%matte.cols*matte.cell[0],sy:Math.floor(f[1]/matte.cols)*matte.cell[1],sw:f[4],sh:f[5],x:f[2]*matte.scale,y:f[3]*matte.scale,w:f[4]*matte.scale,h:f[5]*matte.scale};}
@@ -52,14 +70,14 @@ clipWater(c);
 function renderDuck(){if(!duck)return;duck.position.y=actor.mode==='float'?Math.sin(time*2)*.009:0;duck.rotation.set(Math.sin(time*1.5)*.025,actor.yaw,Math.sin(time*1.2)*.035);lamp.intensity=.9+1.1*Math.max(0,1-Math.abs(actor.x-.82)*2);lamp.position.x=(.82-actor.x)*8;duck.traverse(m=>{if(m.isMesh)m.material.clippingPlanes=actor.mode==='float'?[clip]:null;});renderer.render(scene,camera);let d=duckSprite.x;d.clearRect(0,0,192,192);d.drawImage(renderer.domElement,0,0);if(actor.mode==='float'){d.save();d.globalCompositeOperation='source-atop';let wet=d.createLinearGradient(0,149,0,175);wet.addColorStop(0,'rgba(0,0,0,0)');wet.addColorStop(1,`rgba(${waterColor},.45)`);d.fillStyle=wet;d.fillRect(0,145,192,47);d.restore();}}
 function drawDuck(c){let s=pose();c.save();c.translate(s.x,s.y+s.bob-s.lift);c.drawImage(duckSprite.c,-s.size/2,-s.size*.85,s.size,s.size);c.restore();let f=matteFrame(),base=f?(f.y+f.h)/H:.805;if(actor.mode!=='held'&&actor.y<base-.012)cutCapy(c);}
 function drawDrops(c){for(let d of droplets){if(d.life<=0)continue;c.save();c.globalAlpha=Math.min(.8,d.life*1.5);c.translate(d.x,d.y-d.z);c.rotate(Math.atan2(d.vy,d.vx)*.2);c.fillStyle=actor.x>.70?'#e5dfba':'#c6ded8';c.beginPath();c.ellipse(0,0,1.7,3.1,0,0,Math.PI*2);c.fill();c.restore();}let f=matteFrame();if(f&&actor.y<(f.y+f.h)/H)cutCapy(c);}
-function reset(){drag=null;route=[];Object.assign(actor,{x:.74,y:.845,height:0,vh:0,vx:0,vy:0,mode:'float',target:null});hint.textContent='拖动鸭子，松手落水';}
+function reset(){drag=null;route=[];Object.assign(actor,{x:.74,y:.845,height:0,vh:0,vx:0,vy:0,mode:'float',target:null});relocate();hint.textContent='拖动鸭子，松手落水';}
 function screenDuck(){let s=pose();return env.screen(s.x/W,(s.y+s.bob-s.lift-s.size*.43)/H,W,H);}
-env.on('pointerdown',e=>{video.play().catch(()=>{});if(!modelReady||!maskReady||hidden||drag)return;let q=pointer(e),s=screenDuck();if(Math.hypot(e.clientX-s.x,e.clientY-s.y)<36){e.preventDefault();canvas.setPointerCapture(e.pointerId);let z=pose();route=[];drag={id:e.pointerId,offsetX:actor.x-q.x,offsetY:actor.y-q.y,last:{x:actor.x,y:actor.y},t:performance.now(),size:z.size,bob:z.bob};actor.mode='held';actor.target=null;actor.vh=0;actor.vx=actor.vy=0;hint.textContent='松手，看看落水效果';}});
+env.on('pointerdown',e=>{video.play().catch(()=>{});if(!modelReady||!maskReady||hidden||drag)return;let q=pointer(e),s=screenDuck();if(Math.hypot(e.clientX-s.x,e.clientY-s.y)<36){e.preventDefault();canvas.setPointerCapture(e.pointerId);let z=pose();route=[];drag={id:e.pointerId,offsetX:actor.x-q.x,offsetY:actor.y-q.y,last:{x:actor.x,y:actor.y},t:performance.now(),size:z.size,bob:z.bob};actor.mode='held';actor.target=null;actor.vh=0;if(env.engine.scene.waterObstacle?.())actor.height=0;actor.vx=actor.vy=0;hint.textContent='松手，看看落水效果';}});
 env.on('pointermove',e=>{if(!drag||e.pointerId!==drag.id)return;e.preventDefault();let q=pointer(e),t=performance.now(),dt=Math.max(.016,(t-drag.t)/1000),f=fit(q.x+drag.offsetX,q.y+drag.offsetY);actor.vx=Math.max(-.10,Math.min(.10,(f.x-drag.last.x)/dt*.18));actor.vy=Math.max(-.06,Math.min(.06,(f.y-drag.last.y)/dt*.18));actor.x=f.x;actor.y=f.y;drag.last=f;drag.t=t;});
 function release(e){if(!drag||drag.id!==e.pointerId)return;let stale=performance.now()-drag.t>100||e.type!=='pointerup';if(stale)actor.vx=actor.vy=0;drag=null;Object.assign(actor,fit(actor.x,actor.y));actor.mode='air';actor.vh=-.08;if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);}
 env.on('pointerup',release);env.on('pointercancel',release);env.on('lostpointercapture',release);
-function frame(now){let dt=Math.min(.035,(now-last)/1000);last=now;time+=dt;if(!video.requestVideoFrameCallback)mediaTime=video.currentTime;
-if(actor.mode==='held'){let wanted=(.045-actor.height)*Math.min(1,dt*12),q=fit(actor.x,actor.y+wanted),lift=q.y-actor.y;actor.height+=lift;actor.y=q.y;drag.offsetY+=lift;drag.last.y+=lift;}
+function frame(now){let dt=Math.min(.035,(now-last)/1000);last=now;time+=dt;relocate();if(!video.requestVideoFrameCallback)mediaTime=video.currentTime;
+if(actor.mode==='held'){let wanted=((env.engine.scene.waterObstacle?.()?0:.045)-actor.height)*Math.min(1,dt*12),q=fit(actor.x,actor.y+wanted),lift=q.y-actor.y;actor.height+=lift;actor.y=q.y;drag.offsetY+=lift;drag.last.y+=lift;}
 if(actor.mode==='air'){actor.vh-=.85*dt;actor.height+=actor.vh*dt;if(actor.height<=0){let strength=Math.min(1.4,Math.max(.45,Math.abs(actor.vh)*2.5));splash(strength);actor.mode='float';actor.height=-.004;actor.vh=-actor.vh*.15;}}
 else if(actor.mode==='float'){actor.vh+=(-actor.height*45-actor.vh*8)*dt;actor.height+=actor.vh*dt;if(actor.target){let dx=actor.target.x-actor.x,dy=actor.target.y-actor.y,d=Math.hypot(dx,dy),step=dt*.038;if(d<=step){actor.x=actor.target.x;actor.y=actor.target.y;actor.target=route.shift()||null;actor.vx=actor.vy=0;if(!actor.target)hint.textContent='拖动鸭子，松手落水';}else{actor.vx=dx/d*.038;actor.vy=dy/d*.038;}}else{actor.vx+=Math.sin(time*.7)*dt*.0003;actor.vy+=Math.cos(time*.9)*dt*.00012;}if(!actor.target){actor.vx*=Math.exp(-dt*2.8);actor.vy*=Math.exp(-dt*2.8);}}
 if(actor.mode!=='held'){let q=fit(actor.x+actor.vx*dt,actor.y+actor.vy*dt);actor.x=q.x;actor.y=q.y;if(Math.abs(actor.vx)>.002){let target=actor.vx>0?.75:-.75;actor.yaw+=(target-actor.yaw)*dt*1.4;}}
@@ -70,8 +88,8 @@ setup(cx);if(!modelReady||!maskReady||hidden)return;colorAtDuck();renderDuck();s
 function setup(c){env.setup(c,W,H);}
 function pointer(e){return env.pointer(e,W,H);}
 function resize(){env.resize();for(let a of [waterLayer,duckLayer])if(a.c.width!==canvas.width||a.c.height!==canvas.height){a.c.width=canvas.width;a.c.height=canvas.height;}}
-function state(){return [actor].map(a=>({x:a.x,y:a.y-(a.mode==='held'?a.height:0)}));}
-function restore(points){drag=null;[actor].forEach((a,i)=>{const p=points?.[i]||a;if(p&&Number.isFinite(p.x)&&Number.isFinite(p.y)){const q=fit(p.x,p.y,{x:.74,y:.845});Object.assign(a,q);}a.height=a.vh=a.vx=a.vy=0;a.mode='float';if(a.route)a.route=[];a.target=null;});}
+function state(){return [actor].map(a=>({x:a.x,y:a.y-(a.mode==='held'?Math.max(0,a.height):0)}));}
+function restore(points){drag=null;[actor].forEach((a,i)=>{const p=points?.[i]||a;if(p&&Number.isFinite(p.x)&&Number.isFinite(p.y)){a.height=0;const q=movement.nearest({x:p.x,y:p.y});Object.assign(a,q);if(Math.hypot(q.x-p.x,q.y-p.y)>.00001)env.changed?.();}a.height=a.vh=a.vx=a.vy=0;a.mode='float';if(a.route)a.route=[];a.target=null;});}
 return {tick(now){video=env.video();resize();videoReady=video?.readyState>=2;const m=env.engine.matte[env.engine.seg];if(matte!==m?.meta){maskTime=-1;matte=m?.meta;sheets=m?.sheets||[];}mediaTime=env.engine.vt>=0?env.engine.vt:video.currentTime;maskReady=!!matte&&sheets.every(i=>i.complete&&i.naturalWidth);if(!videoReady||!maskReady){env.clear();return;};frame(now);},ready:()=>modelReady&&maskReady&&videoReady,state,restore,reset,screen:()=>[screenDuck()],valid,
  suspend(){restore(state());route=[];impacts.length=droplets.length=0;last=performance.now();},dispose(){renderer.dispose();}};
 }

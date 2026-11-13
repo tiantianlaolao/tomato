@@ -75,6 +75,13 @@ window.SCENES.onsen = {
   //    已按各自槽位预调黄昏光）。坐标＝视频画幅归一化（量 _onsen3/base_a.png）。
   // 🔴 整层先画离屏，再按角色通道挖掉水豚（E.matteCut）——樱花漂满池面，不挖就压在水豚身上。
   // 🔴 花瓣漂移只能来回摆（样片是 5 秒的线性漂移，App 常开会漂出池子）。
+  waterObstacle() {
+    if (window.RW?.theme !== 'onsen' || window.RW?.view?.state?.placed?.water_near !== 'float') return null;
+    const [x,y,w] = this._sak?.float || [.73,.866,.22];
+    const h = w * (170/239) * (1088/1920);
+    // Lower part of float.png is the tray; reserve drift, rotation and a small water gap.
+    return {x,y:y+h*.24,rx:w*.5+.010,ry:h*.28+.006};
+  },
   drawGarden(E, cx, toy = null) {
     const S = this, RW = window.RW, rv = RW && RW.view;
     if (!rv || !rv.state || !rv.catalog) return;
@@ -159,7 +166,7 @@ window.SCENES.onsen = {
       const bot = cyp + dy + h * 0.43;
       // Compare water-contact depth, not the centre of the tray artwork.
       const trayDepth = (bot - E.map(0, 0)[1]) / (E.map(0, 1)[1] - E.map(0, 0)[1]);
-      const trayInFront = toy && !toy.lifted && toy.depth < trayDepth;
+      const trayInFront = toy && toy.depth < trayDepth;
       if (!front) {
       c.save(); c.strokeStyle = 'rgba(210,228,224,0.31)'; c.lineCap = 'round';
       const w2 = w * 1.12 / 2, h2 = w * 1.12 * 0.19;
