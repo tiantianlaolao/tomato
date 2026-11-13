@@ -75,7 +75,7 @@ window.SCENES.onsen = {
   //    已按各自槽位预调黄昏光）。坐标＝视频画幅归一化（量 _onsen3/base_a.png）。
   // 🔴 整层先画离屏，再按角色通道挖掉水豚（E.matteCut）——樱花漂满池面，不挖就压在水豚身上。
   // 🔴 花瓣漂移只能来回摆（样片是 5 秒的线性漂移，App 常开会漂出池子）。
-  drawGarden(E, cx) {
+  drawGarden(E, cx, toy = null) {
     const S = this, RW = window.RW, rv = RW && RW.view;
     if (!rv || !rv.state || !rv.catalog) return;
     const DIR = 'assets/p3/onsen/';
@@ -104,7 +104,9 @@ window.SCENES.onsen = {
     if (hasSak) for (let i = 0; i < PN; i++) need.push(img('petal_water_' + i), img('petal_land_' + i));
     if (!need.length || need.some((im) => !im.ok && !im.failed)) return;     // 冷启不许一件件蹦
     const FW = E.map(1, 0)[0] - E.map(0, 0)[0], kk = FW / 1088;                // 素材像素量自 1088 宽画幅
-    const t = performance.now() / 1000;
+    const t = toy ? toy.now : performance.now() / 1000;
+    const front = toy && toy.pass === 'front';
+    if (front && !hasFloat) return;
     const pc = E.hasMatte() ? (S._pc || (S._pc = document.createElement('canvas'))) : null;
     if (pc && (pc.width !== E.W || pc.height !== E.H)) { pc.width = E.W; pc.height = E.H; }
     const c = pc ? pc.getContext('2d') : cx;
@@ -112,7 +114,7 @@ window.SCENES.onsen = {
     const persp = (y) => Math.max(0.45, Math.min(1.15, 0.45 + (y - 0.55) / 0.38 * 0.7));   // 远小近大
     const LAMPX = 0.82;
     // ① 岸上花瓣（静）：躺平＝按地面透视压扁
-    if (hasSak) for (const [x, y, r0, sd] of S._sak.land) {
+    if (!front && hasSak) for (const [x, y, r0, sd] of S._sak.land) {
       const im = img('petal_land_' + (sd % PN)); if (!im.ok) continue;
       const [px, py] = E.map(x, y), k = persp(y) * 1.05 * kk;
       c.save(); c.translate(px, py); c.scale(k, k * 0.5); c.rotate(r0 * Math.PI / 180);
@@ -120,7 +122,7 @@ window.SCENES.onsen = {
     }
     // ② 静物：落影背离灯笼 + 贴地接触线，按底边 y 排序（近的盖远的）
     statics.sort((a, b) => a.at[1] - b.at[1]);
-    for (const s of statics) {
+    for (const s of front ? [] : statics) {
       const im = img(s.id); if (!im.ok) continue;
       const [px, py] = E.map(s.at[0], s.at[1]), w = s.fw * FW, h = w * im.height / im.width;
       const lx = s.at[0] < LAMPX ? -w * 0.2 : w * 0.2;
@@ -138,7 +140,7 @@ window.SCENES.onsen = {
       c.drawImage(im, -w / 2, -h / 2, w, h); c.restore();
     }
     // ③ 水面花瓣（漂）：各自慢漂慢转、不同步；湿的效果已预做进 petal_water_*
-    if (hasSak) for (const [x, y, r0, sd] of S._sak.water) {
+    if (!front && hasSak) for (const [x, y, r0, sd] of S._sak.water) {
       const im = img('petal_water_' + (sd % PN)); if (!im.ok) continue;
       const per = 7 + sd % 6, k = persp(y) * 1.3 * kk;
       const [bx, by] = E.map(x, y);
@@ -155,6 +157,10 @@ window.SCENES.onsen = {
       const [cxp, cyp] = E.map(fx, fy), w = fwid * FW, h = w * im.height / im.width;
       const dx = 3 * kk * Math.sin(2 * Math.PI * t / 9), dy = 1.6 * kk * Math.sin(2 * Math.PI * t / 3.7), rot = 1.1 * Math.sin(2 * Math.PI * t / 5.3);
       const bot = cyp + dy + h * 0.43;
+      // Compare water-contact depth, not the centre of the tray artwork.
+      const trayDepth = (bot - E.map(0, 0)[1]) / (E.map(0, 1)[1] - E.map(0, 0)[1]);
+      const trayInFront = toy && !toy.lifted && toy.depth < trayDepth;
+      if (!front) {
       c.save(); c.strokeStyle = 'rgba(210,228,224,0.31)'; c.lineCap = 'round';
       const w2 = w * 1.12 / 2, h2 = w * 1.12 * 0.19;
       [[200, 250, 2], [275, 330, 3], [25, 70, 2], [115, 160, 3]].forEach(([a0, a1, lw]) => {
@@ -163,10 +169,13 @@ window.SCENES.onsen = {
       });
       c.restore();
       if (rf.ok) c.drawImage(rf, cxp + dx - w / 2, bot - 4 * kk, w, h * 0.45);
+      }
+      if (!toy || !!front === !!trayInFront) {
       c.save(); c.translate(cxp + dx, cyp + dy); c.rotate(rot * Math.PI / 180); c.drawImage(im, -w / 2, -h / 2, w, h); c.restore();
       const g = c.createRadialGradient(cxp, cyp, 0, cxp, cyp, w * 0.75);
       g.addColorStop(0, 'rgba(215,228,232,0.12)'); g.addColorStop(1, 'rgba(215,228,232,0)');
       c.fillStyle = g; c.fillRect(cxp - w, cyp - w, w * 2, w * 2);
+      }
     }
     if (pc) { E.matteCut(c); cx.drawImage(pc, 0, 0); }
   },
@@ -174,7 +183,7 @@ window.SCENES.onsen = {
   // ── 叠加层绘制（9-1 从引擎搬回家：日系=功能上牌+当班牌+天空题字框竖排）──
   drawUI(E, cx, v) {
     const S = this, ph = E.phase, BRUSH = E.brush;
-    S.drawGarden(E, cx);
+    if (!window.WaterToys?.composesGarden?.('onsen')) S.drawGarden(E, cx);
     // 木牌：空闲=功能菜单；运行=当班牌（第几泡/小憩/休止 + 完成刻痕计数）。
     // 🔴 当班牌是纯展示不是按钮——零 UI 原则没破，只是别让牌在过程中空着（8-31 反馈）。
     if (S.board) {

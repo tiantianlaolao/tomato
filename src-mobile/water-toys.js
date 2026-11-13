@@ -4,11 +4,12 @@
 const KEY='capy_water_toys_v1';
 const specs={onsen:{file:'duck',name:'小鸭子',note:'日系温泉泡汤时出现，离池时收起。'},glasshouse:{file:'oranges',name:'双橘子',note:'花房长休泡汤时出现，回房间时收起。'}};
 let saved={};try{const value=JSON.parse(localStorage.getItem(KEY)||'{}');if(value&&typeof value==='object'&&!Array.isArray(value))saved=value;}catch(_){}
-const records={},loading={},errors={};let canvas,engine,active=null,lastTick=0,saveAt=0,suppressClick=0,started=false;
+const records={},loading={},errors={};let canvas,engine,active=null,lastTick=0,saveAt=0,suppressClick=0,started=false,composedGarden=null;
 function pref(id){const p=saved[id];return p&&typeof p==='object'?p:{};}
 function write(){try{localStorage.setItem(KEY,JSON.stringify(saved));return true;}catch(_){return false;}}
 function snapshot(){if(active){const p=pref(active.id);saved[active.id]={enabled:!!p.enabled,points:active.api.state()};write();}}
-function suspend(){if(!active)return;snapshot();const old=active;active=null;old.api.suspend();for(const id of old.pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}old.pointers.clear();engine.root.classList.remove('water-toy-active');clear();}
+function suspend(){if(!active)return;snapshot();const old=active;active=null;old.api.suspend();for(const id of old.pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}old.pointers.clear();engine.root.classList.remove('water-toy-active');clear();gardenOwner(null);}
+function gardenOwner(id){if(composedGarden===id)return;composedGarden=id;engine.draw();}
 function clear(){if(canvas)canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);}
 function dimensions(W,H){const r=canvas.getBoundingClientRect(),k=Math.max(canvas.width/W,canvas.height/H);return{r,k,x:(canvas.width-W*k)/2,y:(canvas.height-H*k)/2};}
 function resize(){const r=engine.root.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,1.5),w=Math.round(r.width*d),h=Math.round(r.height*d);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}}
@@ -23,6 +24,7 @@ async function load(id){
  try{
   const module=await import('./water-toys/'+specs[id].file+'.js');
   const env={canvas,engine,clear,resize,video:()=>engine.cur(),on:(name,fn)=>{(handlers[name]||(handlers[name]=[])).push(fn);},error:e=>{errors[id]=true;console.warn('water toy unavailable',id);},
+   garden(pass,depth,lifted,now){if(id!=='onsen')return;const c=canvas.getContext('2d');c.save();c.setTransform(canvas.width/engine.W,0,0,canvas.height/engine.H,0,0);engine.scene.drawGarden(engine,c,{pass,depth,lifted,now});c.restore();},
    setup(c,W,H){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,c.canvas.width,c.canvas.height);const d=dimensions(W,H);c.setTransform(d.k,0,0,d.k,d.x,d.y);},
    pointer(e,W,H){const d=dimensions(W,H);return{x:((e.clientX-d.r.left)*canvas.width/d.r.width-d.x)/d.k/W,y:((e.clientY-d.r.top)*canvas.height/d.r.height-d.y)/d.k/H};},
    screen(x,y,W,H){const d=dimensions(W,H);return{x:d.r.left+(d.x+x*W*d.k)/canvas.width*d.r.width,y:d.r.top+(d.y+y*H*d.k)/canvas.height*d.r.height};},
@@ -40,7 +42,7 @@ function sync(){
 function frame(now){
  requestAnimationFrame(frame);if(!engine)return;sync();if(!active||now-lastTick<1000/30)return;
  lastTick=now;
- try{active.api.tick(now);}catch(e){errors[active.id]=true;console.warn('water toy rendering unavailable',active.id);suspend();}
+ try{active.api.tick(now);gardenOwner(active.id==='onsen'&&active.api.ready()?'onsen':null);}catch(e){errors[active.id]=true;console.warn('water toy rendering unavailable',active.id);suspend();}
  if(saveAt&&now>=saveAt){saveAt=0;snapshot();}
 }
 function mount(E){
@@ -70,5 +72,5 @@ function garden(body){
  function render(){const holder=document.createElement('div');garden(holder);return holder.firstChild;}
  body.appendChild(section);
 }
-window.WaterToys={mount,garden,debug:()=>({scene:engine?.scene?.id,active:active?.id||null,ready:!!active?.api.ready(),points:active?.api.state(),screen:active?.api.screen(),saved,errors,canvas:[canvas?.width,canvas?.height],lastTick})};
+window.WaterToys={mount,garden,composesGarden:id=>composedGarden===id,debug:()=>({scene:engine?.scene?.id,active:active?.id||null,ready:!!active?.api.ready(),points:active?.api.state(),screen:active?.api.screen(),saved,errors,canvas:[canvas?.width,canvas?.height],lastTick})};
 })();

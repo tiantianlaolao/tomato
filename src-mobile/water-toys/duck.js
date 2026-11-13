@@ -64,7 +64,7 @@ if(actor.mode==='air'){actor.vh-=.85*dt;actor.height+=actor.vh*dt;if(actor.heigh
 else if(actor.mode==='float'){actor.vh+=(-actor.height*45-actor.vh*8)*dt;actor.height+=actor.vh*dt;if(actor.target){let dx=actor.target.x-actor.x,dy=actor.target.y-actor.y,d=Math.hypot(dx,dy),step=dt*.038;if(d<=step){actor.x=actor.target.x;actor.y=actor.target.y;actor.target=route.shift()||null;actor.vx=actor.vy=0;if(!actor.target)hint.textContent='拖动鸭子，松手落水';}else{actor.vx=dx/d*.038;actor.vy=dy/d*.038;}}else{actor.vx+=Math.sin(time*.7)*dt*.0003;actor.vy+=Math.cos(time*.9)*dt*.00012;}if(!actor.target){actor.vx*=Math.exp(-dt*2.8);actor.vy*=Math.exp(-dt*2.8);}}
 if(actor.mode!=='held'){let q=fit(actor.x+actor.vx*dt,actor.y+actor.vy*dt);actor.x=q.x;actor.y=q.y;if(Math.abs(actor.vx)>.002){let target=actor.vx>0?.75:-.75;actor.yaw+=(target-actor.yaw)*dt*1.4;}}
 for(let d of droplets){if(d.life<=0)continue;d.life-=dt;d.vz-=430*dt;d.z+=d.vz*dt;d.x+=d.vx*dt;d.y+=d.vy*dt;}while(droplets.length>60)droplets.shift();
-setup(cx);if(!modelReady||!maskReady||hidden)return;colorAtDuck();renderDuck();setup(waterLayer.x);drawWater(waterLayer.x);cx.setTransform(1,0,0,1,0,0);cx.drawImage(waterLayer.c,0,0);setup(duckLayer.x);drawDuck(duckLayer.x);drawDrops(duckLayer.x);cx.drawImage(duckLayer.c,0,0);
+setup(cx);if(!modelReady||!maskReady||hidden)return;colorAtDuck();renderDuck();setup(waterLayer.x);drawWater(waterLayer.x);cx.setTransform(1,0,0,1,0,0);cx.drawImage(waterLayer.c,0,0);env.garden('back',actor.y,actor.mode==='held'||actor.height>.012,now/1000);setup(duckLayer.x);drawDuck(duckLayer.x);drawDrops(duckLayer.x);cx.drawImage(duckLayer.c,0,0);env.garden('front',actor.y,actor.mode==='held'||actor.height>.012,now/1000);
 }
 
 function setup(c){env.setup(c,W,H);}
