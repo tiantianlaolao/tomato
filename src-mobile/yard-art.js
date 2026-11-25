@@ -1,85 +1,187 @@
-/* All samples, including the clean courtyard used when withdrawing an item,
-   come from playing footage. Default furnished idle is one full-frame take. */
-window.YardArt=(()=>{
- const media=new Map(), masks=new Map();
- const rects={
-  plaque:[.875,.207,.989,.446],bell:[.584,.141,.696,.263],
-  title:[.123,.278,.46,.354],cloth:[.163,.34,.426,.47],
-  shore:[.12,.421,.313,.557],smoke:[.23,.495,.351,.602],
-  tray:[.326,.51,.53,.586],water:[0,.792,1,1],
-  actor:[.202,.601,.832,.822],route:[.185,.472,.861,.83],
- };
- const mint=(w,h)=>Object.assign(document.createElement('canvas'),{width:w,height:h});
- function film(name){
-  if(!media.has(name)){
-   const v=document.createElement('video');v.muted=true;v.defaultMuted=true;v.playsInline=true;v.loop=true;v.preload='auto';
-   AS.setVideoSource(v,'assets/ink-courtyard/'+name+'-loop.mp4',true);media.set(name,v);
+// A shot owns its actor, reflections, wall and water. All furnishings have alpha.
+window.YardArt = (() => {
+  const width = 720, height = 1280;
+  const dir = 'assets/ink-details/';
+  function canvas(w, h) {
+    return Object.assign(document.createElement('canvas'), {width:w, height:h});
   }
-  const v=media.get(name);
-  if(Scene.running && !document.hidden && !Scene.frozen && v.paused && !v.pendingPlay){
-   v.pendingPlay=true;v.play().catch(()=>{}).finally(()=>{v.pendingPlay=false});
-  }else if(Scene.frozen && !v.paused)v.pause();
-  return v
- }
- function pause(){for(const v of media.values())v.pause()}
- // Each replacement retains full motion and uses a soft, stationary join.
- function patch(key,source,c){
-  if(!source||source.readyState<2)return;
-  const [x,y,r,b]=rects[key];
-  if(!masks.has(key)){
-   const w=Math.ceil((r-x)*720),h=Math.ceil((b-y)*1280),mask=mint(w,h),m=mask.getContext('2d');
-   const edge=key==='route'||key==='actor'?20:10;
-   m.filter='blur('+edge/2+'px)';m.fillRect(x===0?-edge:edge,y===0?-edge:edge,w+(x===0?edge:0)+(r===1?edge:0)-(x===0?0:edge)-(r===1?0:edge),h+(b===1?edge:0)-edge-(b===1?0:edge));
-   masks.set(key,{mask,scratch:mint(w,h)})
+  const base = canvas(width,height), previous = canvas(width,height), surface = canvas(width,height);
+  const bg = base.getContext('2d'), prior = previous.getContext('2d'), g = surface.getContext('2d');
+  const swatch = canvas(164,124), fabric = swatch.getContext('2d');
+  const fishLayer = canvas(111,101), fish = fishLayer.getContext('2d');
+  const pages = new Map(), lastFrames = new Map(), prints = new Map();
+  let parts, depth, loading, activeShot, activeVideo, lastTick, elapsed = 0, blendStart;
+
+  function prepare() {
+    if (loading) return;
+    const json = async file => {
+      const response = await fetch(dir + file);
+      if (!response.ok) throw Error(file);
+      return response.json();
+    };
+    loading = Promise.all([json('parts.json'),json('depth.json')])
+      .then(([items,actors]) => { parts = items; depth = actors; })
+      .catch(() => { loading = null; });
   }
-  const {mask,scratch}=masks.get(key),s=scratch.getContext('2d'),w=scratch.width,h=scratch.height;
-  s.globalCompositeOperation='copy';s.drawImage(source,x*source.videoWidth,y*source.videoHeight,(r-x)*source.videoWidth,(b-y)*source.videoHeight,0,0,w,h);
-  s.globalCompositeOperation='destination-in';s.drawImage(mask,0,0);
-  c.drawImage(scratch,x*720,y*1280,(r-x)*720,(b-y)*1280)
- }
- const surface=mint(720,1280),painter=surface.getContext('2d'),prints={};
- function threadwork(id,time){
-  if(!id||id==='t01'||id==='t06')return;
-  if(!prints[id]){const img=new Image();img.src='assets/p3/ink/'+id+'.png';prints[id]=img}
-  const img=prints[id];if(!img.naturalWidth)return;
-  const frames=clothMotion.lotus;if(!frames?.length)return;
-  const q=frames[Math.min(frames.length-1,Math.floor(film('lotus').currentTime*24))],[a,b,c,d]=q;
-  painter.save();painter.beginPath();for(const [x,y] of q)painter.lineTo(x,y);
-  painter.closePath();painter.clip();painter.globalCompositeOperation='multiply';painter.globalAlpha=.58;
-  for(let i=0;i<20;i++){
-   const u=i/20,top=[a[0]+u*(b[0]-a[0]),a[1]+u*(b[1]-a[1])],base=[d[0]+u*(c[0]-d[0]),d[1]+u*(c[1]-d[1])];
-   painter.save();painter.transform((b[0]-a[0])/20,(b[1]-a[1])/20,base[0]-top[0],base[1]-top[1],...top);
-   painter.drawImage(img,(.2+.57*u)*img.width,.12*img.height,.57*img.width/20,.76*img.height,0,0,1.02,1);painter.restore()
-  }painter.restore()
- }
- function render(engine,ctx,phase,state){
-  const p=state?.placed||{},water=p.water_near,native=water==='koi'||(!water&&p.floor_mid==='teatray')?'koi':'lotus';
-  const room=film(native),clean=engine.cur(),ready=v=>v?.readyState>=2;
-  if(!ready(room))return;
-  painter.drawImage(room,0,0,720,1280);
-  if(phase!=='idle'||!p.wall)patch('title',clean,painter);
-  if(!p.willow)patch('bell',clean,painter);
-  if(!p.pool_edge)patch('smoke',clean,painter);
-  if(!p.lamp_side)patch('shore',clean,painter);
-  else if((p.lamp_side==='orchid')!==(native==='lotus'))patch('shore',film(native==='lotus'?'koi':'lotus'),painter);
-  if(native==='koi'&&!p.floor_mid)patch('tray',clean,painter);
-  if(native==='lotus'&&p.floor_mid==='teatray')patch('tray',film('koi'),painter);
-  if(!state?.hung)patch('cloth',clean,painter);
-  else if((state.hung==='t06')!==(native==='koi'))patch('cloth',film(native==='lotus'?'koi':'lotus'),painter);
-  if(state?.hung)threadwork(state.hung,room.currentTime);
-  if(state?.guest_towel){
-   painter.save();painter.translate(204,280);painter.scale(.52,.52);painter.translate(-125,-441);
-   patch('cloth',film(state.guest_towel==='t06'?'koi':'lotus'),painter);threadwork(state.guest_towel,room.currentTime);painter.restore()
+  function page(file) {
+    let im = pages.get(file);
+    if (im) pages.delete(file);
+    else { im = new Image(); im.src = dir + file; }
+    pages.set(file,im);
+    if (pages.size > 28) pages.delete(pages.keys().next().value);
+    return im;
   }
-  if(!water)patch('water',clean,painter);
-  if(phase!=='idle'&&ready(clean)){
-   const bath=['loop_soak','loop_work','loop_urge'].includes(engine.seg);
-   patch(bath?'actor':'route',clean,painter)
+  function frame(name) {
+    const def = parts?.[name];
+    if (!def) return;
+    const i = Math.floor(elapsed * def.fps) % def.count, j = i % def.per;
+    const sheet = Math.floor(i / def.per), im = page(def.pages[sheet]);
+    if (def.pages.length > 1 && (j >= def.per - 5 || i >= def.count - 5)) {
+      page(def.pages[(sheet + 1) % def.pages.length]);
+    }
+    if (!im.complete || !im.naturalWidth) return lastFrames.get(name);
+    const [w,h] = def.size, [x,y] = def.positions?.[i] || def.box;
+    const result = {im,sx:(j%def.columns)*w,sy:Math.floor(j/def.columns)*h,w,h,x,y,def};
+    lastFrames.set(name,result);
+    return result;
   }
-  const [x,y]=engine.map(0,0),[r,b]=engine.map(1,1);
-  ctx.drawImage(surface,x,y,r-x,b-y);
-  const dim=engine.scene.dim[phase]||0;if(dim){ctx.fillStyle='rgba(8,6,4,'+dim+')';ctx.fillRect(x,y,r-x,b-y)}
-  window.yardMotion={name:native,time:room.currentTime,surface}
- }
- render.pause=pause;return render;
+  function paint(c,s,x=s.x,y=s.y) {
+    c.drawImage(s.im,s.sx,s.sy,s.w,s.h,x,y,s.w,s.h);
+  }
+  function shadow(s) {
+    if (!s.def.shadow) return;
+    const [dx,dy,blur,a] = s.def.shadow;
+    g.shadowColor = 'rgba(39,27,25,'+a+')';
+    g.shadowOffsetX = dx; g.shadowOffsetY = dy; g.shadowBlur = blur;
+  }
+  function prop(name) {
+    const s = frame(name);
+    if (!s) return;
+    g.save(); shadow(s); paint(g,s); g.restore();
+  }
+  function towel(id,guest) {
+    if (!id) return;
+    const indigo = id === 't06', s = frame(indigo ? 'indigo' : 'ivory');
+    if (!s) return;
+    fabric.clearRect(0,0,s.w,s.h);
+    paint(fabric,s,0,0);
+    if (id !== 't01' && !indigo) {
+      if (!prints.has(id)) {
+        const im = new Image(); im.src = 'assets/p3/ink/'+id+'.png'; prints.set(id,im);
+      }
+      const im = prints.get(id), track = clothMotion.lotus;
+      if (im.naturalWidth && track?.length) {
+        const [a,b,c,d] = track[Math.floor(elapsed*24)%track.length];
+        fabric.save(); fabric.translate(-s.x,-s.y);
+        fabric.globalCompositeOperation='source-atop'; fabric.globalAlpha=.45;
+        for(let n=0;n<16;n++) {
+          const u=n/16, x=a[0]+(b[0]-a[0])*u, y=a[1]+(b[1]-a[1])*u;
+          fabric.save();
+          fabric.transform((b[0]-a[0])/16,(b[1]-a[1])/16,d[0]+(c[0]-d[0])*u-x,d[1]+(c[1]-d[1])*u-y,x,y);
+          fabric.drawImage(im,(.20+.57*u)*im.width,.12*im.height,.57*im.width/16,.76*im.height,0,0,1.02,1);
+          fabric.restore();
+        }
+        fabric.restore();
+      }
+    }
+    g.save();
+    if (guest) { g.translate(204,280); g.scale(.52,.52); g.translate(-125,-441); }
+    shadow(s); g.drawImage(swatch,s.x,s.y); g.restore();
+  }
+  function lotus() {
+    const s=frame('lotus');
+    if (s) {
+      // The broken reflection contains only reflected petals. Gaps show the live shot.
+      g.save();
+      for(let n=0;n<31;n+=2) {
+        g.globalAlpha=.25*(1-n/31);
+        g.drawImage(s.im,s.sx+13,s.sy+74-n,98,2, s.x+13+2*Math.sin(elapsed*2.2+n*.42),1174+n,98,1.5);
+      }
+      g.restore();
+    }
+    prop('leaves'); prop('lotus');
+  }
+  function school() {
+    for(const name of ['fish0','fish1']) {
+      const s=frame(name); if(!s) continue;
+      fish.clearRect(0,0,s.w,s.h); paint(fish,s,0,0);
+      fish.save(); fish.globalCompositeOperation='source-atop'; fish.globalAlpha=.17;
+      fish.drawImage(base,s.x,s.y,s.w,s.h,0,0,s.w,s.h);
+      fish.restore(); g.drawImage(fishLayer,s.x,s.y);
+    }
+  }
+  function incense() {
+    prop('censer'); g.save();
+    for(let i=0;i<16;i++) {
+      const t=(elapsed*.32+i/16)%1, x=204+6*Math.sin(t*7-elapsed*.66)+12*t*t;
+      const y=710-64*t, r=1.1+4*t, a=.085*Math.sin(Math.PI*t);
+      const cloud=g.createRadialGradient(x,y,0,x,y,r);
+      cloud.addColorStop(0,'rgba(219,208,190,'+a+')');cloud.addColorStop(1,'rgba(219,208,190,0)');
+      g.fillStyle=cloud;g.fillRect(x-r,y-r,r*2,r*2);
+    }
+    g.restore();
+  }
+  function clippedTray(seg,time) {
+    const track=depth?.[seg];
+    const outline=track?.frames[Math.min(track.frames.length-1,Math.floor(time*track.fps))];
+    g.save();
+    if (outline?.length) {
+      g.beginPath();g.rect(0,0,width,height);
+      for(const path of outline) {
+        g.moveTo(path[0],path[1]);
+        for(let i=2;i<path.length;i+=2) g.lineTo(path[i],path[i+1]);
+        g.closePath();
+      }
+      g.clip('evenodd');
+    }
+    // Place the tray inside the clear paving left of the animal's approach.
+    g.translate(-22,-15);prop('tray');g.restore();
+  }
+  let lastMediaTime=0, hasBase=false;
+  function render(engine,ctx,phase,state) {
+    prepare();
+    const now=performance.now(), video=engine.cur();
+    if(engine.running && !engine.frozen && !document.hidden && lastTick!=null) elapsed+=Math.min(.1,(now-lastTick)/1000);
+    lastTick=now;
+    if(video?.readyState>=2 && !video.seeking) {
+      if(activeShot!==engine.seg || video!==activeVideo) {
+        if(hasBase) { prior.drawImage(base,0,0); blendStart=now; }
+        activeShot=engine.seg; activeVideo=video;
+      }
+      lastMediaTime=video.currentTime;
+      bg.drawImage(video,0,0,width,height);
+      if(blendStart!=null) {
+        const t=Math.min(1,(now-blendStart)/200);
+        if(t<1) { bg.globalAlpha=1-t*t*(3-2*t); bg.drawImage(previous,0,0); bg.globalAlpha=1; }
+        else blendStart=null;
+      }
+      hasBase=true;
+    }
+    if(!hasBase) return;
+    g.drawImage(base,0,0);
+    const p=state?.placed||{};
+    prop('plaque');
+    if (phase==='idle' && p.wall) prop('title');
+    if (p.willow) prop('bell');
+    towel(state?.hung,false); towel(state?.guest_towel,true);
+    if (p.lamp_side==='orchid' || p.lamp_side==='stool') prop(p.lamp_side);
+    if (p.pool_edge) incense();
+    if (p.floor_mid==='teatray') clippedTray(activeShot,lastMediaTime);
+    if (p.water_near==='lotus') lotus();
+    if (p.water_near==='koi') school();
+    const [x,y]=engine.map(0,0),[r,b]=engine.map(1,1);
+    ctx.drawImage(surface,x,y,r-x,b-y);
+    const dim=engine.scene.dim[phase]||0;
+    if(dim){ctx.fillStyle='rgba(8,6,4,'+dim+')';ctx.fillRect(x,y,r-x,b-y);}
+    window.yardMotion={name:p.water_near||'empty',time:elapsed,surface};
+  }
+  render.pause=()=>{
+    lastTick=null;
+    if(window.Scene?.scene?.id!=='ink') {
+      hasBase=false;
+      activeShot=activeVideo=blendStart=null;
+      lastFrames.clear();
+    }
+  };
+  return render;
 })();
