@@ -66,7 +66,8 @@ window.AS = {
   // 角色通道（9-3）：<base>/matte/<seg>.json + <seg>_<k>.webp，与视频同版本同目录（_design/video/_cmp/_matte.py 产）。
   // 有缓存给 blob，没缓存直接走服务器；ensure() 在视频之后顺手缓进 IDB。
   matteUrl(file, assets = cur) {
-    if (!assets || assets.bundled) return null;
+    if (!assets || (assets.bundled && !assets.mattes)) return null;
+    if (assets.bundled) return assets.dir + '/matte/' + file;
     if (DEV) return assets.dir + '/matte/' + file;
     return map[assets.base + '/matte/' + file] || HOST + assets.base + '/matte/' + file;
   },

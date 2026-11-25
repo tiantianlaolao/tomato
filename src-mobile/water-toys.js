@@ -11,7 +11,7 @@ function snapshot(){if(active){const p=pref(active.id);saved[active.id]={enabled
 function suspend(){if(!active)return;snapshot();const old=active;active=null;old.api.suspend();for(const id of old.pointers){if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}old.pointers.clear();engine.root.classList.remove('water-toy-active');clear();gardenOwner(null);}
 function gardenOwner(id){if(composedGarden===id)return;composedGarden=id;engine.draw();}
 function clear(){if(canvas)canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height);}
-function dimensions(W,H){const r=canvas.getBoundingClientRect(),k=Math.max(canvas.width/W,canvas.height/H);return{r,k,x:(canvas.width-W*k)/2,y:(canvas.height-H*k)/2};}
+function dimensions(W,H){const r=canvas.getBoundingClientRect(),k=(engine.scene.fit==='contain'?Math.min:Math.max)(canvas.width/W,canvas.height/H);return{r,k,x:(canvas.width-W*k)/2,y:(canvas.height-H*k)/2};}
 function resize(){const r=engine.root.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,1.5),w=Math.round(r.width*d),h=Math.round(r.height*d);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;}}
 function allowed(id){
  if(document.hidden||document.body.classList.contains('sheeton')||engine.frozen||!engine.running||!engine.ready||engine.fog?.classList.contains('on')||engine.motionState?.moving)return false;

@@ -31,10 +31,10 @@ window.YardArt = (() => {
     if (pages.size > 28) pages.delete(pages.keys().next().value);
     return im;
   }
-  function frame(name) {
+  function frame(name, time=elapsed) {
     const def = parts?.[name];
     if (!def) return;
-    const i = Math.floor(elapsed * def.fps) % def.count, j = i % def.per;
+    const i = Math.floor(time * def.fps) % def.count, j = i % def.per;
     const sheet = Math.floor(i / def.per), im = page(def.pages[sheet]);
     if (def.pages.length > 1 && (j >= def.per - 5 || i >= def.count - 5)) {
       page(def.pages[(sheet + 1) % def.pages.length]);
@@ -59,19 +59,19 @@ window.YardArt = (() => {
     if (!s) return;
     g.save(); shadow(s); paint(g,s); g.restore();
   }
-  function towel(id,guest) {
+  function cloth(id,time,theme) {
     if (!id) return;
-    const indigo = id === 't06', s = frame(indigo ? 'indigo' : 'ivory');
+    const indigo = id === 't06', s = frame(indigo ? 'indigo' : 'ivory',time);
     if (!s) return;
     fabric.clearRect(0,0,s.w,s.h);
     paint(fabric,s,0,0);
-    if (id !== 't01' && !indigo) {
+    if (id !== 't01' && id !== 'ot_white' && !indigo) {
       if (!prints.has(id)) {
-        const im = new Image(); im.src = 'assets/p3/ink/'+id+'.png'; prints.set(id,im);
+        const im = new Image(); im.src = 'assets/p3/'+theme+'/'+id+'.png'; prints.set(id,im);
       }
       const im = prints.get(id), track = clothMotion.lotus;
       if (im.naturalWidth && track?.length) {
-        const [a,b,c,d] = track[Math.floor(elapsed*24)%track.length];
+        const [a,b,c,d] = track[Math.floor(time*24)%track.length];
         fabric.save(); fabric.translate(-s.x,-s.y);
         fabric.globalCompositeOperation='source-atop'; fabric.globalAlpha=.45;
         for(let n=0;n<16;n++) {
@@ -84,6 +84,10 @@ window.YardArt = (() => {
         fabric.restore();
       }
     }
+    return s;
+  }
+  function towel(id,guest) {
+    const s=cloth(id,elapsed,'ink'); if(!s)return;
     g.save();
     if (guest) { g.translate(204,280); g.scale(.52,.52); g.translate(-125,-441); }
     shadow(s); g.drawImage(swatch,s.x,s.y); g.restore();
@@ -165,6 +169,17 @@ window.YardArt = (() => {
     if(dim){ctx.fillStyle='rgba(8,6,4,'+dim+')';ctx.fillRect(x,y,r-x,b-y);}
     window.yardMotion={name:p.water_near||'empty',time:elapsed,surface};
   }
+  render.drawOnsenCloth=(ctx,id,time,pinX,pinY,scale)=>{
+    prepare();
+    const s=cloth(id,time,'onsen'); if(!s)return;
+    // Omit the projecting rod ends. The new shot already contains its own fixed rail.
+    fabric.clearRect(0,0,59,30); fabric.clearRect(118,0,46,30);
+    ctx.save();ctx.translate(pinX,pinY);ctx.scale(scale,scale);
+    ctx.filter='brightness(.83) saturate(.78)';
+    ctx.shadowColor='rgba(14,20,30,.40)';ctx.shadowBlur=2.3*scale;
+    ctx.shadowOffsetX=-1.6*scale;ctx.shadowOffsetY=2*scale;
+    ctx.drawImage(swatch,-86,-15);ctx.restore();
+  };
   render.pause=()=>{
     lastTick=null;
     if(window.Scene?.scene?.id!=='ink') {

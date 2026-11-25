@@ -5,22 +5,29 @@ import {mergeGeometries} from './vendor/utils/BufferGeometryUtils.js';
 
 // Adapted from the accepted onsen v5; original rendering retained.
 export function create(env){
-const W=1088,H=1920,canvas=env.canvas,cx=canvas.getContext('2d'),hint={textContent:''};let video=env.video();
+const W=1080,H=1920,canvas=env.canvas,cx=canvas.getContext('2d'),hint={textContent:''};let video=env.video();
 const layer=()=>{let c=document.createElement('canvas');return{c,x:c.getContext('2d')};};
 const waterLayer=layer(),duckLayer=layer(),waterPatch=layer(),sourcePatch=layer(),duckSprite=layer();duckSprite.c.width=duckSprite.c.height=192;
 waterPatch.c.width=sourcePatch.c.width=320;waterPatch.c.height=sourcePatch.c.height=128;
 let crop=0,cropH=H,close=false,hidden=false,time=0,last=performance.now(),mediaTime=0,duck,matte,sheets=[],videoReady=false,modelReady=false,maskReady=false,drag=null;
 const actor={x:.74,y:.845,height:0,vh:0,vx:0,vy:0,mode:'float',yaw:.60,target:null,splashes:0};
-let route=[];const bodyMask=layer(),bodyColor=layer();let maskTime=-1;const impacts=[],droplets=[];let waterColor=[71,108,109],lastColorAt=-1;
+let route=[];const impacts=[],droplets=[];let waterColor=[71,108,109],lastColorAt=-1;
 const sample=document.createElement('canvas');sample.width=sample.height=8;const sc=sample.getContext('2d',{willReadFrequently:true});
 const renderer=new T.WebGLRenderer({alpha:true,antialias:true,preserveDrawingBuffer:true});renderer.setSize(192,192);renderer.setPixelRatio(1);renderer.outputColorSpace=T.SRGBColorSpace;renderer.toneMapping=T.ACESFilmicToneMapping;renderer.toneMappingExposure=.82;renderer.localClippingEnabled=true;
 const scene=new T.Scene(),camera=new T.OrthographicCamera(-.57,.57,.77,-.37,.1,20);camera.position.set(1.5,1.25,4);camera.lookAt(0,.22,0);
 scene.add(new T.HemisphereLight('#a7bfd0','#354848',1.8));const moon=new T.DirectionalLight('#b7c7d8',1.8);moon.position.set(-3,5,3);scene.add(moon);const lamp=new T.DirectionalLight('#ffbd72',1.3);lamp.position.set(3,2,2);scene.add(lamp);
 const clip=new T.Plane(new T.Vector3(0,1,0),-.015);
 const waterPath=new Path2D();const p=(x,y)=>[x*W,y*H];
-waterPath.moveTo(...p(.008,.706));waterPath.bezierCurveTo(...p(.015,.678),...p(.11,.66),...p(.25,.656));waterPath.bezierCurveTo(...p(.45,.648),...p(.72,.657),...p(.88,.699));waterPath.bezierCurveTo(...p(1.005,.735),...p(1.012,.807),...p(.93,.871));waterPath.bezierCurveTo(...p(.88,.922),...p(.65,.954),...p(.45,.968));waterPath.bezierCurveTo(...p(.36,.968),...p(.38,.89),...p(.26,.863));waterPath.bezierCurveTo(...p(.21,.845),...p(.14,.835),...p(.07,.827));waterPath.bezierCurveTo(...p(.00,.803),...p(-.03,.747),...p(.008,.706));waterPath.closePath();
+// Outline of the spring, in the same coordinates as the redesigned plate.
+const shoreline=[[0,.593],[.19,.581],[.42,.587],[.62,.603],[.89,.617],[1,.635],
+ [1,.902],[.84,.919],[.65,.933],[.46,.936],[.23,.919],[.21,.887],[.19,.848],
+ [.13,.808],[.075,.787],[0,.782]];
+for(const [i,[x,y]] of shoreline.entries()) {
+ if(i===0) waterPath.moveTo(...p(x,y)); else waterPath.lineTo(...p(x,y));
+}
+waterPath.closePath();
 const poolTest=document.createElement('canvas').getContext('2d');
-function valid(x,y){if(!env.inView(x,y,W,H,90))return false;if(x<.04||x>.96||y<.66||y>.96)return false;for(let [dx,dy] of [[0,0],[.037,0],[-.037,0],[0,.016],[0,-.014]])if(!poolTest.isPointInPath(waterPath,(x+dx)*W,(y+dy)*H))return false;return !blocked(x,y);}
+function valid(x,y){if(!env.inView(x,y,W,H,90))return false;if(x<.04||x>.96||y<.58||y>.94)return false;for(let [dx,dy] of [[0,0],[.037,0],[-.037,0],[0,.016],[0,-.014]])if(!poolTest.isPointInPath(waterPath,(x+dx)*W,(y+dy)*H))return false;return !blocked(x,y);}
 // The tray's water footprint includes its whole bobbing range and duck clearance.
 // Placement is read live; taking the tray away immediately restores this water.
 function blocked(x,y){
@@ -42,22 +49,25 @@ function relocate(){
 function perspective(y){return Math.max(.65,Math.min(1.15,.64+(y-.68)*2.0));}
 function pose(){const size=actor.mode==='held'?drag.size:178*perspective(actor.y),bob=actor.mode==='held'?drag.bob:Math.sin(time*2.0)*1.7;return{x:actor.x*W,y:actor.y*H,bob,size,lift:actor.height*H};}
 function matteFrame(){if(!matte)return null;let idx=Math.min(matte.frames.length-1,Math.max(0,Math.round(mediaTime*matte.fps))),f=matte.frames[idx];if(!f)return null;let im=sheets[f[0]];if(!im?.complete)return null;return{im,sx:f[1]%matte.cols*matte.cell[0],sy:Math.floor(f[1]/matte.cols)*matte.cell[1],sw:f[4],sh:f[5],x:f[2]*matte.scale,y:f[3]*matte.scale,w:f[4]*matte.scale,h:f[5]*matte.scale};}
-function cutCapy(c){let f=matteFrame();if(!f||!videoReady)return;
-if(maskTime!==mediaTime){maskTime=mediaTime;bodyMask.c.width=bodyColor.c.width=f.sw;bodyMask.c.height=bodyColor.c.height=f.sh;
-bodyColor.x.drawImage(video,f.x,f.y,f.w,f.h,0,0,f.sw,f.sh);let d=bodyColor.x.getImageData(0,0,f.sw,f.sh);
-for(let i=0;i<d.data.length;i+=4){let r=d.data[i],g=d.data[i+1],b=d.data[i+2];d.data[i+3]=Math.round(255*Math.max(0,Math.min(1,(r-Math.max(g,b)-8)/14)));}
-bodyColor.x.putImageData(d,0,0);bodyMask.x.drawImage(f.im,f.sx,f.sy,f.sw,f.sh,0,0,f.sw,f.sh);bodyMask.x.globalCompositeOperation='destination-in';bodyMask.x.drawImage(bodyColor.c,0,0);bodyMask.x.globalCompositeOperation='source-over';}
-c.save();c.globalCompositeOperation='destination-out';c.drawImage(bodyMask.c,f.x,f.y,f.w,f.h);c.restore();}
+function cutCapy(c){
+ const f=matteFrame();if(!f)return;
+ c.save();c.globalCompositeOperation='destination-out';
+ c.drawImage(f.im,f.sx,f.sy,f.sw,f.sh,f.x,f.y,f.w,f.h);c.restore();
+}
+// Sampling coordinates refer to the virtual duck stage, independently of the video codec size.
+function sampleVideo(c,x,y,w,h,dw,dh){
+ c.drawImage(video,x*video.videoWidth/W,y*video.videoHeight/H,w*video.videoWidth/W,h*video.videoHeight/H,0,0,dw,dh);
+}
 function clipWater(c){c.save();c.globalCompositeOperation='destination-in';c.fillStyle='#fff';c.fill(waterPath);c.restore();cutCapy(c);}
 function oldSetup(c){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,canvas.width,canvas.height);c.setTransform(canvas.width/W,0,0,canvas.height/cropH,0,-crop*canvas.height/cropH);}
 function merge(group){group.updateWorldMatrix(true,true);let inv=group.matrixWorld.clone().invert(),by=new Map(),remove=[];group.traverse(m=>{if(!m.isMesh)return;let id=m.material.uuid;if(!by.has(id))by.set(id,{material:m.material,geos:[]});let g=m.geometry.index?m.geometry.toNonIndexed():m.geometry.clone();g.applyMatrix4(new T.Matrix4().multiplyMatrices(inv,m.matrixWorld));for(let k of Object.keys(g.attributes))if(!['position','normal'].includes(k))g.deleteAttribute(k);by.get(id).geos.push(g);remove.push(m);});for(let m of remove)m.removeFromParent();for(let {material,geos} of by.values()){group.add(new T.Mesh(mergeGeometries(geos,false),material));for(let g of geos)g.dispose();}}
 new GLTFLoader().load(new URL('./duck-model.glb',import.meta.url).href,g=>{duck=g.scene.getObjectByName('DUCK');merge(duck);duck.removeFromParent();duck.position.set(0,0,0);duck.rotation.set(0,.6,0);let used=new Set();duck.traverse(m=>{if(!m.isMesh)return;m.material=m.material.clone();m.material.color.convertSRGBToLinear();m.material.roughness=.90;m.material.metalness=0;m.material.clippingPlanes=[clip];used.add(m.material);});scene.add(duck);g.scene.traverse(m=>{if(m.isMesh){m.geometry.dispose();if(!used.has(m.material))m.material.dispose();}});modelReady=true;},undefined,env.error);
-function colorAtDuck(){if(!videoReady||time-lastColorAt<.5)return;lastColorAt=time;let f=matteFrame(),px=actor.x*W,py=actor.y*H+6;if(f&&px>f.x&&px<f.x+f.w&&py>f.y&&py<f.y+f.h)return;sc.drawImage(video,px-12,py,24,18,0,0,8,8);let d=sc.getImageData(0,0,8,8).data,r=0,g=0,b=0;for(let i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2];}waterColor=[r/64,g/64,b/64].map(Math.round);}
+function colorAtDuck(){if(!videoReady||time-lastColorAt<.5)return;lastColorAt=time;let f=matteFrame(),px=actor.x*W,py=actor.y*H+6;if(f&&px>f.x&&px<f.x+f.w&&py>f.y&&py<f.y+f.h)return;sampleVideo(sc,px-12,py,24,18,8,8);let d=sc.getImageData(0,0,8,8).data,r=0,g=0,b=0;for(let i=0;i<d.length;i+=4){r+=d[i];g+=d[i+1];b+=d[i+2];}waterColor=[r/64,g/64,b/64].map(Math.round);}
 function splash(strength){actor.splashes++;impacts.push({x:actor.x,y:actor.y,t:time,strength});if(impacts.length>8)impacts.shift();for(let i=0;i<12+strength*9;i++){let a=Math.random()*Math.PI*2;droplets.push({x:actor.x*W,y:actor.y*H,z:0,vx:Math.cos(a)*(25+Math.random()*90),vy:Math.sin(a)*(8+Math.random()*28),vz:85+Math.random()*110*strength,life:.45+Math.random()*.30});}hint.textContent='拖动鸭子，松手落水';}
 function drop(x=.73,y=.84){let q=fit(x,y);Object.assign(actor,q,{height:.105,vh:-.015,vx:.035,vy:-.015,mode:'air',target:null});}
 function ring(c,x,y,rx,ry,alpha,width=1.4,phase=0){c.save();c.strokeStyle=`rgba(190,215,205,${alpha})`;c.lineWidth=width;c.lineCap='round';for(let i=0;i<4;i++){let a=i*Math.PI*.5+.15+phase;c.beginPath();c.ellipse(x,y,rx,ry,0,a,a+.97);c.stroke();}c.restore();}
 function warpWater(c){if(!videoReady)return;let {x,y,size}=pose(),width=size*1.7,height=size*.48;let f=matteFrame();if(f&&x+width/2>f.x&&x-width/2<f.x+f.w&&y+height/2>f.y&&y-height/2<f.y+f.h)return;
-sourcePatch.x.clearRect(0,0,320,128);sourcePatch.x.drawImage(video,x-width/2,y-height/2,width,height,0,0,320,128);waterPatch.x.clearRect(0,0,320,128);
+sourcePatch.x.clearRect(0,0,320,128);sampleVideo(sourcePatch.x,x-width/2,y-height/2,width,height,320,128);waterPatch.x.clearRect(0,0,320,128);
 for(let row=0;row<128;row+=4){let taper=Math.sin(row/128*Math.PI);let dx=Math.sin(row*.20-time*2.4)*1.0*taper;for(let i of impacts){let age=time-i.t;if(age<2.4)dx+=Math.sin(row*.24-age*10)*Math.exp(-age)*2*i.strength*taper;}waterPatch.x.drawImage(sourcePatch.c,0,row,320,4,dx,row,320,4);}
 waterPatch.x.save();waterPatch.x.globalCompositeOperation='destination-in';waterPatch.x.translate(160,64);waterPatch.x.scale(1,.4);let grad=waterPatch.x.createRadialGradient(0,0,28,0,0,156);grad.addColorStop(0,'#fff');grad.addColorStop(.60,'rgba(255,255,255,.75)');grad.addColorStop(1,'rgba(255,255,255,0)');waterPatch.x.fillStyle=grad;waterPatch.x.fillRect(-160,-160,320,320);waterPatch.x.restore();c.drawImage(waterPatch.c,x-width/2,y-height/2,width,height);
 }
@@ -90,6 +100,6 @@ function pointer(e){return env.pointer(e,W,H);}
 function resize(){env.resize();for(let a of [waterLayer,duckLayer])if(a.c.width!==canvas.width||a.c.height!==canvas.height){a.c.width=canvas.width;a.c.height=canvas.height;}}
 function state(){return [actor].map(a=>({x:a.x,y:a.y-(a.mode==='held'?Math.max(0,a.height):0)}));}
 function restore(points){drag=null;[actor].forEach((a,i)=>{const p=points?.[i]||a;if(p&&Number.isFinite(p.x)&&Number.isFinite(p.y)){a.height=0;const q=movement.nearest({x:p.x,y:p.y});Object.assign(a,q);if(Math.hypot(q.x-p.x,q.y-p.y)>.00001)env.changed?.();}a.height=a.vh=a.vx=a.vy=0;a.mode='float';if(a.route)a.route=[];a.target=null;});}
-return {tick(now){video=env.video();resize();videoReady=video?.readyState>=2;const m=env.engine.matte[env.engine.seg];if(matte!==m?.meta){maskTime=-1;matte=m?.meta;sheets=m?.sheets||[];}mediaTime=env.engine.vt>=0?env.engine.vt:video.currentTime;maskReady=!!matte&&sheets.every(i=>i.complete&&i.naturalWidth);if(!videoReady||!maskReady){env.clear();return;};frame(now);},ready:()=>modelReady&&maskReady&&videoReady,state,restore,reset,screen:()=>[screenDuck()],valid,
+return {tick(now){video=env.video();resize();videoReady=video?.readyState>=2;const m=env.engine.matte[env.engine.seg];if(matte!==m?.meta){matte=m?.meta;sheets=m?.sheets||[];}mediaTime=env.engine.vt>=0?env.engine.vt:video.currentTime;maskReady=!!matte&&sheets.every(i=>i.complete&&i.naturalWidth);if(!videoReady||!maskReady){env.clear();return;};frame(now);},ready:()=>modelReady&&maskReady&&videoReady,state,restore,reset,screen:()=>[screenDuck()],valid,
  suspend(){restore(state());route=[];impacts.length=droplets.length=0;last=performance.now();},dispose(){renderer.dispose();}};
 }

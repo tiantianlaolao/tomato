@@ -37,6 +37,7 @@ const Scene = {
     if (window.AS && s.assets) AS.configure(s.assets);
     if (s.assets) this.matteLoad(s.assets.names); else this.matte = {};
     const poster = s.poster || 'assets/poster_cn.webp';
+    this.root.style.setProperty('--scene-poster', 'url("' + poster + '")');
     if (this.vids) for (const el of this.vids) el.poster = poster;
     // 海报层：视频还没喂/还没出帧时舞台就是它（不然是 #stage 的深色底）；换了海报就重新等它 load
     if (this.poster && this.poster.getAttribute('src') !== poster) { this.ready = false; this.poster.src = poster; }
@@ -136,7 +137,7 @@ const Scene = {
     return (S.pixelOverlay && S.pixelOverlay(this.seg)) || (this.hasMatte() && (this.seg === S.swimOut || this.seg === S.swimIn));
   },
   coverRect(el) {
-    const vw = el.videoWidth || 1088, vh = el.videoHeight || 1920, s = Math.max(this.W / vw, this.H / vh);
+    const vw = el.videoWidth || 1088, vh = el.videoHeight || 1920, s = (this.scene.fit === 'contain' ? Math.min : Math.max)(this.W / vw, this.H / vh);
     return [(this.W - vw * s) / 2, (this.H - vh * s) / 2, vw * s, vh * s];
   },
   drawVideo(cx) {
@@ -160,7 +161,7 @@ const Scene = {
     const [cw, ch] = m.meta.cell, cols = m.meta.cols, sc = m.meta.scale;
     // 🔴 遮罩坐标是**视频**像素系（1088×1920），不是母版画幅（1152×2048）——按视频自己的 cover 变换映射，
     //    否则整块往左上偏 3%（9-3 红色叠层一眼看出来）
-    const vw = m.meta.w || 1088, vh = m.meta.h || 1920, s = Math.max(this.W / vw, this.H / vh);
+    const vw = m.meta.w || 1088, vh = m.meta.h || 1920, s = (this.scene.fit === 'contain' ? Math.min : Math.max)(this.W / vw, this.H / vh);
     const ox = (this.W - vw * s) / 2, oy = (this.H - vh * s) / 2;
     return { img, sx: (f[1] % cols) * cw, sy: Math.floor(f[1] / cols) * ch, sw: f[4], sh: f[5],
              x: ox + f[2] * sc * s, y: oy + f[3] * sc * s, w: f[4] * sc * s, h: f[5] * sc * s };
