@@ -46,7 +46,7 @@ function frame(now){
  if(saveAt&&now>=saveAt){saveAt=0;snapshot();}
 }
 function mount(E){
- if(started)return;started=true;engine=E;canvas=document.createElement('canvas');canvas.id='waterToyCanvas';canvas.setAttribute('aria-hidden','true');engine.root.insertBefore(canvas,engine.cv);resize();
+ if(started)return;started=true;engine=E;InkWaterToys.mount(E);canvas=document.createElement('canvas');canvas.id='waterToyCanvas';canvas.setAttribute('aria-hidden','true');engine.root.insertBefore(canvas,engine.cv);resize();
  for(const name of ['pointerdown','pointermove','pointerup','pointercancel','lostpointercapture'])engine.root.addEventListener(name,e=>{
   sync();if(!active)return;const record=active,captured=record.pointers.has(e.pointerId);
   if(!captured&&!record.api.ready())return;
@@ -59,6 +59,7 @@ function mount(E){
  requestAnimationFrame(frame);
 }
 function garden(body){
+ if(engine.scene?.id==='ink')return InkWaterToys.garden(body);
  const id=engine.scene?.id,spec=specs[id],section=document.createElement('section');section.className='water-toy-garden';
  const title=document.createElement('h3');title.textContent='水面小物';section.appendChild(title);
  const note=document.createElement('p');note.className='tip';note.textContent=spec?spec.note:'小鸭子适用于日系温泉，双橘子适用于雨夜花房。';section.appendChild(note);

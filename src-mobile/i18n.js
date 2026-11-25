@@ -20,6 +20,8 @@ try {
 // ── 字典：中文原句 → 英文。{n} 为数字占位；键里的 {n} 会编译成 (\d+) ──
 const D = {
   '水面小物': 'Water companions', '小鸭子': 'Little duck', '双橘子': 'Two oranges',
+  '水面小陪伴': 'Water companions', '小草龟': 'Pond turtle', '柳叶舟': 'Willow sailboat',
+  '木牌三格都能点：汤沐＝开始 · 调汤＝设置 · 沐录＝记录': 'Tap the sign: Soak · Tune · Log',
   '不放小物': 'No companion', '小物归位': 'Reset position',
   '日系温泉泡汤时出现，离池时收起。': 'Appears while soaking in Mountain Onsen; put away when leaving the pool.',
   '花房长休泡汤时出现，回房间时收起。': 'Appears during a long soaking break in Rainy Conservatory; put away in the room.',

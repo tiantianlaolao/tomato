@@ -15,6 +15,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
 #stage video.layer{object-fit:cover;object-position:center;opacity:0;transition:opacity .5s}
 #stage video.layer.on{opacity:1}
 #stage video.layer.cut{transition:none}   /* 9-4 接口硬切：换类那一帧不走淡化（scene.js playOn hard） */
+#stage[data-fit=contain] img.layer,#stage[data-fit=contain] video.layer{object-fit:contain}
+#stage[data-fit=contain]{overflow:hidden;background:#292621}
+#stage[data-fit=contain]::before{content:'';position:absolute;inset:-24px;background:center/cover url('assets/ink-courtyard/soak.webp');filter:blur(20px) brightness(.54)}
 #ovc{pointer-events:none}
 #fog{position:absolute;inset:0;pointer-events:none;z-index:3;opacity:0;transition:opacity .9s;
   background:radial-gradient(ellipse at 50% 70%, #cfd6d8 0%, #aab4b8 60%, #97a1a6 100%)}

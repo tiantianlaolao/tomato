@@ -32,23 +32,48 @@ window.AS = {
   configure(a) {
     if (!a || (cur && cur.base === a.base)) return;
     cur = a;
-    if (!DEV) ensure(a);
+    if (!DEV && !a.bundled) ensure(a);
+    else if (a.bundled) note(null);
   },
   url(name) {
     if (!cur) return null;
-    if (DEV) return cur.dir + '/' + name + '.mp4';
+    if (DEV || cur.bundled) return cur.dir + '/' + name + '.mp4';
     return map[cur.base + '/' + name] || HOST + cur.base + '/' + name + '.mp4';
+  },
+  // Some mobile media decoders cannot seek over a WebView's custom asset scheme.
+  // Only retry the active local source, including after a rapid scene change.
+  setVideoSource(video, localUrl, bundled) {
+    video.onerror = null;
+    if (bundled) {
+      video.onerror = async () => {
+        if (video.getAttribute('src') !== localUrl) return;
+        video.onerror = null;
+        try {
+          if (!map[localUrl]) {
+            const response = await fetch(localUrl);
+            if (!response.ok) return;
+            const bytes = await response.arrayBuffer();
+            map[localUrl] ||= URL.createObjectURL(new Blob([bytes], {type:'video/mp4'}));
+          }
+          if (video.getAttribute('src') !== localUrl) return;
+          video.src = map[localUrl];
+          if (Scene.running && !Scene.frozen && Scene.scene?.assets?.bundled) await video.play();
+        } catch {}
+      };
+    }
+    video.src = map[localUrl] || localUrl;
   },
   // 角色通道（9-3）：<base>/matte/<seg>.json + <seg>_<k>.webp，与视频同版本同目录（_design/video/_cmp/_matte.py 产）。
   // 有缓存给 blob，没缓存直接走服务器；ensure() 在视频之后顺手缓进 IDB。
   matteUrl(file, assets = cur) {
-    if (!assets) return null;
+    if (!assets || assets.bundled) return null;
     if (DEV) return assets.dir + '/matte/' + file;
     return map[assets.base + '/matte/' + file] || HOST + assets.base + '/matte/' + file;
   },
   // 诊断一行（调汤「画面」行用）：dev 还是正式、资产源、当前主题几段已缓进 IDB（其余走网播）
   diag() {
     if (!cur) return 'AS: 没配场景';
+    if (cur.bundled) return 'AS: bundled ' + cur.dir;
     const names = cur.names || [];
     const cached = names.filter((n) => (map[cur.base + '/' + n] || '').startsWith('blob:')).length;
     const matte = Object.keys(map).filter((k) => k.startsWith(cur.base + '/matte/')).length;
@@ -56,7 +81,6 @@ window.AS = {
   },
 };
 
-if (DEV) return;
 
 function idb() {
   return new Promise((res, rej) => {

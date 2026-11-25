@@ -31,6 +31,8 @@ const Scene = {
     const s = (window.SCENES || {})[id];
     if (!s) { console.error('没有这个场景：' + id); return; }
     this.scene = s;
+    this.root.dataset.fit = s.fit || 'cover';
+    if (id !== 'ink') window.YardArt?.pause();
     // 主题资产与首屏海报都归场景包管（9-1 双主题起）
     if (window.AS && s.assets) AS.configure(s.assets);
     if (s.assets) this.matteLoad(s.assets.names); else this.matte = {};
@@ -94,7 +96,8 @@ const Scene = {
   // 关键帧画幅归一化坐标 → 画布像素（cover，与视频 object-fit:cover 同一套变换）
   map(nx, ny) {
     const [iw, ih] = this.scene.frame;
-    const s = Math.max(this.W / iw, this.H / ih);
+    const scale = this.scene.fit === 'contain' ? Math.min : Math.max;
+    const s = scale(this.W / iw, this.H / ih);
     return [(this.W - iw*s)/2 + nx*iw*s, (this.H - ih*s)/2 + ny*ih*s];
   },
   rect(r) {
@@ -215,7 +218,7 @@ const Scene = {
     el.loop = !!loop;
     if (this.scene.readVideoPixels) el.crossOrigin = 'anonymous';
     else el.removeAttribute('crossorigin');
-    el.src = this.src(seg);
+    AS.setVideoSource(el, this.src(seg), this.scene.assets?.bundled);
     el.currentTime = 0;
     el.play().catch((e) => { this.noteErr('play', e); });
     if (this.scene.motion && (this.frozen || !this.running)) el.pause();
@@ -434,7 +437,7 @@ const Scene = {
     if (!this.running) return;
     this.raf = requestAnimationFrame((t) => this.frame(t));
     if (ts < this.nextFrameAt) return;
-    this.nextFrameAt = ts + this.frameGap;
+    this.nextFrameAt = ts + (this.scene.id === 'ink' ? 1000 / 30 - 4 : this.frameGap);
     const dt = (ts - this.lastTs) / 1000 || 1/8;
     this.lastTs = ts;
     this.lastFps = this.lastFps * 0.8 + (1/dt) * 0.2;
@@ -450,6 +453,7 @@ const Scene = {
   },
   stop() {
     this.running = false;
+    window.YardArt?.pause();
     cancelAnimationFrame(this.raf);
     this.cur().pause();          // 后台停视频省电（回前台 start 会续播）
   },
