@@ -10,7 +10,7 @@ window.YardArt = (() => {
   const swatch = canvas(164,124), fabric = swatch.getContext('2d');
   const fishLayer = canvas(111,101), fish = fishLayer.getContext('2d');
   const pages = new Map(), lastFrames = new Map(), prints = new Map();
-  let parts, depth, loading, activeShot, activeVideo, lastTick, elapsed = 0, blendStart;
+  let parts, loading, activeShot, activeVideo, lastTick, elapsed = 0, blendStart;
 
   function prepare() {
     if (loading) return;
@@ -19,8 +19,8 @@ window.YardArt = (() => {
       if (!response.ok) throw Error(file);
       return response.json();
     };
-    loading = Promise.all([json('parts.json'),json('depth.json')])
-      .then(([items,actors]) => { parts = items; depth = actors; })
+    loading = json('parts.json')
+      .then(items => { parts = items; })
       .catch(() => { loading = null; });
   }
   function page(file) {
@@ -121,23 +121,14 @@ window.YardArt = (() => {
     }
     g.restore();
   }
-  function clippedTray(seg,time) {
-    const track=depth?.[seg];
-    const outline=track?.frames[Math.min(track.frames.length-1,Math.floor(time*track.fps))];
+  function teaTray() {
+    // The occupied pixels (including the shadow) fit on the paving at
+    // x=208..300, y=647..687 for the complete exit and return.
     g.save();
-    if (outline?.length) {
-      g.beginPath();g.rect(0,0,width,height);
-      for(const path of outline) {
-        g.moveTo(path[0],path[1]);
-        for(let i=2;i<path.length;i+=2) g.lineTo(path[i],path[i+1]);
-        g.closePath();
-      }
-      g.clip('evenodd');
-    }
-    // Place the tray inside the clear paving left of the animal's approach.
-    g.translate(-22,-15);prop('tray');g.restore();
+    g.translate(211,647); g.scale(.78,.78); g.translate(-249,-675);
+    prop('tray'); g.restore();
   }
-  let lastMediaTime=0, hasBase=false;
+  let hasBase=false;
   function render(engine,ctx,phase,state) {
     prepare();
     const now=performance.now(), video=engine.cur();
@@ -148,7 +139,6 @@ window.YardArt = (() => {
         if(hasBase) { prior.drawImage(base,0,0); blendStart=now; }
         activeShot=engine.seg; activeVideo=video;
       }
-      lastMediaTime=video.currentTime;
       bg.drawImage(video,0,0,width,height);
       if(blendStart!=null) {
         const t=Math.min(1,(now-blendStart)/200);
@@ -165,8 +155,8 @@ window.YardArt = (() => {
     if (p.willow) prop('bell');
     towel(state?.hung,false); towel(state?.guest_towel,true);
     if (p.lamp_side==='orchid' || p.lamp_side==='stool') prop(p.lamp_side);
+    if (p.floor_mid==='teatray') teaTray();
     if (p.pool_edge) incense();
-    if (p.floor_mid==='teatray') clippedTray(activeShot,lastMediaTime);
     if (p.water_near==='lotus') lotus();
     if (p.water_near==='koi') school();
     const [x,y]=engine.map(0,0),[r,b]=engine.map(1,1);
