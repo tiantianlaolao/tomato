@@ -130,7 +130,7 @@ const D = {
   '来了 {n} 天 · 一共来过 {m} 天': '{n} days this month · {m} days in all',
   // 场景包
   '野天风吕': 'Mountain Onsen', '水墨庭院': 'Ink Courtyard', '山中野天风吕': 'Mountain Onsen',
-  '牌上三行都能点：入浴＝开始 · 汤加减＝设置 · 汤帐＝记录': 'Tap the sign: Soak = start · Tune = settings · Log = records',
+  '轻点木牌上的「开始」「设置」或「记录」': 'Tap Start, Settings or Records on the wooden sign',
   '墙上三个词都能点：汤沐＝开始 · 调汤＝设置 · 沐录＝记录': 'Tap the words on the wall: Soak = start · Tune = settings · Log = records',
   // 面板标题 / 入口
   '编排': 'Plan', '设置': 'Settings', '记录': 'Records', '今天泡多久': 'How long today?', '收起': 'Close',

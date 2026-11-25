@@ -3,20 +3,21 @@
 (function () {
 'use strict';
 
-// Normalized to the 9:16 spring master. The three menu hits follow the wood face.
-const board={x:.092,y:.354,x2:.374,y2:.443};
+// Layout uses the original pool coordinates. The taller cut gives the board
+// a 294-pixel writing face above the unchanged towel rail and waterline.
+const board={x:.092,y:(530-256)/1280,x2:.374,y2:(824-256)/1280};
 const row=i=>({...board,y:board.y+(board.y2-board.y)*i/3,y2:board.y+(board.y2-board.y)*(i+1)/3});
-const P={board,row1:row(0),row2:row(1),row3:row(2),cart:{x:.759,y:.063,x2:.887,y2:.219}};
+const P={board,row1:row(0),row2:row(1),row3:row(2),cart:{x:.759,y:-.075,x2:.887,y2:.081}};
 const tray=[.745,.84,.173];
 window.SCENES = window.SCENES || {};
 window.SCENES.onsen = {
   id: 'onsen',
   readVideoPixels: true,
   name: '山中野天风吕',
-  fit:'contain', frame:[720,1280],          // 槽位坐标的参照画幅
+  fit:'cover', frame:[720,1280], frameTop:256, alignY:.72,
   poster: 'assets/onsen-spring/soak.webp',
-  hint: '牌上三行都能点：入浴＝开始 · 汤加减＝设置 · 汤帐＝记录',
-  assets: {bundled:true,mattes:true,base:'onsen-spring-v1',dir:'assets/onsen-spring',
+  hint: '轻点木牌上的「开始」「设置」或「记录」',
+  assets: {bundled:true,mattes:true,base:'onsen-spring-v2',dir:'assets/onsen-spring',
             names: ['loop_soak','loop_work','loop_tea','loop_eat',
                     'loop_urge','loop_empty','t_a_swim','t_b_swim'] },
 
@@ -38,9 +39,9 @@ window.SCENES.onsen = {
 
   // 木牌功能菜单（空闲时画；毛笔字=马善政楷 OFL 子集，倾角跟牌走，量自 kf_k1）
   board: { ...P.board, tiltDeg:0, ink:'#3a2112',
-           menu: [ { key:'start',    label:'入 浴' },
-                   { key:'settings', label:'汤加减' },
-                   { key:'stats',    label:'汤 帐' } ] },
+           menu: [ { key:'start',    label:'开始' },
+                   { key:'settings', label:'设置' },
+                   { key:'stats',    label:'记录' } ] },
   // 倒计时题字框：右上天空竖排，纸色+朱边+「汤」印（浮世绘题字的母语，不是 UI 贴片）
   cart: { ...P.cart, paper:'229,216,189', border:'129,97,68', ink:'#302724',
           seal:'汤', sealBg:'#984735' },
@@ -196,10 +197,18 @@ window.SCENES.onsen = {
       cx.textAlign = 'center'; cx.textBaseline = 'middle';
       if (ph === 'idle') {
         const rows = S.board.menu, rh = B.h / rows.length;
-        cx.font = Math.round(rh * 0.60) + 'px ' + BRUSH;
-        cx.fillStyle = S.board.ink;
+        cx.font = '600 ' + Math.round(rh * .53) + 'px ' + BRUSH;
+        cx.lineWidth = Math.max(E.DPR, B.w * .009);
         for (let i = 0; i < rows.length; i++) {
-          cx.fillText(window.I18N ? I18N.t(rows[i].label) : rows[i].label, 0, (i - (rows.length - 1) / 2) * rh);   // 英文：Soak / Tune / Log
+          const y = (i - 1) * rh;
+          cx.fillStyle = S.board.ink;
+          cx.fillText(window.I18N ? I18N.t(rows[i].label) : rows[i].label, -B.w*.035, y, B.w*.77);
+          cx.strokeStyle = '#663b24';
+          cx.beginPath(); cx.moveTo(B.w*.38,y-rh*.075); cx.lineTo(B.w*.42,y); cx.lineTo(B.w*.38,y+rh*.075); cx.stroke();
+          if (i < rows.length-1) {
+            cx.strokeStyle = 'rgba(83,44,20,.36)';
+            cx.beginPath(); cx.moveTo(-B.w*.44,y+rh/2); cx.lineTo(B.w*.44,y+rh/2); cx.stroke();
+          }
         }
       } else if (ph === 'work' || ph === 'break' || ph === 'paused') {
         const st = (v && v.stages) || [], idx = (v && v.idx) || 0;
@@ -239,6 +248,7 @@ window.SCENES.onsen = {
     const hasTime = (ph === 'work' || ph === 'break' || ph === 'paused');
     if (hasTime && S.cart) {
       const C = E.rect(S.cart);
+      C.y = Math.max(C.y, Math.min(E.H*.08,60*E.DPR));
       const pre = (ph !== 'paused' && secs <= E.preAlertSec)
         ? (1 - secs / E.preAlertSec) : 0;                  // 末 30 秒纸色渐醒目
       cx.save();

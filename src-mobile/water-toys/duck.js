@@ -56,7 +56,10 @@ function cutCapy(c){
 }
 // Sampling coordinates refer to the virtual duck stage, independently of the video codec size.
 function sampleVideo(c,x,y,w,h,dw,dh){
- c.drawImage(video,x*video.videoWidth/W,y*video.videoHeight/H,w*video.videoWidth/W,h*video.videoHeight/H,0,0,dw,dh);
+ const scene=env.engine.scene;
+ const top=(scene.frameTop || 0)*video.videoWidth/scene.frame[0];
+ const sy=(video.videoHeight-top)/H;
+ c.drawImage(video,x*video.videoWidth/W,top+y*sy,w*video.videoWidth/W,h*sy,0,0,dw,dh);
 }
 function clipWater(c){c.save();c.globalCompositeOperation='destination-in';c.fillStyle='#fff';c.fill(waterPath);c.restore();cutCapy(c);}
 function oldSetup(c){c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,canvas.width,canvas.height);c.setTransform(canvas.width/W,0,0,canvas.height/cropH,0,-crop*canvas.height/cropH);}

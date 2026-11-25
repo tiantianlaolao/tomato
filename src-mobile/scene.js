@@ -32,6 +32,7 @@ const Scene = {
     if (!s) { console.error('没有这个场景：' + id); return; }
     this.scene = s;
     this.root.dataset.fit = s.fit || 'cover';
+    this.root.style.setProperty('--scene-position-y', ((s.alignY ?? .5) * 100) + '%');
     if (id !== 'ink') window.YardArt?.pause();
     // 主题资产与首屏海报都归场景包管（9-1 双主题起）
     if (window.AS && s.assets) AS.configure(s.assets);
@@ -94,12 +95,21 @@ const Scene = {
     this.draw();
   },
 
-  // 关键帧画幅归一化坐标 → 画布像素（cover，与视频 object-fit:cover 同一套变换）
+  // Logical artwork can occupy the lower part of a taller encoded frame.
+  // Masks, interaction and reflections share this projection with the video.
+  projection(iw, ih, width, height, top = 0) {
+    const scale = this.scene.fit === 'contain' ? Math.min : Math.max;
+    const s = scale(width / iw, height / (ih + top));
+    return {s, x:(width - iw*s)/2, y:(height - (ih+top)*s)*(this.scene.alignY ?? .5) + top*s};
+  },
+  artProjection(iw, ih, width = this.W, height = this.H) {
+    const top = (this.scene.frameTop || 0) * iw / this.scene.frame[0];
+    return this.projection(iw, ih, width, height, top);
+  },
   map(nx, ny) {
     const [iw, ih] = this.scene.frame;
-    const scale = this.scene.fit === 'contain' ? Math.min : Math.max;
-    const s = scale(this.W / iw, this.H / ih);
-    return [(this.W - iw*s)/2 + nx*iw*s, (this.H - ih*s)/2 + ny*ih*s];
+    const {s,x,y} = this.artProjection(iw, ih);
+    return [x + nx*iw*s, y + ny*ih*s];
   },
   rect(r) {
     const a = this.map(r.x, r.y), b = this.map(r.x2, r.y2);
@@ -137,8 +147,9 @@ const Scene = {
     return (S.pixelOverlay && S.pixelOverlay(this.seg)) || (this.hasMatte() && (this.seg === S.swimOut || this.seg === S.swimIn));
   },
   coverRect(el) {
-    const vw = el.videoWidth || 1088, vh = el.videoHeight || 1920, s = (this.scene.fit === 'contain' ? Math.min : Math.max)(this.W / vw, this.H / vh);
-    return [(this.W - vw * s) / 2, (this.H - vh * s) / 2, vw * s, vh * s];
+    const vw = el.videoWidth || 1088, vh = el.videoHeight || 1920;
+    const {s,x,y} = this.projection(vw, vh, this.W, this.H);
+    return [x, y, vw*s, vh*s];
   },
   drawVideo(cx) {
     const el = this.cur(); if (!el || el.readyState < 2) return false;
@@ -161,8 +172,7 @@ const Scene = {
     const [cw, ch] = m.meta.cell, cols = m.meta.cols, sc = m.meta.scale;
     // 🔴 遮罩坐标是**视频**像素系（1088×1920），不是母版画幅（1152×2048）——按视频自己的 cover 变换映射，
     //    否则整块往左上偏 3%（9-3 红色叠层一眼看出来）
-    const vw = m.meta.w || 1088, vh = m.meta.h || 1920, s = (this.scene.fit === 'contain' ? Math.min : Math.max)(this.W / vw, this.H / vh);
-    const ox = (this.W - vw * s) / 2, oy = (this.H - vh * s) / 2;
+    const {s,x:ox,y:oy} = this.artProjection(m.meta.w || 1088, m.meta.h || 1920);
     return { img, sx: (f[1] % cols) * cw, sy: Math.floor(f[1] / cols) * ch, sw: f[4], sh: f[5],
              x: ox + f[2] * sc * s, y: oy + f[3] * sc * s, w: f[4] * sc * s, h: f[5] * sc * s };
   },
