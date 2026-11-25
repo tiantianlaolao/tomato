@@ -32,6 +32,7 @@ const Scene = {
     if (!s) { console.error('没有这个场景：' + id); return; }
     this.scene = s;
     this.root.dataset.fit = s.fit || 'cover';
+    this.root.style.setProperty('--scene-position-x', ((s.alignX ?? .5) * 100) + '%');
     this.root.style.setProperty('--scene-position-y', ((s.alignY ?? .5) * 100) + '%');
     if (id !== 'ink') window.YardArt?.pause();
     // 主题资产与首屏海报都归场景包管（9-1 双主题起）
@@ -100,7 +101,7 @@ const Scene = {
   projection(iw, ih, width, height, top = 0) {
     const scale = this.scene.fit === 'contain' ? Math.min : Math.max;
     const s = scale(width / iw, height / (ih + top));
-    return {s, x:(width - iw*s)/2, y:(height - (ih+top)*s)*(this.scene.alignY ?? .5) + top*s};
+    return {s, x:(width - iw*s)*(this.scene.alignX ?? .5), y:(height - (ih+top)*s)*(this.scene.alignY ?? .5) + top*s};
   },
   artProjection(iw, ih, width = this.W, height = this.H) {
     const top = (this.scene.frameTop || 0) * iw / this.scene.frame[0];

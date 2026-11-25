@@ -16,7 +16,7 @@ window.SCENES = window.SCENES || {};
 window.SCENES.ink = {
   id: 'ink',
   name: '水墨庭院',
-  fit: 'contain', frame: [720, 1280],
+  fit: 'cover', frame: [720, 1280], alignX:1, alignY:.80,
   poster: 'assets/ink-courtyard/soak.webp',
   hint: '木牌三格都能点：汤沐＝开始 · 调汤＝设置 · 沐录＝记录',
   assets: { bundled: true, base: 'ink-courtyard-v5', dir: 'assets/ink-courtyard',   // 9-2：睡觉/吃桃重出 + 四段过渡换 Seedance 2.0；v3=去程首帧改钉工作帧（与 loop_work 同源）
@@ -42,6 +42,15 @@ window.SCENES.ink = {
 
   ink: '#3e3226', seal: '汤', sealBg: '#b2382a',
   dim: { idle:0, work:0.08, break:0, awaiting:0, done:0, paused:0.34 },
+
+  // Place the near-water decorations in the visible pool. The dry landing and
+  // the menu remain fixed to the stones and the right-hand pillar in the film.
+  framing(E) {
+    const [w,h]=this.frame, {x,y,s}=E.artProjection(w,h);
+    const left=Math.max(0,-x/s), bottom=Math.min(h,(E.H-y)/s);
+    const waterScale=Math.min(1,E.W/(w*s));
+    return {left,waterScale,waterTop:bottom-h*waterScale};
+  },
 
   // ── 叠加层：题壁横排倒计时+朱印+当班小字（运行），菜单一行（空闲）──
   drawUI(E, cx, v) {
@@ -72,6 +81,7 @@ window.SCENES.ink = {
     // 题壁计时：横排 MM:SS 大字 + 右侧朱印；下方一行当班小字。
     // 题壁诗直接落在粉壁上是园林母语——没有框，字就是画的一部分。
     const T = E.rect(P.wall);
+    T.x = Math.max(T.x, 10*E.DPR);
     const secs = Math.max(0, Math.round(((v && v.remaining_ms) || 0) / 1000));
     const pre = (ph !== 'paused' && secs <= E.preAlertSec) ? (1 - secs / E.preAlertSec) : 0;
     const txt = String(Math.floor(secs / 60)).padStart(2, '0') + ':' +

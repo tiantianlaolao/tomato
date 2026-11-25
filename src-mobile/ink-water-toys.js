@@ -12,8 +12,10 @@
  function bounded(value){const b=limits();return Math.max(b.left,Math.min(b.right,value))}
  function reset(){x=.62;y=.91;t=0;dir=-1}
  function frameRect(){
-  const [left,top]=engine.map(0,0),[right,bottom]=engine.map(1,1),d=engine.DPR;
-  return {left:left/d,top:top/d,width:(right-left)/d,height:(bottom-top)/d};
+  const {left,waterTop,waterScale}=engine.scene.framing(engine);
+  const [w,h]=engine.scene.frame, [px,py]=engine.map(left/w,waterTop/h);
+  const {s}=engine.artProjection(w,h),k=s*waterScale/engine.DPR;
+  return {left:px/engine.DPR,top:py/engine.DPR,width:w*k,height:h*k};
  }
  function mount(scene){
   engine=scene;prop=document.createElement('canvas');prop.width=340;prop.height=260;engine.root.append(prop);prop.hidden=true;prop.setAttribute('role','img');
@@ -28,11 +30,13 @@
   prop.hidden=!kind||!engine.running||engine.scene?.id!=='ink'||document.hidden||engine.fog.classList.contains('on')||document.body.classList.contains('sheeton')||!['loop_soak','loop_work','loop_nap','loop_eat','loop_empty','loop_urge'].includes(engine.seg);
   if(prop.hidden)return;
   prop.dataset.kind=kind;prop.setAttribute('aria-label',kind==='turtle'?'小草龟':'柳叶舟');
-  paintToy(prop,kind,now/1000,x,y);
   x=bounded(x);if(!held){t+=dt;if(kind==='turtle'){const next=x+dt*dir*.040;x=bounded(next);if(x!==next)dir=-dir}}
+  const px=bounded(x+(kind==='boat'?.018*Math.sin(t*.45):0)),py=y+.003*Math.sin(t);
+  const view=engine.scene.framing(engine);
+  paintToy(prop,kind,now/1000,view.left/720+px*view.waterScale,view.waterTop/1280+py*view.waterScale,view.waterScale);
   const f=frameRect();prop.style.width=f.width*.16+'px';
-  prop.style.left=f.left+f.width*bounded(x+(kind==='boat'?.018*Math.sin(t*.45):0))+'px';
-  prop.style.top=f.top+f.height*(y+.003*Math.sin(t))+'px';
+  prop.style.left=f.left+f.width*px+'px';
+  prop.style.top=f.top+f.height*py+'px';
   prop.style.transform='translate(-50%,-64%) rotate('+Math.sin(t*1.5)*2+'deg) scaleX('+(kind==='turtle'?-dir:1)+')';
  }
  const bodies={},images={};
@@ -45,7 +49,7 @@
    const g=c.getContext('2d');g.beginPath();for(const [x,y] of path)g.lineTo(x,y);g.closePath();g.clip();g.drawImage(im,0,0);bodies[name]=c
   };im.src='assets/ink-courtyard/'+name+'.webp'
  }
- function paintToy(canvas,name,time,x,y){
+ function paintToy(canvas,name,time,x,y,scale){
   const body=bodies[name],g=canvas.getContext('2d'),surface=window.yardMotion?.surface;
   g.clearRect(0,0,340,260);if(!body)return;
   const turtle=name==='turtle',src=turtle?[73,21,276,72]:[54,25,242,196];
@@ -62,7 +66,7 @@
    for(let j=0;j<5;j++){
     const wave=Math.sin(time*1.9+j*.9),yrow=line-4+j*1.25+wave;
     g.globalAlpha=.15+.10*j;
-    g.drawImage(surface,Math.max(0,x*720-43),y*1280+wave*2+j,86,1,left+2*Math.sin(j+time),yrow,width,1.5)
+    g.drawImage(surface,Math.max(0,x*720-43*scale),y*1280+(wave*2+j)*scale,86*scale,scale,left+2*Math.sin(j+time),yrow,width,1.5)
    }
   }
   g.globalAlpha=1;

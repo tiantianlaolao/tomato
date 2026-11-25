@@ -14,7 +14,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#14100d;color:#cbb89a;
 /* 整场视频状态机（8-30 定案）：双 video 交替 + 雾吞吐转场 + 数字叠加层 */
 #stage video.layer{object-fit:cover;object-position:center;opacity:0;transition:opacity .5s}
 #stage video.layer.on{opacity:1}
-#stage img.layer,#stage video.layer{object-position:50% var(--scene-position-y,50%)}
+#stage img.layer,#stage video.layer{object-position:var(--scene-position-x,50%) var(--scene-position-y,50%)}
 #stage video.layer.cut{transition:none}   /* 9-4 接口硬切：换类那一帧不走淡化（scene.js playOn hard） */
 #stage[data-fit=contain] img.layer,#stage[data-fit=contain] video.layer{object-fit:contain}
 #stage[data-fit=contain]{overflow:hidden;background:#292621}

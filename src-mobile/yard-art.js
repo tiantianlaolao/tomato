@@ -105,12 +105,13 @@ window.YardArt = (() => {
     }
     prop('leaves'); prop('lotus');
   }
-  function school() {
+  function school(view) {
     for(const name of ['fish0','fish1']) {
       const s=frame(name); if(!s) continue;
       fish.clearRect(0,0,s.w,s.h); paint(fish,s,0,0);
       fish.save(); fish.globalCompositeOperation='source-atop'; fish.globalAlpha=.17;
-      fish.drawImage(base,s.x,s.y,s.w,s.h,0,0,s.w,s.h);
+      fish.drawImage(base,view.left+s.x*view.waterScale,view.waterTop+s.y*view.waterScale,
+        s.w*view.waterScale,s.h*view.waterScale,0,0,s.w,s.h);
       fish.restore(); g.drawImage(fishLayer,s.x,s.y);
     }
   }
@@ -154,15 +155,26 @@ window.YardArt = (() => {
     if(!hasBase) return;
     g.drawImage(base,0,0);
     const p=state?.placed||{};
+    const view=engine.scene.framing(engine);
     prop('plaque');
+    g.save();
+    g.translate(Math.max(0,view.left+12-94),0);
     if (phase==='idle' && p.wall) prop('title');
+    g.restore();
     if (p.willow) prop('bell');
-    towel(state?.hung,false); towel(state?.guest_towel,true);
-    if (p.lamp_side==='orchid' || p.lamp_side==='stool') prop(p.lamp_side);
+    g.save(); g.translate(Math.max(0,view.left+8-135),0);
+    towel(state?.hung,false); g.restore();
+    towel(state?.guest_towel,true);
+    if (p.lamp_side==='orchid' || p.lamp_side==='stool') {
+      g.save(); g.translate(Math.max(0,view.left+4-97),0);
+      prop(p.lamp_side); g.restore();
+    }
     if (p.floor_mid==='teatray') teaTray();
     if (p.pool_edge) incense();
+    g.save(); g.translate(view.left,view.waterTop); g.scale(view.waterScale,view.waterScale);
     if (p.water_near==='lotus') lotus();
-    if (p.water_near==='koi') school();
+    if (p.water_near==='koi') school(view);
+    g.restore();
     const [x,y]=engine.map(0,0),[r,b]=engine.map(1,1);
     ctx.drawImage(surface,x,y,r-x,b-y);
     const dim=engine.scene.dim[phase]||0;
